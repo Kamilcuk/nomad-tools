@@ -8,6 +8,7 @@ import re
 import subprocess
 from pathlib import Path
 from shlex import quote, split
+from typing import List
 
 log = logging.getLogger(__file__)
 
@@ -15,7 +16,6 @@ log = logging.getLogger(__file__)
 rgxtxt = r'{{ /\* nomad-putter \*/ }}{{ with nomadVar "(.*)" }}{{ index \. "(.*)" }}{{ end }}'.replace(
     " ", r"\s*"
 )
-rgx = re.compile(rgxtxt)
 
 
 def run(cmd: str, silent=False, **kvargs):
@@ -29,18 +29,80 @@ def run(cmd: str, silent=False, **kvargs):
         exit(e.returncode)
 
 
-def extract_files_to_upload(jobjson: dict):
-    jobid = jobjson["ID"]
-    for tg in jobjson["TaskGroups"]:
-        for task in tg["Tasks"]:
-            for tmpl in task["Templates"]:
-                data = tmpl["EmbeddedTmpl"]
-                matches = rgx.match(data)
-                if matches:
-                    assert (
-                        matches[1] == jobid
-                    ), f"Template {data} does not reference nomadVar by job ID!"
-                    yield Path(matches[2])
+class NomadPutter:
+    rgx = re.compile(rgxtxt)
+
+    def _nomad_job_file_to_json(self, file: Path):
+        try:
+            jobjsontmp = json.load(file.open())
+        except json.JSONDecodeError:
+            jobjsontmp = json.loads(
+                run(
+                    f"nomad job run -output {quote(str(file))}",
+                    silent=True,
+                    stdout=subprocess.PIPE,
+                ).stdout
+            )
+        return jobjsontmp["Job"]
+
+    def __init__(self, file: Path):
+        # Extract files from the nomad job specification.
+        self.file = file
+        self.jobjson = self._nomad_job_file_to_json(file)
+        self.namespace = (
+            self.jobjson["Namespace"]
+            if self.jobjson.get("Namespace", None)
+            else os.getenv("NOMAD_NAMESPACE", "default")
+        )
+        self.namespacearg = f"-namespace={quote(self.namespace)}"
+        self.jobid = self.jobjson.get("ID", self.jobjson["Name"])
+        self.key = f"nomad/jobs/{self.jobid}"
+
+    def _extract_files_to_upload_gen(self):
+        for tg in self.jobjson["TaskGroups"]:
+            for task in tg["Tasks"]:
+                for tmpl in task["Templates"]:
+                    data = tmpl["EmbeddedTmpl"]
+                    matches = self.rgx.match(data)
+                    if matches:
+                        assert (
+                            matches[1] == self.key
+                        ), f"nomadVar key has to reference {self.key}:  {matches[1]}"
+                        yield Path(matches[2])
+
+    def extract_files_to_upload(self):
+        return sorted(list(set(self._extract_files_to_upload_gen())))
+
+    def put_var(self, files: List[Path], clear: bool):
+        items = {}
+        if not clear:
+            try:
+                item = json.dumps(
+                    run(
+                        f"nomad var get {self.namespacearg} -out=json {quote(self.key)}",
+                        silent=True,
+                        stdout=subprocess.PIPE,
+                        check=False,
+                    ).stdout
+                )
+            except Exception:
+                pass
+        jobid = self.jobjson["ID"]
+        items = {str(file): file.open().read() for file in files}
+        log.debug(
+            f"Putting var {self.key}@{self.namespace} with: {' '.join(items.keys())}"
+        )
+        run(
+            f"nomad var put {self.namespacearg} -force -in=json {quote(self.key)} -",
+            input=json.dumps({"Items": items}),
+            stdout=subprocess.DEVNULL,
+        )
+
+    def run_nomad_job(self, mode: str, options: List[str]):
+        optionsarg = "".join(quote(x) + " " for x in args.options)
+        run(
+            f"nomad job {quote(mode)} {self.namespacearg} {optionsarg}{quote(str(self.file))}"
+        )
 
 
 if __name__ == "__main__":
@@ -55,6 +117,7 @@ if __name__ == "__main__":
         """,
         epilog="Written by Kamil Cukrowski 2023. All right reserved.",
     )
+    parser.add_argument("--clear", action="store_true")
     parser.add_argument(
         "mode",
         choices=("put", "run", "plan"),
@@ -67,37 +130,10 @@ if __name__ == "__main__":
     parser.add_argument("file", type=Path, help="Nomad HCL job")
     args = parser.parse_args()
     logging.basicConfig(format="%(module)s: %(message)s", level=logging.DEBUG)
-    # Extract files from the nomad job specification.
-    try:
-        jobjson = json.load(args.file.open())
-    except json.JSONDecodeError:
-        jobjson = json.loads(
-            run(
-                f"nomad job run -output {quote(str(args.file))}",
-                silent=True,
-                stdout=subprocess.PIPE,
-            ).stdout
-        )
-    jobjson = jobjson["Job"]
-    namespace = (
-        jobjson["Namespace"]
-        if jobjson.get("Namespace", None)
-        else os.getenv("NOMAD_NAMESPACE", "default")
-    )
-    files = sorted(list(set(extract_files_to_upload(jobjson))))
-    # Update the Nomad variable with new content if needed.
+
+    np = NomadPutter(args.file)
+    files = np.extract_files_to_upload()
     if files:
-        jobid = jobjson["ID"]
-        items = {str(file): file.open().read() for file in files}
-        log.debug(f"Putting var {jobid}@{namespace} with: {' '.join(items.keys())}")
-        run(
-            f"nomad var put -namespace={quote(namespace)} -force -in=json {quote(jobid)} -",
-            input=json.dumps({"Items": items}),
-            stdout=subprocess.DEVNULL,
-        )
-    # Optionally execute nomad job run.
+        np.put_var(files, args.clear)
     if args.mode != "put":
-        options = "".join(quote(x) + " " for x in args.options)
-        run(
-            f"nomad job {args.mode} -namespace={quote(namespace)} {options}{quote(str(args.file))}"
-        )
+        np.run_nomad_job(args.mode, args.options)
