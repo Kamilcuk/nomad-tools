@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+import sys
+import tempfile
+import datetime
 import argparse
 import json
 import logging
@@ -13,6 +16,7 @@ from typing import List
 log = logging.getLogger(__file__)
 
 # template { data } must be exactly like this.
+# Note - all spaces are matched with \s*
 rgxtxt = r'{{ /\* nomad-putter \*/ }}{{ with nomadVar "(.*)" }}{{ index \. "(.*)" }}{{ end }}'.replace(
     " ", r"\s*"
 )
@@ -30,7 +34,7 @@ def run(cmd: str, silent=False, **kvargs):
 
 
 class NomadPutter:
-    rgx = re.compile(rgxtxt)
+    rgx = re.compile(rgxtxt, re.MULTILINE)
 
     def _nomad_job_file_to_json(self, file: Path):
         try:
@@ -68,12 +72,12 @@ class NomadPutter:
                         assert (
                             matches[1] == self.key
                         ), f"nomadVar key has to reference {self.key}:  {matches[1]}"
-                        yield Path(matches[2])
+                        yield matches[2]
 
-    def extract_files_to_upload(self):
+    def extract_files_to_upload(self) -> List[str]:
         return sorted(list(set(self._extract_files_to_upload_gen())))
 
-    def put_var(self, files: List[Path], clear: bool):
+    def put_var(self, files: List[str], clear: bool):
         items = {}
         if not clear:
             try:
@@ -88,9 +92,9 @@ class NomadPutter:
             except Exception:
                 pass
         jobid = self.jobjson["ID"]
-        items = {str(file): file.open().read() for file in files}
+        items = {str(file): open(file).read() for file in files}
         log.debug(
-            f"Putting var {self.key}@{self.namespace} with: {' '.join(items.keys())}"
+            f"Putting var {self.key}@{self.namespace} with files: {' '.join(items.keys())}"
         )
         run(
             f"nomad var put {self.namespacearg} -force -in=json {quote(self.key)} -",
@@ -105,25 +109,116 @@ class NomadPutter:
         )
 
 
+def run_example(args):
+    hcl = r"""
+job "test_nomad_putter" {
+  group "test_nomad_putter_noop" {
+    task "test_nomad_putter" {
+      driver = "docker"
+      config {
+        image = "busybox"
+        args = ["sh", "-xc", "while sleep 5; do date; cat -n /local/test; echo; done"]
+      }
+      template {
+        destination = "local/test"
+        data        = "{{/*nomad-putter*/}}{{with nomadVar \"nomad/jobs/test_nomad_putter\"}}{{index . \"test_nomad_putter.txt\"}}{{end}}"
+        change_mode = "noop"
+      }
+    }
+  }
+  group "test_nomad_putter_script" {
+    task "test_nomad_putter_script" {
+      driver = "docker"
+      config {
+        image = "busybox"
+        args = ["sh", "-xc", "while sleep 5; do date; cat -n /local/test; cat -n /local/test2; echo; done" ]
+      }
+      template {
+        destination = "local/test"
+        data        = "{{/*nomad-putter*/}}{{with nomadVar \"nomad/jobs/test_nomad_putter\"}}{{index . \"test_nomad_putter.txt\"}}{{end}}"
+        change_mode = "script"
+        change_script {
+          command = "cp"
+          args    = ["-va", "/local/test", "/local/test2"]
+        }
+      }
+    }
+  }
+  group "test_nomad_putter_signal" {
+    task "test_nomad_putter_signal" {
+      driver = "docker"
+      config {
+        image = "busybox"
+        args = ["sh", "-xc", <<EOF
+          refresh() { echo "RECEIVED SIGUSR1"; date; cat -n /local/test; echo; }
+          refresh ; trap refresh USR1 ; while sleep 1; do sleep 1; done
+          EOF
+        ]
+      }
+      template {
+        destination   = "local/test"
+        data          = "{{/*nomad-putter*/}}{{with nomadVar \"nomad/jobs/test_nomad_putter\"}}{{index . \"./test_nomad_putter.txt\"}}{{end}}"
+        change_mode   = "signal"
+        change_signal = "SIGUSR1"
+      }
+    }
+  }
+  """ + open(args.file).read() + """
+}
+    """
+    filecontent = f"{datetime.datetime.now()} Written by {sys.argv[0]} script for testing nomad-putter funcionality."
+    with tempfile.TemporaryDirectory() as d:
+        hclf = Path(d) / "test_nomad_putter.nomad.hcl"
+        hclf.open('w').write(hcl)
+        file = Path(d) / "test_nomad_putter.txt"
+        file.open('w').write(filecontent)
+        print("Running job test_nomad_putter:")
+        print(hcl)
+        print("With the following test_nomad_putter.txt file:")
+        print(filecontent)
+        subprocess.check_output([sys.argv[0], "run", str(hclf)], cwd=hclf.parent)
+        print("The job is deployed. No you can re-run the example, to see that the processes inside the job received a signal.")
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description=f"""
-        Given a Nomad job checks if a task template data matches spcific
-        regex in the form: '{rgxtxt}'.  If it does, the first has to match
-        the job Name as a precaution. Then the next part is expected to
-        be a filename relative to current working directory. All such
-        extracted files are read and posted to Nomad variable storage
-        with the job id as the path with filepaths as keys.
+        Given a Nomad job checks if any task template data matches spcific
+        regex in the form:
+              {rgxtxt}
+        """ r"""
+        For example the job specification for a job named 'test_nomad_putter' contains the following:
+            template {
+              destination = "local/file"
+              data = "{{/*nomad-putter*/}}{{with nomadVar \"nomad/jobs/examplejob\"}}{{index . \"./examplefile.txt\"}}{{end}}"
+              #                                                                                  ^^^^^^^^^^^^^^^^^ - path to file
+              #                                                        ^^^^^^^^^^ - has to be the job name
+              #       ^^^^^^^^^^^^^^^^^^^^ - constant tag
+              change_mode = "signal"
+              change_signal = "SIGHUP"
+            }
+
+        If the nomad job specification has a template specification
+        that matches such string, the path './test_nomad_putter.txt'
+        is extracted.  The file 'test_nomad_putter.txt' relative to
+        current workind directory is found.  The file is then uploaded
+        to nomad/jobs/test_nomad_putter Nomad variable.  After that,
+        the Nomad job is run.
+
+        To run the example:
+          nomad-putter example <(printf "%s\n" 'namespace="dev"' 'datacenters=["wee-dev"]')
         """,
         epilog="Written by Kamil Cukrowski 2023. All right reserved.",
+        formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument("--clear", action="store_true")
     parser.add_argument(
         "mode",
-        choices=("put", "run", "plan"),
+        choices=("put", "run", "plan", "example"),
         help="""
-        'put' extracts the files from job file and puts them into Nomad
-        variable. 'run' additionally follows with nomad job run call.
+        put     - Extracts the files from job file and puts them into Nomad variable.
+        run     - Put but also follows with 'nomad job run' call.
+        plan    - Runs nomad plan.
+        example - Runs a job "test_nomad_putter" with a "test_nomad_putter.txt" file.
         """,
     )
     parser.add_argument("options", nargs="*", help="Options passed to nomad run")
@@ -131,9 +226,15 @@ if __name__ == "__main__":
     args = parser.parse_args()
     logging.basicConfig(format="%(module)s: %(message)s", level=logging.DEBUG)
 
-    np = NomadPutter(args.file)
-    files = np.extract_files_to_upload()
-    if files:
+    if args.mode in ["put", "run", "plan"]:
+        np = NomadPutter(args.file)
+        files = np.extract_files_to_upload()
         np.put_var(files, args.clear)
-    if args.mode != "put":
-        np.run_nomad_job(args.mode, args.options)
+        if args.mode == "run":
+            np.run_nomad_job("run", args.options)
+        elif args.mode == "plan":
+            np.run_nomad_job("plan", args.options)
+    elif args.mode == "example":
+        run_example(args)
+    else:
+        exit(f"Unknown mode {args.mode}")
