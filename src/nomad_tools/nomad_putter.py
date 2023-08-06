@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 
-import sys
-import tempfile
-import datetime
 import argparse
+import datetime
 import json
 import logging
 import os
 import re
 import subprocess
+import sys
+import tempfile
 from pathlib import Path
 from shlex import quote, split
 from typing import List
@@ -17,16 +17,16 @@ log = logging.getLogger(__file__)
 
 # template { data } must be exactly like this.
 # Note - all spaces are matched with \s*
-rgxtxt = r'{{ /\* nomad-putter \*/ }}{{ with nomadVar "(.*)" }}{{ index \. "(.*)" }}{{ end }}'.replace(
+rgxtxt = r'{{ /\* nomad-putter \*/ }} {{ with nomadVar "(.*)" }} {{ index \. "(.*)" }} {{ end }}'.replace(
     " ", r"\s*"
 )
 
 
-def run(cmd: str, silent=False, **kvargs):
+def run(cmd: str, silent=False, check=True, **kvargs):
     if not silent:
         log.debug(f"+ {cmd}")
     try:
-        return subprocess.run(split(cmd), text=True, check=True, **kvargs)
+        return subprocess.run(split(cmd), text=True, check=check, **kvargs)
     except subprocess.CalledProcessError as e:
         if silent:
             log.error(f"+ {cmd}")
@@ -105,7 +105,8 @@ class NomadPutter:
     def run_nomad_job(self, mode: str, options: List[str]):
         optionsarg = "".join(quote(x) + " " for x in args.options)
         run(
-            f"nomad job {quote(mode)} {self.namespacearg} {optionsarg}{quote(str(self.file))}"
+            f"nomad job {quote(mode)} {self.namespacearg} {optionsarg} {quote(str(self.file))}",
+            input=json.dumps(self.jobjson),
         )
 
 
@@ -135,7 +136,7 @@ job "test_nomad_putter" {
       }
       template {
         destination = "local/test"
-        data        = "{{/*nomad-putter*/}}{{with nomadVar \"nomad/jobs/test_nomad_putter\"}}{{index . \"test_nomad_putter.txt\"}}{{end}}"
+        data        = "{{/*nomad-putter*/}}{{with nomadVar \"nomad/jobs/${NOMAD_JOB_NAME}\"}}{{index . \"test_nomad_putter.txt\"}}{{end}}"
         change_mode = "script"
         change_script {
           command = "cp"
@@ -163,29 +164,32 @@ job "test_nomad_putter" {
       }
     }
   }
-  """ + open(args.file).read() + """
-}
-    """
+  %s
+}""" % "\n".join(
+        args.options
+    )
     filecontent = f"{datetime.datetime.now()} Written by {sys.argv[0]} script for testing nomad-putter funcionality."
     with tempfile.TemporaryDirectory() as d:
         hclf = Path(d) / "test_nomad_putter.nomad.hcl"
-        hclf.open('w').write(hcl)
+        hclf.open("w").write(hcl)
         file = Path(d) / "test_nomad_putter.txt"
-        file.open('w').write(filecontent)
+        file.open("w").write(filecontent)
         print("Running job test_nomad_putter:")
         print(hcl)
         print("With the following test_nomad_putter.txt file:")
         print(filecontent)
         subprocess.check_output([sys.argv[0], "run", str(hclf)], cwd=hclf.parent)
-        print("The job is deployed. No you can re-run the example, to see that the processes inside the job received a signal.")
+        print(
+            "The job is deployed. No you can re-run the example, to see that the processes inside the job received a signal."
+        )
 
-if __name__ == "__main__":
+
+def parse_args():
     parser = argparse.ArgumentParser(
-        description=f"""
+        description=r"""
         Given a Nomad job checks if any task template data matches spcific
         regex in the form:
-              {rgxtxt}
-        """ r"""
+              %s
         For example the job specification for a job named 'test_nomad_putter' contains the following:
             template {
               destination = "local/file"
@@ -205,27 +209,57 @@ if __name__ == "__main__":
         the Nomad job is run.
 
         To run the example:
-          nomad-putter example <(printf "%s\n" 'namespace="dev"' 'datacenters=["wee-dev"]')
-        """,
+          nomad-putter example 'namespace="dev"' 'datacenters=["wee-dev"]' /dev/null
+        """
+        % rgxtxt,
         epilog="Written by Kamil Cukrowski 2023. All right reserved.",
         formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument("--clear", action="store_true")
     parser.add_argument(
         "mode",
-        choices=("put", "run", "plan", "example"),
+        choices=("put", "run", "plan", "replace", "example"),
         help="""
         put     - Extracts the files from job file and puts them into Nomad variable.
         run     - Put but also follows with 'nomad job run' call.
         plan    - Runs nomad plan.
         example - Runs a job "test_nomad_putter" with a "test_nomad_putter.txt" file.
+        replace - Replace string nomad_putter("file") by proper regex used by this command.
         """,
     )
     parser.add_argument("options", nargs="*", help="Options passed to nomad run")
     parser.add_argument("file", type=Path, help="Nomad HCL job")
     args = parser.parse_args()
     logging.basicConfig(format="%(module)s: %(message)s", level=logging.DEBUG)
+    return args
 
+
+def run_replace(file: Path):
+    content = file.open().read()
+    putterfunctxt = r'nomad_putter\("(.*)"\)'
+    putterfuncrgx = re.compile(putterfunctxt, re.MULTILINE)
+    if putterfuncrgx.findall(content):
+        for line in content.splitlines():
+            r = re.match(r'\s*job\s*"(.*)"\s*{\s*', line)
+            if r:
+                jobname = r[1]
+                break
+        else:
+            exit(f"Could not extract job name from {file}")
+        content, number_of_subs_made = putterfuncrgx.subn(
+            r'"{{/*nomad-putter*/}}{{with nomadVar \"nomad/jobs/%s\"}}{{index . \"\1\"}}{{end}}"'
+            % jobname,
+            content,
+        )
+        assert number_of_subs_made > 0
+        run(f"diff {quote(str(file))} -", input=content, check=False)
+        print(content, file=file.open("w"))
+    else:
+        print("Nothing to do")
+
+
+if __name__ == "__main__":
+    args = parse_args()
     if args.mode in ["put", "run", "plan"]:
         np = NomadPutter(args.file)
         files = np.extract_files_to_upload()
@@ -234,6 +268,8 @@ if __name__ == "__main__":
             np.run_nomad_job("run", args.options)
         elif args.mode == "plan":
             np.run_nomad_job("plan", args.options)
+    elif args.mode == "replace":
+        run_replace(args.file)
     elif args.mode == "example":
         run_example(args)
     else:
