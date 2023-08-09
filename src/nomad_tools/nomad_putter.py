@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -17,20 +18,33 @@ log = logging.getLogger(__file__)
 
 # template { data } must be exactly like this.
 # Note - all spaces are matched with \s*
-rgxtxt = r'{{ /\* nomad-putter \*/ }} {{ with nomadVar "(.*)" }} {{ index \. "(.*)" }} {{ end }}'.replace(
+rgxtxt = r' {{ /\* nomad-putter \*/ }} {{ with nomadVar "(.*)" }} {{ index \. "(.*)" }} {{ end }} '.replace(
     " ", r"\s*"
 )
 
 
 def run(cmd: str, silent=False, check=True, **kvargs):
     if not silent:
-        log.debug(f"+ {cmd}")
+        dryrunstr = "DRYRUN: " if args.dryrun else ""
+        log.info(f"{dryrunstr}+ {cmd}")
     try:
-        return subprocess.run(split(cmd), text=True, check=check, **kvargs)
+        if silent or not args.dryrun:
+            return subprocess.run(split(cmd), text=True, check=check, **kvargs)
     except subprocess.CalledProcessError as e:
         if silent:
             log.error(f"+ {cmd}")
         exit(e.returncode)
+
+
+def run_stdout(cmd: str, check=True):
+    rr = run(
+        cmd,
+        check=check,
+        silent=True,
+        stdout=subprocess.PIPE,
+    )
+    assert rr is not None
+    return rr.stdout
 
 
 class NomadPutter:
@@ -41,11 +55,7 @@ class NomadPutter:
             jobjsontmp = json.load(file.open())
         except json.JSONDecodeError:
             jobjsontmp = json.loads(
-                run(
-                    f"nomad job run -output {quote(str(file))}",
-                    silent=True,
-                    stdout=subprocess.PIPE,
-                ).stdout
+                run_stdout(f"nomad job run -output {quote(str(file))}")
             )
         return jobjsontmp["Job"]
 
@@ -67,12 +77,16 @@ class NomadPutter:
             for task in tg["Tasks"]:
                 for tmpl in task["Templates"]:
                     data = tmpl["EmbeddedTmpl"]
+                    log.debug(f"inspecting {shlex.quote(data)}")
                     matches = self.rgx.match(data)
                     if matches:
+                        log.debug(f"{data} matched!")
+                        key = matches[1]
+                        file = matches[2]
                         assert (
-                            matches[1] == self.key
-                        ), f"nomadVar key has to reference {self.key}:  {matches[1]}"
-                        yield matches[2]
+                            key == self.key
+                        ), f"nomadVar key has to reference {self.key}:  key"
+                        yield file
 
     def extract_files_to_upload(self) -> List[str]:
         return sorted(list(set(self._extract_files_to_upload_gen())))
@@ -82,18 +96,16 @@ class NomadPutter:
         if not clear:
             try:
                 item = json.dumps(
-                    run(
+                    run_stdout(
                         f"nomad var get {self.namespacearg} -out=json {quote(self.key)}",
-                        silent=True,
-                        stdout=subprocess.PIPE,
                         check=False,
-                    ).stdout
+                    )
                 )
             except Exception:
                 pass
         jobid = self.jobjson["ID"]
         items = {str(file): open(file).read() for file in files}
-        log.debug(
+        log.info(
             f"Putting var {self.key}@{self.namespace} with files: {' '.join(items.keys())}"
         )
         run(
@@ -216,6 +228,8 @@ def parse_args():
         formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument("--clear", action="store_true")
+    parser.add_argument("-n", "--dryrun", action="store_true")
+    parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument(
         "mode",
         choices=("put", "run", "plan", "replace", "example"),
@@ -230,7 +244,10 @@ def parse_args():
     parser.add_argument("options", nargs="*", help="Options passed to nomad run")
     parser.add_argument("file", type=Path, help="Nomad HCL job")
     args = parser.parse_args()
-    logging.basicConfig(format="%(module)s: %(message)s", level=logging.DEBUG)
+    logging.basicConfig(
+        format="%(module)s: %(message)s",
+        level=logging.DEBUG if args.verbose else logging.INFO,
+    )
     return args
 
 
