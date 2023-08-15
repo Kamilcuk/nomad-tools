@@ -13,6 +13,8 @@ from typing import Dict, List
 
 log = logging.getLogger(__file__)
 
+###############################################################################
+
 
 def dryrunstr():
     return "DRYRUN: " if args.dryrun else ""
@@ -43,6 +45,7 @@ def get_namespace_job_from_nomad_service_file(file: Path):
         jobjson = json.loads(run_stdout("nomad job run -output".split() + [str(file)]))
     return jobjson["Job"]["Namespace"], jobjson["Job"]["ID"]
 
+###############################################################################
 
 class NomadVarDir:
     def get_old_items(self):
