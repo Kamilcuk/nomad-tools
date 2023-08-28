@@ -20,7 +20,18 @@ from typing import Dict, List, Optional, Tuple
 import requests
 from requests.auth import HTTPBasicAuth
 
-log = logging.getLogger(__name__)
+###############################################################################
+
+
+class MyLogger(logging.Logger):
+    def trace(self, msg, *args, **kwargs):
+        self.log(5, msg, *args, **kwargs)
+
+
+logging.setLoggerClass(MyLogger)
+log = logging.getLogger("nomad-watch")
+
+###############################################################################
 
 
 def run(cmd, *args, check=True, **kvargs):
@@ -92,8 +103,12 @@ job "test-nomad-do" {{
             print(l)
 
 
+###############################################################################
+
+
 @dataclasses.dataclass
 class MyNomad:
+    """Represents connection to Nomad"""
     namespace: Optional[str] = None
     session: requests.Session = dataclasses.field(default_factory=requests.Session)
 
@@ -128,33 +143,81 @@ class MyNomad:
             **kvargs,
         )
 
-    def reqjson(self, mode, url, json: Optional[dict] = None, *args, **kvargs):
+    def _reqjson(self, mode, url, json: Optional[dict] = None, *args, **kvargs):
         rr = self.request(mode, url, *args, json=json, **kvargs)
         rr.raise_for_status()
         return rr.json()
 
     def get(self, url, json: Optional[dict] = None, *args, **kvargs):
-        return self.reqjson("GET", url, json=json, *args, **kvargs)
+        return self._reqjson("GET", url, json=json, *args, **kvargs)
 
     def put(self, *args, **kvargs):
-        return self.reqjson("PUT", *args, **kvargs)
+        return self._reqjson("PUT", *args, **kvargs)
 
     def post(self, *args, **kvargs):
-        return self.reqjson("PUT", *args, **kvargs)
+        return self._reqjson("POST", *args, **kvargs)
 
 
 mynomad = MyNomad()
 
+###############################################################################
 
-@dataclasses.dataclass
-class AllocWorker:
-    state: str = ""
-    loggers: Dict[str, List[threading.Thread]] = dataclasses.field(default_factory=dict)
-    exitcodes: Dict[str, int] = dataclasses.field(default_factory=dict)
 
-    def _logs_streamer_lines(
-        self, stream: requests.Response, task: str, streamtype: str
+def ns2dt(ns: int):
+    return datetime.datetime.fromtimestamp(1360287003083988472 // 1000000000)
+
+
+class output:
+    """Output templates in one place"""
+
+    @staticmethod
+    def prefix(allocid: str, group: str, task: str):
+        # return f"{allocid:.6}:{group}:{task}:"
+        return f"{group}:{task}:"
+
+    @classmethod
+    def task_start(
+        cls,
+        allocid: str,
+        group: str,
+        task: str,
+        start: datetime.datetime,
+        nodename: str,
+    ):
+        print(f"{cls.prefix(allocid, group, task)} at {start} started on {nodename}")
+
+    @classmethod
+    def log(cls, allocid: str, group: str, task: str, streamtype: str, line: str):
+        print(f"{cls.prefix(allocid, group, task)}{streamtype}: {line}")
+
+    @classmethod
+    def task_end(
+        cls, allocid: str, group: str, task: str, exitcode: int, stop: datetime.datetime
+    ):
+        print(f"{cls.prefix(allocid, group, task)} at {stop} exited with {exitcode}")
+
+
+###############################################################################
+
+
+class Logger(threading.Thread):
+    """Represents a single logging stream from Nomad. Such stream is created separately for stdout and stderr."""
+
+    def __init__(self, alloc: dict, taskname: str, stderr: bool):
+        super().__init__()
+        self.alloc: dict = alloc
+        self.allocid: str = alloc["ID"]
+        self.taskname: str = taskname
+        self.stderr: bool = stderr
+        self.stream: Optional[requests.Response] = None
+
+    def streamtype(self):
+        return "err" if self.stderr else "out"
+
+    def _handle_lines(
+        self, stream: requests.Response, fromoffset: Optional[int] = None
     ) -> Optional[int]:
+        stream.raise_for_status()
         lastoffset = None
         for dataline in stream.iter_lines():
             if dataline:
@@ -162,68 +225,77 @@ class AllocWorker:
                 try:
                     linejson: dict = json.loads(dataline)
                 except Exception as e:
-                    print(dataline, file=sys.stderr)
+                    print(r"dataline={dataline}", file=sys.stderr)
                     raise Exception() from e
+                lines = ""
+                offset = linejson.get("Offset")
                 if "Data" in linejson:
                     line64: str = linejson["Data"]
                     lines = base64.b64decode(line64.encode()).decode()
+                    # Chop from offset if given.
+                    if (
+                        fromoffset
+                        and offset
+                        and offset < fromoffset < offset + len(lines)
+                    ):
+                        lines = lines[fromoffset - offset :]
                     for line in lines.splitlines():
                         line = line.rstrip()
-                        template = "{task}:{type}: {line}"
-                        print(
-                            template.format(
-                                task=task,
-                                line=line,
-                                type=streamtype,
-                            )
+                        output.log(
+                            self.allocid,
+                            self.alloc["TaskGroup"],
+                            self.taskname,
+                            self.streamtype(),
+                            line,
                         )
-                if "FileEvent" in linejson:
-                    if linejson["FileEvent"] == "file deleted":
-                        break
-                if "Offset" in linejson:
-                    lastoffset = linejson["Offset"]
+                if offset:
+                    lastoffset = offset + len(lines)
+                if linejson.get("FileEvent") == "file deleted":
+                    break
         return lastoffset
 
-    def _logs_streamer(self, allocid: str, task: str, stderr: bool = False):
-        streamtype: str = "err" if stderr else "out"
-        args = {
-            "method": "GET",
-            "url": f"client/fs/logs/{allocid}",
-            "params": {
-                "task": task,
-                "type": f"std{streamtype}",
+    def _stream(self, params={}):
+        return mynomad.request(
+            "GET",
+            f"client/fs/logs/{self.allocid}",
+            params={
+                "task": self.taskname,
+                "type": f"std{self.streamtype()}",
+                **params,
             },
-            "stream": True,
-        }
-        with mynomad.request(**args) as stream:
-            lastoffset = self._logs_streamer_lines(stream, task, streamtype)
-        args["params"]["follow"] = True
-        args["params"]["offset"] = lastoffset
-        with mynomad.request(**args) as stream:
-            self._logs_streamer_lines(stream, task, streamtype)
+            stream=True,
+        )
 
-    def _create_loggers(self, allocid, taskname):
-        ths: List[threading.Thread] = []
+    def run(self):
+        # To get all the logs, firstly stream is opened without follow.
+        with self._stream() as self.stream:
+            lastoffset = self._handle_lines(self.stream)
+        # Then with follow to get all.
+        with self._stream({"follow": True, "offset": lastoffset}) as self.stream:
+            self._handle_lines(self.stream, lastoffset)
+
+
+@dataclasses.dataclass
+class AllocWorker:
+    """Represents a worker that prints out and manages state related to one allocation"""
+
+    loggers: Dict[str, List[Logger]] = dataclasses.field(default_factory=dict)
+    exitcodes: Dict[str, int] = dataclasses.field(default_factory=dict)
+
+    def _create_loggers(self, alloc: dict, taskname: str):
+        ths: List[Logger] = []
         if not args.only or args.only == "stdout":
-            th = threading.Thread(
-                target=self._logs_streamer,
-                args=(allocid, taskname, False),
-                daemon=True,
-            )
-            ths.append(th)
+            ths.append(Logger(alloc, taskname, False))
         if not args.only or args.only == "stderr":
-            th = threading.Thread(
-                target=self._logs_streamer,
-                args=(allocid, taskname, True),
-                daemon=True,
-            )
-            ths.append(th)
+            ths.append(Logger(alloc, taskname, True))
         assert len(ths)
-        for i in ths:
-            i.start()
+        for th in ths:
+            th.daemon = True
+            th.start()
         return ths
 
     def alloc_event(self, alloc: dict):
+        """Update the state with alloc"""
         allocid = alloc["ID"]
         if alloc["TaskStates"] is None:
             return
@@ -232,27 +304,47 @@ class AllocWorker:
                 "running",
                 "dead",
             ]:
-                print(f"{taskname}: started")
-                self.loggers[taskname] = self._create_loggers(allocid, taskname)
-            if taskname not in self.exitcodes and task["State"] == "dead":
-                exitcode = next(
-                    (
-                        e["ExitCode"]
-                        for e in task["Events"]
-                        if e["Type"] == "Terminated"
-                    ),
-                    -1,
+                startedevent: Optional[dict] = next(
+                    (e for e in task["Events"] if e["Type"] == "Started"), None
                 )
+                if startedevent:
+                    startedtime: int = startedevent["Time"]
+                    output.task_start(
+                        allocid,
+                        alloc["TaskGroup"],
+                        taskname,
+                        ns2dt(startedtime),
+                        alloc["NodeName"],
+                    )
+                    self.loggers[taskname] = self._create_loggers(alloc, taskname)
+                else:
+                    # No startedevent - means something went wrong.
+                    # Get all messages and just display them
+                    msgs = "\n".join(e["DisplayMessage"] for e in task["Events"])
+                    for line in msgs.splitlines():
+                        output.log(allocid, alloc["TaskGroup"], taskname, "!!!", line)
+                    self.loggers[taskname] = []
+            if taskname not in self.exitcodes and task["State"] == "dead":
+                te = next(
+                    (e for e in task["Events"] if e["Type"] == "Terminated"), None
+                )
+                exitcode = te["ExitCode"] if te else -1
+                stoptime = te["Time"] if te else 0
                 self.exitcodes[taskname] = exitcode
-                print(f"{taskname}: exited with {exitcode}")
+                output.task_end(
+                    allocid, alloc["TaskGroup"], taskname, exitcode, ns2dt(stoptime)
+                )
 
 
 @dataclasses.dataclass
 class NomadWatch:
+    """The main class of nomad-watch for watching over stuff"""
+
     # allocid -> AllocWorker
     workers: Dict[str, AllocWorker] = dataclasses.field(default_factory=dict)
 
     def _start_job(self, input: str) -> Tuple[str, str]:
+        """Start a job from input file input."""
         if shutil.which("nomad"):
             jsonarg = "--json" if args.json else ""
             data = run(
@@ -261,7 +353,8 @@ class NomadWatch:
                 ),
                 stdout=subprocess.PIPE,
             ).stdout.strip()
-            print(data)
+            for line in data.splitlines():
+                log.info(line)
             evalid = next(
                 x.split(" ", 3)[-1] for x in data.splitlines() if "eval" in x.lower()
             ).strip()
@@ -294,17 +387,23 @@ class NomadWatch:
             if not mynomad.namespace:
                 mynomad.namespace = jobjson["Namespace"]
             evals = mynomad.get(f"job/{jobid}/evaluations")
+            # Filter only evaluations created for newer version then the Job
             recentevalsids = set(
                 eval["ID"]
                 for eval in evals
                 if eval.get("JobModifyIndex", -1) >= jobjson["JobModifyIndex"]
             )
+            # Get all allocations of evaluations.
             allocs: List[dict] = mynomad.get(f"job/{jobid}/allocations")
             for alloc in allocs:
                 if alloc["EvalID"] in recentevalsids:
                     self._notify_alloc_worker(alloc)
             if jobjson["Status"] == "dead":
                 break
+            if len(self.workers) == 0 and all(
+                len(w.loggers) == 0 for w in self.workers.values()
+            ):
+                log.info("Waiting for allocation...")
             time.sleep(1)
         self._join_workers()
 
@@ -316,7 +415,7 @@ class NomadWatch:
         while True:
             alloc = mynomad.get(f"allocation/{allocid}")
             self._notify_alloc_worker(alloc)
-            if alloc["ClientStatus"] in ["failed", "lost", "unknown", "complete"]:
+            if alloc["ClientStatus"] not in ["pending", "running"]:
                 break
             time.sleep(1)
         self._join_workers()
