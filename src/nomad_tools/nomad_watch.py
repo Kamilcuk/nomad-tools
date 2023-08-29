@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-# pip instlal python-nomad
 import argparse
 import base64
 import dataclasses
