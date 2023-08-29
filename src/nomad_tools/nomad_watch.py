@@ -473,6 +473,10 @@ If the job has only one task, exit with the task exit status.
 Othwerwise, if all tasks exited failed, exit with 3.
 If there are failed tasks, exit with 2.
 If there was a python exception, exit code is 1.
+
+Examples: nomad-watch --namespace default run ./some-job.nomad.hcl
+          nomad-watch job some-job
+          nomad-watch alloc af94b2
 """,
         epilog="""
 Written by Kamil Cukrowski 2023. Jointly under Beerware and MIT Licenses.
