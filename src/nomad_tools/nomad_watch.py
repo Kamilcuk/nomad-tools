@@ -108,6 +108,7 @@ job "test-nomad-do" {{
 @dataclasses.dataclass
 class MyNomad:
     """Represents connection to Nomad"""
+
     namespace: Optional[str] = None
     session: requests.Session = dataclasses.field(default_factory=requests.Session)
 
@@ -208,36 +209,42 @@ class Logger(threading.Thread):
         self.allocid: str = alloc["ID"]
         self.taskname: str = taskname
         self.stderr: bool = stderr
-        self.stream: Optional[requests.Response] = None
 
     def streamtype(self):
         return "err" if self.stderr else "out"
 
-    def _handle_lines(
-        self, stream: requests.Response, fromoffset: Optional[int] = None
-    ) -> Optional[int]:
-        stream.raise_for_status()
-        lastoffset = None
-        for dataline in stream.iter_lines():
-            if dataline:
-                log.debug(f"RECV: {repr(dataline)}")
+    @staticmethod
+    def _read_json_stream(stream: requests.Response):
+        txt = ""
+        for c in stream.iter_content(decode_unicode=True):
+            txt += c
+            # Nomad is consistent, the jsons are flat.
+            if c == "}":
                 try:
-                    linejson: dict = json.loads(dataline)
-                except Exception as e:
-                    print(r"dataline={dataline}", file=sys.stderr)
-                    raise Exception() from e
-                lines = ""
-                offset = linejson.get("Offset")
-                if "Data" in linejson:
-                    line64: str = linejson["Data"]
+                    ret = json.loads(txt)
+                    if ret:
+                        log.debug(f"RECV: {ret}")
+                        yield ret
+                except Exception:
+                    log.warn(f"error decoding json: {txt}")
+                txt = ""
+
+    def run(self):
+        with mynomad.request(
+            "GET",
+            f"client/fs/logs/{self.allocid}",
+            params={
+                "task": self.taskname,
+                "type": f"std{self.streamtype()}",
+                "follow": True,
+            },
+            stream=True,
+        ) as stream:
+            stream.raise_for_status()
+            for event in self._read_json_stream(stream):
+                line64: Optional[str] = event.get("Data")
+                if line64:
                     lines = base64.b64decode(line64.encode()).decode()
-                    # Chop from offset if given.
-                    if (
-                        fromoffset
-                        and offset
-                        and offset < fromoffset < offset + len(lines)
-                    ):
-                        lines = lines[fromoffset - offset :]
                     for line in lines.splitlines():
                         line = line.rstrip()
                         output.log(
@@ -247,31 +254,6 @@ class Logger(threading.Thread):
                             self.streamtype(),
                             line,
                         )
-                if offset:
-                    lastoffset = offset + len(lines)
-                if linejson.get("FileEvent") == "file deleted":
-                    break
-        return lastoffset
-
-    def _stream(self, params={}):
-        return mynomad.request(
-            "GET",
-            f"client/fs/logs/{self.allocid}",
-            params={
-                "task": self.taskname,
-                "type": f"std{self.streamtype()}",
-                **params,
-            },
-            stream=True,
-        )
-
-    def run(self):
-        # To get all the logs, firstly stream is opened without follow.
-        with self._stream() as self.stream:
-            lastoffset = self._handle_lines(self.stream)
-        # Then with follow to get all.
-        with self._stream({"follow": True, "offset": lastoffset}) as self.stream:
-            self._handle_lines(self.stream, lastoffset)
 
 
 @dataclasses.dataclass
@@ -497,11 +479,12 @@ Written by Kamil Cukrowski 2023. Jointly under Beerware and MIT Licenses.
     )
     parser.add_argument(
         "mode",
-        choices=("run", "job", "alloc"),
+        choices=("run", "job", "alloc", "test"),
         help="""
         If mode is run, will run a job in Nomad and watch it.
         If mode is job, will watch a job by name.
         If mode is alloc, will watch a single allocation.
+        Mode test is for internal testing.
         """,
     )
     parser.add_argument(
@@ -523,7 +506,7 @@ Written by Kamil Cukrowski 2023. Jointly under Beerware and MIT Licenses.
     if args.only:
         args.only = "stdout" if args.only in ["stdout", "out", "1"] else "stderr"
     #
-    if args.input == "test":
+    if args.mode == "test" and args.input == "test":
         test()
         exit()
     #
