@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 import argparse
 import base64
@@ -17,7 +18,7 @@ import time
 from http import client as http_client
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-import requests
+import requests.adapters
 from requests.auth import HTTPBasicAuth
 
 ###############################################################################
@@ -148,11 +149,14 @@ class MyNomad:
     namespace: Optional[str] = None
     session: requests.Session = dataclasses.field(default_factory=requests.Session)
 
+    def __post_init__(self):
+        a = requests.adapters.HTTPAdapter(pool_maxsize=100, max_retries=3)
+        self.session.mount("http://", a)
+
     def request(
         self,
         method,
         url,
-        json: Optional[dict] = None,
         params: Optional[dict] = None,
         *args,
         **kvargs,
@@ -178,8 +182,8 @@ class MyNomad:
             **kvargs,
         )
 
-    def _reqjson(self, mode, url, json: Optional[dict] = None, *args, **kvargs):
-        rr = self.request(mode, url, *args, **kvargs)
+    def _reqjson(self, mode, *args, **kvargs):
+        rr = self.request(mode, *args, **kvargs)
         rr.raise_for_status()
         return rr.json()
 
@@ -301,7 +305,12 @@ class TaskHandler:
     @staticmethod
     def _create_loggers(tk: TaskKey):
         ths: List[Logger] = []
-        assert args.stream in [None, "", "err", "out"], f"invalid args.stream = {args.stream}"
+        assert args.stream in [
+            None,
+            "",
+            "err",
+            "out",
+        ], f"invalid args.stream = {args.stream}"
         if (args.stream or "out") == "out":
             ths.append(Logger(tk, False))
         if (args.stream or "err") == "err":
@@ -332,6 +341,10 @@ class TaskHandler:
             and self._find_event(events, "Started")
         ):
             self.loggers += self._create_loggers(tk)
+            if task["State"] == "dead":
+                # If the task is already finished, give myself max 3 seconds to query all the logs.
+                # This is to reduce the number of connections.
+                threading.Timer(3, self.stop)
         if self.exitcode is None and task["State"] == "dead":
             # Assigns None if Terminated event not found
             self.exitcode = self._find_event(events, "Terminated").get("ExitCode")
@@ -394,8 +407,8 @@ class NomadWatch:
             try:
                 jobjson = json.loads(txt)
             except json.JSONDecodeError:
-                jobjson = mynomad.post("jobs/parse", {"JobHCL": txt})
-            evalid = mynomad.post("jobs", {"Job": jobjson, "Submission": txt})["EvalID"]
+                jobjson = mynomad.post("jobs/parse", json={"JobHCL": txt})
+            evalid = mynomad.post("jobs", json={"Job": jobjson, "Submission": txt})["EvalID"]
         return evalid
 
     def _notify_alloc_worker(self, alloc: dict):
@@ -429,19 +442,19 @@ class NomadWatch:
             log.info(f"Evaluation {evalid} failed to place groups: {groups}")
         return eval_
 
-    def _watch_job(self, jobinit: dict, purged: bool = False):
+    def _watch_job(self, jobinit: dict):
         jobid: str = jobinit["ID"]
         jobmodifyindex: int = jobinit["JobModifyIndex"]
         jobversion: int = jobinit["Version"]
-        jobdesc = f"{jobid} v{jobversion}"
-        if not purged:
-            log.info(f"Watching job {jobid} v{jobversion}")
+        jobdesc = jobid if args.all else f"{jobid} v{jobversion}"
+        #
+        log.info(f"Watching job {jobdesc}")
         while True:
             try:
                 allocs: List[dict] = mynomad.get(f"job/{jobid}/allocations")
             except requests.exceptions.HTTPError as e:
-                if e.response.status_code == 404 and purged:
-                    log.info(f"Job {jobdesc} purged")
+                if e.response.status_code == 404:
+                    log.info(f"Job {jobdesc} removed")
                     return
                 raise e
             # Filter relevant allocations only.
@@ -450,29 +463,31 @@ class NomadWatch:
                 for alloc in allocs
                 if alloc["ID"] in self.workers.keys()
                 or alloc["JobVersion"] == jobversion
+                or args.all
             ]
             for alloc in allocs:
                 self._notify_alloc_worker(alloc)
-            if len(self.workers) == 0:
-                try:
-                    jobjson: dict = mynomad.get(f"job/{jobid}")
-                    if jobjson["Status"] == "dead":
-                        log.info(f"Job {jobdesc} is dead with no allocations")
+            if not args.all:
+                if len(self.workers) == 0:
+                    try:
+                        jobjson: dict = mynomad.get(f"job/{jobid}")
+                        if jobjson["Status"] == "dead":
+                            log.info(f"Job {jobdesc} is dead with no allocations")
+                            break
+                    except requests.exceptions.HTTPError as e:
+                        if e.response.status_code == 404:
+                            log.info(f"Job {jobdesc} removed")
+                            return
+                        raise e
+                    log.info(f"Job {jobdesc} has no allocations")
+                else:
+                    allallocsfinished = all(
+                        alloc["ClientStatus"] not in ["pending", "running"]
+                        for alloc in allocs
+                    )
+                    if allallocsfinished:
+                        log.info(f"All allocations of {jobdesc} are finished")
                         break
-                except requests.exceptions.HTTPError as e:
-                    if e.response.status_code == 404 and purged:
-                        log.info(f"Job {jobdesc} purged")
-                        return
-                    raise e
-                log.info(f"Job {jobdesc} has no allocations")
-            else:
-                allallocsfinished = all(
-                    alloc["ClientStatus"] not in ["pending", "running"]
-                    for alloc in allocs
-                )
-                if allallocsfinished:
-                    log.info(f"All allocations of {jobdesc} are finished")
-                    break
             time.sleep(1)
 
     def _join_workers(self):
@@ -510,7 +525,9 @@ class NomadWatch:
         jobinit = mynomad.get(f"job/{jobid}")
         #
         done = threading.Event()
-        waiterthread = threading.Thread(target=self._waiter, args=(jobinit, done))
+        waiterthread = threading.Thread(
+            target=self._waiter, args=(jobinit, done), daemon=True
+        )
         try:
             # First wait for the evaluation.
             self._wait_for_eval(evalid)
@@ -523,7 +540,7 @@ class NomadWatch:
             # On exception, purge the job.
             if args.purge or not args.detach:
                 self._stop_job(jobid)
-            if waiterthread:
+            if waiterthread and not args.all:
                 waiterthread.join()
 
     def _find_job(self, jobid: str) -> str:
@@ -605,23 +622,33 @@ class NomadWatch:
 def parse_args():
     parser = argparse.ArgumentParser(
         description="""
-Run a Nomad job in Nomad and then print logs to stdout and wait for the job to finish.
-Made for running batch commands and monitoring them until they are done.
-The exit code is 0 if the job was properly done and all tasks exited with 0 exit code.
-If the job has only one task, exit with the task exit status.
-Othwerwise, if all tasks exited failed, exit with 3.
-If there are failed tasks, exit with 2.
-If there was a python exception, standard exit code is 1.
-Examples: nomad-watch --namespace default run ./some-job.nomad.hcl
-          nomad-watch job some-job
-          nomad-watch alloc af94b2
-""",
+            Run a Nomad job in Nomad and then print logs to stdout and wait for the job to finish.
+            Made for running batch commands and monitoring them until they are done.
+            The exit code is 0 if the job was properly done and all tasks exited with 0 exit code.
+            If the job has only one task, exit with the task exit status.
+            Othwerwise, if all tasks exited failed, exit with 3.
+            If there are failed tasks, exit with 2.
+            If there was a python exception, standard exit code is 1.
+            Examples: nomad-watch --namespace default run ./some-job.nomad.hcl ;
+                      nomad-watch job some-job ;
+                      nomad-watch alloc af94b2 ;
+                      nomad-watch --all --task redis -N services job redis .
+            """,
         epilog="""
-Written by Kamil Cukrowski 2023. Jointly under Beerware and MIT Licenses.
-""",
+            Written by Kamil Cukrowski 2023. Jointly under Beerware and MIT Licenses.
+            """,
     )
     parser.add_argument(
         "-N", "--namespace", help="Set NOMAD_NAMESPACE environment variable"
+    )
+    parser.add_argument(
+        "-a",
+        "--all",
+        action="store_true",
+        help="""
+            Do not exit after the current job monitoring is done.
+            Instead, watch endlessly for any existing and new allocations of a job.
+            """,
     )
     parser.add_argument(
         "--stream",
@@ -694,6 +721,8 @@ Written by Kamil Cukrowski 2023. Jointly under Beerware and MIT Licenses.
         assert args.mode in ["run", "test"], "--detach is only meaningful in run mode"
     if args.purge:
         assert args.mode in ["run", "test"], "--purge is only meaningful in run mode"
+    if args.all:
+        assert args.mode in ["job", "run"], "--all only relevant in job or run modes"
     #
     return args
 
