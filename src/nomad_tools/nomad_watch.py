@@ -150,7 +150,9 @@ class MyNomad:
     session: requests.Session = dataclasses.field(default_factory=requests.Session)
 
     def __post_init__(self):
-        a = requests.adapters.HTTPAdapter(pool_maxsize=100, max_retries=3)
+        a = requests.adapters.HTTPAdapter(
+            pool_connections=1000, pool_maxsize=1000, max_retries=3
+        )
         self.session.mount("http://", a)
 
     def request(
@@ -215,11 +217,24 @@ class TaskKey:
     """Represent data to unique identify a task"""
 
     allocid: str
+    nodename: str
     group: str
     task: str
 
-    def out(self, what: str):
-        print(f"{self.group}:{self.task}:{what}")
+    def _param(self, param: Dict[str, Any] = {}, **kvargs: Any) -> Dict[str, Any]:
+        ret = dict(param)
+        ret.update(kvargs)
+        ret.update(dataclasses.asdict(self))
+        return ret
+
+    def log_alloc(self, now: datetime.datetime, line: str):
+        print("%(group)s:%(task)s:%(now)s %(line)s" % self._param(now=now, line=line))
+
+    def log_task(self, stream: str, line: str):
+        print(
+            "%(group)s:%(task)s:%(stream)s: %(line)s"
+            % self._param(stream=stream, line=line)
+        )
 
 
 ###############################################################################
@@ -240,18 +255,19 @@ class Logger(threading.Thread):
 
     @staticmethod
     def _read_json_stream(stream: requests.Response):
-        txt = ""
-        for c in stream.iter_content(decode_unicode=True):
-            txt += c
-            # Nomad is consistent, the jsons are flat.
-            if c == "}":
-                try:
-                    ret = json.loads(txt)
-                    log.debug(f"RECV: {ret}")
-                    yield ret
-                except json.JSONDecodeError as e:
-                    log.warn(f"error decoding json: {txt} {e}")
-                txt = ""
+        txt: str = ""
+        for data in stream.iter_content(decode_unicode=True):
+            for c in data:
+                txt += c
+                # Nomad is consistent, the jsons are flat.
+                if c == "}":
+                    try:
+                        ret = json.loads(txt)
+                        log.debug(f"RECV: {ret}")
+                        yield ret
+                    except json.JSONDecodeError as e:
+                        log.warn(f"error decoding json: {txt} {e}")
+                    txt = ""
 
     def _out(self, lines: Optional[List[str]] = None):
         lines = lines or []
@@ -265,7 +281,7 @@ class Logger(threading.Thread):
                 self.ignoretime = 0
             for line in lines:
                 line = line.rstrip()
-                self.tk.out(f"{self._streamtype()}: {line}")
+                self.tk.log_task(self._streamtype(), line)
 
     def run(self):
         self.ignoretime = (time.time() + 0.5) if args.lines < 0 else 0
@@ -334,7 +350,7 @@ class TaskHandler:
             time = e.get("Time")
             if time and time not in self.messages and msg:
                 self.messages.add(time)
-                tk.out(f"{ns2dt(time)} {node} {msg}")
+                tk.log_alloc(ns2dt(time), msg)
         if (
             not self.loggers
             and task["State"] in ["running", "dead"]
@@ -367,7 +383,7 @@ class AllocWorker:
         for taskname, task in taskstates.items():
             if args.task and not args.task.search(taskname):
                 continue
-            tk = TaskKey(alloc["ID"], alloc["TaskGroup"], taskname)
+            tk = TaskKey(alloc["ID"], alloc["NodeName"], alloc["TaskGroup"], taskname)
             self.taskhandlers.setdefault(tk, TaskHandler()).task_event(alloc, tk, task)
 
 
@@ -408,7 +424,9 @@ class NomadWatch:
                 jobjson = json.loads(txt)
             except json.JSONDecodeError:
                 jobjson = mynomad.post("jobs/parse", json={"JobHCL": txt})
-            evalid = mynomad.post("jobs", json={"Job": jobjson, "Submission": txt})["EvalID"]
+            evalid = mynomad.post("jobs", json={"Job": jobjson, "Submission": txt})[
+                "EvalID"
+            ]
         return evalid
 
     def _notify_alloc_worker(self, alloc: dict):
@@ -690,8 +708,10 @@ def parse_args():
         "mode",
         choices=("run", "job", "alloc", "test"),
         help="""
-        If mode is run, will run specified Nomad job and then watch it.
+        If mode is run, will run specified Nomad job and then watch over it.
+        In run mode, job will be stopped unless --detach mode is given.then stop it .
         If mode is job, will watch a job by name.
+        In job mode, the job will not be stopped.
         If mode is alloc, will watch tasks of a single allocation.
         Mode test is for internal testing.
         """,
