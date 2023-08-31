@@ -249,6 +249,7 @@ class Logger(threading.Thread):
         self.stderr: bool = stderr
         self.exitevent = threading.Event()
         self.ignoredlines = []
+        self.first = True
 
     def _streamtype(self):
         return "err" if self.stderr else "out"
@@ -269,9 +270,10 @@ class Logger(threading.Thread):
                         log.warn(f"error decoding json: {txt} {e}")
                     txt = ""
 
-    def _out(self, lines: Optional[List[str]] = None):
+    def _taskout(self, lines: Optional[List[str]] = None):
         lines = lines or []
-        if self.ignoretime and time.time() < self.ignoretime:
+        if self.ignoretime and (self.first or time.time() < self.ignoretime):
+            self.first = False
             self.ignoredlines += lines
             self.ignoredlines = self.ignoredlines[: args.lines]
         else:
@@ -284,7 +286,7 @@ class Logger(threading.Thread):
                 self.tk.log_task(self._streamtype(), line)
 
     def run(self):
-        self.ignoretime = (time.time() + 0.5) if args.lines < 0 else 0
+        self.ignoretime = 0 if args.lines < 0 else (time.time() + 0.5)
         with mynomad.stream(
             f"client/fs/logs/{self.tk.allocid}",
             params={
@@ -300,9 +302,11 @@ class Logger(threading.Thread):
                     line64: Optional[str] = event.get("Data")
                     if line64:
                         lines = base64.b64decode(line64.encode()).decode().splitlines()
-                        self._out(lines)
+                        self._taskout(lines)
                 else:
-                    self._out()
+                    # Nomad json stream periodically sends empty {}.
+                    # No idea why, but I can implement timeout.
+                    self._taskout()
                     if self.exitevent.is_set():
                         break
 
@@ -464,7 +468,12 @@ class NomadWatch:
         jobid: str = jobinit["ID"]
         jobmodifyindex: int = jobinit["JobModifyIndex"]
         jobversion: int = jobinit["Version"]
-        jobdesc = jobid if args.all else f"{jobid} v{jobversion}"
+        jobnamespace: str = jobinit["Namespace"]
+        jobdesc = (
+            f"{jobid}@{jobnamespace}"
+            if args.all
+            else f"{jobid}@{jobnamespace} v{jobversion}"
+        )
         #
         log.info(f"Watching job {jobdesc}")
         while True:
@@ -489,6 +498,9 @@ class NomadWatch:
                 if len(self.workers) == 0:
                     try:
                         jobjson: dict = mynomad.get(f"job/{jobid}")
+                        if jobjson["JobVersion"] != jobversion:
+                            log.info(f"New version of job {jobdesc} posted")
+                            break
                         if jobjson["Status"] == "dead":
                             log.info(f"Job {jobdesc} is dead with no allocations")
                             break
@@ -506,6 +518,8 @@ class NomadWatch:
                     if allallocsfinished:
                         log.info(f"All allocations of {jobdesc} are finished")
                         break
+            if args.no_follow:
+                break
             time.sleep(1)
 
     def _join_workers(self):
@@ -608,6 +622,8 @@ class NomadWatch:
                     f"Allocation {allocid} has status {allocclientstatus}. Exiting."
                 )
                 break
+            if args.no_follow:
+                break
             time.sleep(1)
 
     def close(self) -> int:
@@ -634,6 +650,22 @@ class NomadWatch:
         return 0
 
 
+def find_nomad_namespace(prefix: str):
+    """Finds a nomad namespace by prefix"""
+    namespaces = mynomad.get("namespaces")
+    names = [x["Name"] for x in namespaces]
+    namesstr = " ".join(names)
+    matchednames = [x for x in names if x.startswith(prefix)]
+    matchednamesstr = " ".join(matchednames)
+    assert (
+        len(matchednames) > 0
+    ), f"Couldn't find namespace maching prefix {prefix} from {namesstr}"
+    assert (
+        len(matchednames) < 2
+    ), f"Prefix {prefix} matched multiple namespaces: {matchednamesstr}"
+    return matchednames[0]
+
+
 ###############################################################################
 
 
@@ -657,7 +689,9 @@ def parse_args():
             """,
     )
     parser.add_argument(
-        "-N", "--namespace", help="Set NOMAD_NAMESPACE environment variable"
+        "-N",
+        "--namespace",
+        help="Finds Nomad namespace matching given prefix and sets NOMAD_NAMESPACE environment variable.",
     )
     parser.add_argument(
         "-a",
@@ -669,6 +703,7 @@ def parse_args():
             """,
     )
     parser.add_argument(
+        "-s",
         "--stream",
         choices=("stdout", "stderr", "out", "err", "1", "2"),
         default="",
@@ -699,6 +734,17 @@ def parse_args():
         help="Sets the tail location in best-efforted number of lines relative to the end of logs",
     )
     parser.add_argument(
+        "-f",
+        "--follow",
+        action="store_true",
+        help="Shorthand for --lines=10 like in tail -f.",
+    )
+    parser.add_argument(
+        "--no-follow",
+        action="store_true",
+        help="Just run once, get the logs in a best-effort style and exit.",
+    )
+    parser.add_argument(
         "-t",
         "--task",
         type=re.compile,
@@ -708,10 +754,9 @@ def parse_args():
         "mode",
         choices=("run", "job", "alloc", "test"),
         help="""
-        If mode is run, will run specified Nomad job and then watch over it.
-        In run mode, job will be stopped unless --detach mode is given.then stop it .
-        If mode is job, will watch a job by name.
-        In job mode, the job will not be stopped.
+        If mode is run, will run specified Nomad job and then watch over it
+        and after its done the job will be stopped unless --detach.
+        If mode is job, will watch a job by name. The job will not be stopped.
         If mode is alloc, will watch tasks of a single allocation.
         Mode test is for internal testing.
         """,
@@ -734,8 +779,6 @@ def parse_args():
         http_client.HTTPConnection.debuglevel = 1
     if args.stream:
         args.stream = "out" if args.stream in ("1", "stdout", "out") else "err"
-    if args.namespace:
-        os.environ["NOMAD_NAMESPACE"] = args.namespace
     if args.detach:
         assert not args.purge, f"purge is meaningless if detaching"
         assert args.mode in ["run", "test"], "--detach is only meaningful in run mode"
@@ -743,12 +786,17 @@ def parse_args():
         assert args.mode in ["run", "test"], "--purge is only meaningful in run mode"
     if args.all:
         assert args.mode in ["job", "run"], "--all only relevant in job or run modes"
+    if args.follow:
+        args.lines = 10
     #
     return args
 
 
 if __name__ == "__main__":
     args = parse_args()
+    #
+    if args.namespace:
+        os.environ["NOMAD_NAMESPACE"] = find_nomad_namespace(args.namespace)
     #
     if args.mode == "test":
         Test(args.input)
