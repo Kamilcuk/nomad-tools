@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
+# PYTHON_ARGCOMPLETE_OK
 
 import argparse
 import base64
@@ -20,6 +21,11 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import requests.adapters
 from requests.auth import HTTPBasicAuth
+
+try:
+    import argcomplete.completers
+except ImportError:
+    pass
 
 ###############################################################################
 
@@ -48,7 +54,7 @@ class Test:
 
     def short(self):
         spec = """
-            job "test-nomad-do" {
+            job "test-nomad-watch" {
               type = "batch"
               reschedule { attempts = 0 }
               group "cache" {
@@ -72,7 +78,7 @@ class Test:
     def test(self):
         now = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
         spec = f"""
-        job "test-nomad-do" {{
+        job "test-nomad-watch" {{
             datacenters = ["*"]
             type = "batch"
             reschedule {{
@@ -441,12 +447,8 @@ class NomadWatch:
             log.info(f"Purging job {jobid}")
         else:
             log.info(f"Stopping job {jobid}")
-        assert args.mode in [
-            "run",
-            "job",
-        ], f"Invalid args mode for stop or purge: {args.mode}"
         resp = mynomad.delete(f"job/{jobid}", params={"purge": bool(args.purge)})
-        assert resp["EvalID"], f"Job {jobid} was not properly stopped: {resp}"
+        assert resp["EvalID"], f"Stopping {jobid} did not trigger evaluation: {resp}"
 
     def _wait_for_eval(self, evalid: str):
         while True:
@@ -569,8 +571,8 @@ class NomadWatch:
         except KeyboardInterrupt:
             log.info("Received interrupt")
         finally:
-            # On exception, purge the job.
-            if args.purge or not args.detach:
+            # On exception, stop or purge the job if needed.
+            if args.purge or args.stop:
                 self._stop_job(jobid)
             if waiterthread and not args.all:
                 waiterthread.join()
@@ -669,6 +671,72 @@ def find_nomad_namespace(prefix: str):
 ###############################################################################
 
 
+def bash_completion():
+    return """
+_nomad_watch_api() {
+    env NOMAD_NAMESPACE="$NOMAD_NAMESPACE" nomad operator api /v1/"$1"
+}
+_nomad_watch_jq() {
+    /usr/bin/env python3 -c 'import json,sys; [print(x[sys.argv[1]]) for x in json.load(sys.stdin)]' "$2"
+}
+_nomad_watch_get() {
+    _nomad_watch_api "$1" | _nomad_watch_jq "$2"
+}
+_nomad_watch() {
+    local arg next NOMAD_NAMESPACE="${NOMAD_NAMESPACE:-}" job
+    set -- "${COMP_WORDS[@]}"
+    while (($#)); do
+        case "$arg" in
+        --namespace=*) NOMAD_NAMESPACE=${1##--namespace=}; ;;
+        -*N*) NOMAD_NAMESPACE=${1%*N}; ;;
+        --namespace|-*N|-N) shift; NOMAD_NAMESPACE=$1; ;;
+        job) shift; job=$1; ;;
+        run) shift; job=${1%%.*}; ;;
+        esac
+        shift
+    done
+    #
+    local api jq
+    #
+    local cur prev tmp
+	cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+    case "$cur" in
+    --namespace=*) COMPREPLY=($(compgen -W "$("${api[@]}" /v1/namespaces | "${jq[@]}" Name)" -- "$cur")); ;;
+    --task=*)
+    *)
+        case "$prev" in
+        run) COMPREPLY=($(compgen -o filenames -A file -- "$cur")); ;;
+        job) COMPREPLY=($(compgen -W "$(_nomad_watch_get jobs ID)" -- "$cur")); ;;
+        alloc) COMPREPLY=($(compgen -W "$(_nomad_watch_get allocations ID)" -- "$cur")); ;;
+        -*N|--namespace) COMPREPLY=($(compgen -W "$(_nomad_watch_get namespaces Name)" -- "$cur")); ;;
+        -*t|--task)
+            if [[ -n "${job:-}" ]] && tmp=$("${api[@]}" "$job" 2>/dev/null); then
+                COMPREPLY=($(compgen -W "$(<<<"$tmp" 
+            fi
+            ;;
+        *) COMPREPLY=($(compgen -W "run job alloc" -- "$cur")); ;;
+        ;;
+    esac
+    COMP_WORDS
+}
+complete -F _nomad_watch nomad-watch
+    """
+
+
+###############################################################################
+
+def complete_input(parsed_args, **kwargs):
+    if parsed_args.namespace:
+        os.environ["NOMAD_NAMESPACE"] = find_nomad_namespace(parsed_args.namespace)
+    return (
+        [x["ID"] for x in mynomad.get("allocations")]
+        if parsed_args.mode == "alloc"
+        else [x["ID"] for x in mynomad.get("jobs")]
+        if parsed_args.mode == "job"
+        else argcomplete.completers.FilesCompleter([".hcl", ".nomad"], directories=False)(parsed_args=parsed_args, **kwargs)
+    )
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="""
@@ -692,7 +760,7 @@ def parse_args():
         "-N",
         "--namespace",
         help="Finds Nomad namespace matching given prefix and sets NOMAD_NAMESPACE environment variable.",
-    )
+    ).completer = lambda prefix, parsed_args, **kwargs: [x["Name"] for x in mynomad.get("namespaces")]
     parser.add_argument(
         "-a",
         "--all",
@@ -716,15 +784,14 @@ def parse_args():
         help="job input is in json form, passed to nomad command with --json",
     )
     parser.add_argument(
-        "-d",
-        "--detach",
+        "--stop",
         action="store_true",
-        help="Do not stop the job after done. Only relevant in run mode.",
+        help="In run mode, make sure to stop the job before exit.",
     )
     parser.add_argument(
         "--purge",
         action="store_true",
-        help="Purge the nomad job before exiting. Only relevant in run mode.",
+        help="In run mode, stop and purge the job before exiting.",
     )
     parser.add_argument(
         "-n",
@@ -737,7 +804,7 @@ def parse_args():
         "-f",
         "--follow",
         action="store_true",
-        help="Shorthand for --lines=10 like in tail -f.",
+        help="Shorthand for --all --lines=10 to be like in tail -f.",
     )
     parser.add_argument(
         "--no-follow",
@@ -754,9 +821,8 @@ def parse_args():
         "mode",
         choices=("run", "job", "alloc", "test"),
         help="""
-        If mode is run, will run specified Nomad job and then watch over it
-        and after its done the job will be stopped unless --detach.
-        If mode is job, will watch a job by name. The job will not be stopped.
+        If mode is run, will run specified Nomad job and then watch over it.
+        If mode is job, will watch a job by name.
         If mode is alloc, will watch tasks of a single allocation.
         Mode test is for internal testing.
         """,
@@ -768,7 +834,9 @@ def parse_args():
         If mode is job, this is the job name to watch.
         If mode is alloc, this is the allocation id to watch.
         """,
-    )
+    ).completer = complete_input
+    if "argcomplete" in sys.modules:
+        argcomplete.autocomplete(parser)
     args = parser.parse_args()
     #
     logging.basicConfig(
@@ -779,8 +847,7 @@ def parse_args():
         http_client.HTTPConnection.debuglevel = 1
     if args.stream:
         args.stream = "out" if args.stream in ("1", "stdout", "out") else "err"
-    if args.detach:
-        assert not args.purge, f"purge is meaningless if detaching"
+    if args.stop:
         assert args.mode in ["run", "test"], "--detach is only meaningful in run mode"
     if args.purge:
         assert args.mode in ["run", "test"], "--purge is only meaningful in run mode"
@@ -788,15 +855,15 @@ def parse_args():
         assert args.mode in ["job", "run"], "--all only relevant in job or run modes"
     if args.follow:
         args.lines = 10
+        args.all = True
+    if args.namespace:
+        os.environ["NOMAD_NAMESPACE"] = find_nomad_namespace(args.namespace)
     #
     return args
 
 
 if __name__ == "__main__":
     args = parse_args()
-    #
-    if args.namespace:
-        os.environ["NOMAD_NAMESPACE"] = find_nomad_namespace(args.namespace)
     #
     if args.mode == "test":
         Test(args.input)
