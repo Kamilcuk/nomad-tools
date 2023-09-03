@@ -819,9 +819,10 @@ def parse_args():
     )
     parser.add_argument(
         "mode",
-        choices=("run", "job", "alloc", "test"),
+        choices=("run", "start", "job", "alloc", "test"),
         help="""
         If mode is run, will run specified Nomad job and then watch over it.
+        If mode is start, will run specific Nomad job and wait until it has at least one allocation."
         If mode is job, will watch a job by name.
         If mode is alloc, will watch tasks of a single allocation.
         Mode test is for internal testing.
@@ -830,7 +831,7 @@ def parse_args():
     parser.add_argument(
         "input",
         help="""
-        If mode is run, this is a file path or '-' if using stdin of a job to run in Nomad.
+        If mode is run or start, this is a file path or '-' if using stdin of a job to run in Nomad.
         If mode is job, this is the job name to watch.
         If mode is alloc, this is the allocation id to watch.
         """,
@@ -870,7 +871,7 @@ if __name__ == "__main__":
         exit()
     #
     do = NomadWatch()
-    if args.mode == "run":
+    if args.mode == "run" or args.mode == "start":
         do.main_watch_run(args.input)
     elif args.mode == "job":
         do.main_watch_job(args.input)
