@@ -12,8 +12,9 @@ import socket
 import subprocess
 import sys
 import time
-import tomllib
 from typing import List, Set
+
+import tomli
 
 ###############################################################################
 
@@ -266,14 +267,15 @@ def parse_args():
     return parser.parse_args()
 
 
-if __name__ == "__main__":
+def cli():
+    global args
     args = parse_args()
     logging.basicConfig(
         format="%(module)s:%(lineno)s: %(message)s",
         level=logging.DEBUG if args.verbose else logging.INFO,
     )
     #
-    config = Config(**tomllib.load(args.config))
+    config = Config(**tomli.load(args.config))
     config.update_env()
     env = get_env()
     #
@@ -288,3 +290,7 @@ if __name__ == "__main__":
         mode_cleanup()
     else:
         assert 0, f"Unknown mode: {args.mode}"
+
+
+if __name__ == "__main__":
+    cli()

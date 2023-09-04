@@ -1,0 +1,31 @@
+# .github/workflows/ci-cd.yml
+---
+on:
+  - push
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: pip install --upgrade pip
+      - run: pip install -e '.[test]'
+      - run: pytest -sxv
+
+  pypi-publish:
+    name: Upload release to PyPI
+    needs:
+      - test
+      # if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/nomad-tools
+    permissions:
+      id-token: write  # IMPORTANT: this permission is mandatory for trusted publishing
+    steps:
+      - uses: actions/checkout@v3
+      - run: pip install --upgrade build
+      - run: python -m build
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

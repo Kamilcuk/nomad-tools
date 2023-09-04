@@ -215,8 +215,8 @@ def parse_args():
         exit("Either --service or both --job and --namespace has to be given")
     return args
 
-
-if __name__ == "__main__":
+def cli():
+    global args
     args = parse_args()
     nvd = NomadVarDir()
     nvd.get_old_items()
@@ -229,3 +229,6 @@ if __name__ == "__main__":
         nvd.mode_get()
     else:
         assert False, f"Internal error when parsing arguments: {args.mode}"
+
+if __name__ == "__main__":
+    cli()

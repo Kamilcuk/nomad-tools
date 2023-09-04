@@ -316,8 +316,7 @@ def test():
         ]
     )
 
-
-if __name__ == "__main__":
+def cli():
     global args
     args = parse_args()
     if args.test:
@@ -329,3 +328,6 @@ if __name__ == "__main__":
         stream_mode(src, dst)
     else:
         copy_mode(src, dst)
+
+if __name__ == "__main__":
+    cli()

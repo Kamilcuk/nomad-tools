@@ -1,0 +1,28 @@
+[project]
+name = "nomad-tools"
+readme = "README.md"
+authors = [{name = "Kamil Cukrowski"}]
+license = {text = "GPL-3.0-or-later"}
+dependencies = [
+	"click",
+	"requests",
+	"tomli",
+]
+dynamic = ["version"]
+
+[project.urls]
+homepage = "https://gitlab.com/Kamcuk/nomad-tools"
+repository = "https://gitlab.com/Kamcuk/nomad-tools"
+documentation = "https://gitlab.com/Kamcuk/nomad-tools"
+
+[project.scripts]
+nomad-watch = "nomad_tools:nomad_watch.cli"
+nomad-gitlab-runner = "nomad_tools:nomad_gitlab_runner.cli"
+nomad-cp = "nomad_tools:nomad_cp.cli"
+nomad-vardir = "nomad_tools:nomad_vardir.cli"
+
+[project.optional-dependencies]
+test = [
+	"pytest",
+]
+
