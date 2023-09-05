@@ -19,8 +19,9 @@ from http import client as http_client
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 import click
-import requests.adapters
-from requests.auth import HTTPBasicAuth
+import requests
+
+from . import nomadlib
 
 ###############################################################################
 
@@ -142,134 +143,33 @@ class Test:
 
 ###############################################################################
 
+mynomad = nomadlib.Conn()
 
-@dataclasses.dataclass
-class MyNomad:
-    """Represents connection to Nomad"""
 
-    namespace: Optional[str] = None
-    session: requests.Session = dataclasses.field(default_factory=requests.Session)
-
-    def __post_init__(self):
-        a = requests.adapters.HTTPAdapter(
-            pool_connections=1000, pool_maxsize=1000, max_retries=3
+def nomad_start_job(input: str) -> str:
+    """Start a job from input file input."""
+    if shutil.which("nomad"):
+        jsonarg = "-json" if args.json else ""
+        cmd = shlex.split(
+            f"nomad job run -detach -verbose {jsonarg} {shlex.quote(input)}"
         )
-        self.session.mount("http://", a)
+        try:
+            rr = run(cmd, stdout=subprocess.PIPE if input == "-" else None)
+        except subprocess.CalledProcessError as e:
+            # nomad will print its error, we can just exit
+            exit(e.returncode)
+        data = rr.stdout.strip()
+        for line in data.splitlines():
+            log.info(line)
+        evalid = next(
+            x.split(" ", 3)[-1] for x in data.splitlines() if "eval" in x.lower()
+        ).strip()
+    else:
+        intxt = sys.stdin if input == "-" else open(input)
+        txt: str = intxt.read()
+        evalid = mynomad.start_job(txt)["EvalID"]
+    return evalid
 
-    def request(
-        self,
-        method,
-        url,
-        params: Optional[dict] = None,
-        *args,
-        **kvargs,
-    ):
-        params = dict(params or {})
-        assert "namespace" not in params
-        params["namespace"] = self.namespace or os.environ.get("NOMAD_NAMESPACE", "*")
-        return self.session.request(
-            method,
-            os.environ.get("NOMAD_ADDR", "http://127.0.0.1:4646") + "/v1/" + url,
-            *args,
-            auth=(
-                HTTPBasicAuth(*os.environ["NOMAD_HTTP_AUTH"].split(":"))
-                if "NOMAD_HTTP_AUTH" in os.environ
-                else None
-            ),
-            headers=(
-                {"X-Nomad-Token": os.environ["NOMAD_TOKEN"]}
-                if "NOMAD_TOKEN" in os.environ
-                else None
-            ),
-            params=params,
-            **kvargs,
-        )
-
-    def _reqjson(self, mode, *args, **kvargs):
-        rr = self.request(mode, *args, **kvargs)
-        rr.raise_for_status()
-        return rr.json()
-
-    def get(self, *args, **kvargs):
-        return self._reqjson("GET", *args, **kvargs)
-
-    def put(self, *args, **kvargs):
-        return self._reqjson("PUT", *args, **kvargs)
-
-    def post(self, *args, **kvargs):
-        return self._reqjson("POST", *args, **kvargs)
-
-    def delete(self, *args, **kvargs):
-        return self._reqjson("DELETE", *args, **kvargs)
-
-    def stream(self, *args, **kvargs):
-        stream = self.request("GET", *args, stream=True, **kvargs)
-        stream.raise_for_status()
-        return stream
-
-    def start_job(self, input: str) -> dict:
-        """Start a job from input file input."""
-        if shutil.which("nomad"):
-            jsonarg = "-json" if args.json else ""
-            try:
-                rr = run(
-                    shlex.split(
-                        f"nomad job run -detach -verbose {jsonarg} {shlex.quote(input)}"
-                    ),
-                    stdout=subprocess.PIPE,
-                )
-            except subprocess.CalledProcessError as e:
-                # nomad will print its error, we can just exit
-                exit(e.returncode)
-            data = rr.stdout.strip()
-            for line in data.splitlines():
-                log.info(line)
-            evalid = next(
-                x.split(" ", 3)[-1] for x in data.splitlines() if "eval" in x.lower()
-            ).strip()
-            eval_ = mynomad.get(f"evaluation/{evalid}")
-        else:
-            intxt = sys.stdin if input == "-" else open(input)
-            txt: str = intxt.read()
-            try:
-                jobjson = json.loads(txt)
-            except json.JSONDecodeError:
-                jobjson = mynomad.post("jobs/parse", json={"JobHCL": txt})
-            eval_ = mynomad.post("jobs", json={"Job": jobjson, "Submission": txt})
-        self.namespace = eval_["Namespace"]
-        return eval_
-
-    def stop_job(self, jobid):
-        if args.purge:
-            log.info(f"Purging job {jobid}")
-        else:
-            log.info(f"Stopping job {jobid}")
-        resp: dict = mynomad.delete(f"job/{jobid}", params={"purge": bool(args.purge)})
-        assert resp["EvalID"], f"Stopping {jobid} did not trigger evaluation: {resp}"
-        return resp
-
-    def find_job(self, jobprefix: str) -> str:
-        jobs = mynomad.get("jobs", params={"prefix": jobprefix})
-        assert len(jobs) > 0, f"No jobs found with prefix {jobprefix}"
-        jobsnames = " ".join(f"{x['ID']}@{x['Namespace']}" for x in jobs)
-        assert len(jobs) < 2, f"Multiple jobs found with name {jobprefix}: {jobsnames}"
-        job = jobs[0]
-        mynomad.namespace = job["Namespace"]
-        return job["ID"]
-
-    def find_last_not_stopped_job(self, jobid: str) -> dict:
-        jobinit = mynomad.get(f"job/{jobid}")
-        if jobinit["Stop"]:
-            # Find last job version that is not stopped.
-            versions = mynomad.get(f"job/{jobid}/versions")
-            notstopedjobs = [job for job in versions["Versions"] if not job["Stop"]]
-            if notstopedjobs:
-                notstopedjobs.sort(key=lambda job: -job["ModifyIndex"])
-                return notstopedjobs[0]
-        return jobinit
-
-
-mynomad = MyNomad()
 
 ###############################################################################
 
@@ -376,30 +276,22 @@ class Logger(threading.Thread):
         self.exitevent.set()
 
 
-def nomad_task_events_find(events: List[dict], type_: str) -> dict:
-    """Find event in TaskStates task Events. Return empty dict if not found"""
-    return next((e for e in events if e["Type"] == type_), {})
-
-
 class TaskHandler:
     """A handler for one task. Creates loggers, writes out task events, handle exit conditions"""
 
     def __init__(self):
+        # Array of loggers that log allocation logs.
         self.loggers: List[Logger] = []
+        # A set of message timestamp to know what has been printed.
         self.messages: Set[int] = set()
         self.exitcode: Optional[int] = None
 
     @staticmethod
     def _create_loggers(tk: TaskKey):
         ths: List[Logger] = []
-        assert args.stream in [
-            "both",
-            "err",
-            "out",
-        ], f"invalid args.stream = {args.stream}"
-        if args.stream in ["both", "out"]:
+        if args_stream.out:
             ths.append(Logger(tk, False))
-        if args.stream in ["both", "err"]:
+        if args_stream.err:
             ths.append(Logger(tk, True))
         assert len(ths)
         for th in ths:
@@ -407,28 +299,28 @@ class TaskHandler:
             th.start()
         return ths
 
-    def notify(self, alloc: dict, tk: TaskKey, task: dict):
-        events = task.get("Events") or []
-        node = alloc["NodeName"]
-        for e in events:
-            msg = e.get("DisplayMessage")
-            time = e.get("Time")
-            if time and time not in self.messages and msg:
-                self.messages.add(time)
-                tk.log_alloc(ns2dt(time), msg)
+    def notify(self, alloc: dict, tk: TaskKey, task: nomadlib.AllocTaskStates):
+        events = task.Events
+        if args_stream.alloc:
+            for e in events:
+                msg = e.DisplayMessage
+                time = e.Time
+                if time and time not in self.messages and msg:
+                    self.messages.add(time)
+                    tk.log_alloc(ns2dt(time), msg)
         if (
             not self.loggers
             and task["State"] in ["running", "dead"]
-            and nomad_task_events_find(events, "Started")
+            and task.find_event("Started")
         ):
             self.loggers += self._create_loggers(tk)
-            if task["State"] == "dead":
+            if task.State == "dead":
                 # If the task is already finished, give myself max 3 seconds to query all the logs.
                 # This is to reduce the number of connections.
                 threading.Timer(3, self.stop)
         if self.exitcode is None and task["State"] == "dead":
             # Assigns None if Terminated event not found
-            self.exitcode = nomad_task_events_find(events, "Terminated").get("ExitCode")
+            self.exitcode = (task.find_event("Terminated") or {}).get("ExitCode")
             self.stop()
 
     def stop(self):
@@ -442,10 +334,9 @@ class AllocWorker:
     def __init__(self):
         self.taskhandlers: Dict[TaskKey, TaskHandler] = {}
 
-    def notify(self, alloc: dict):
+    def notify(self, alloc: nomadlib.Alloc):
         """Update the state with alloc"""
-        taskstates: dict = alloc.get("TaskStates") or {}
-        for taskname, task in taskstates.items():
+        for taskname, task in alloc.TaskStates.items():
             if args.task and not args.task.search(taskname):
                 continue
             tk = TaskKey(alloc["ID"], alloc["NodeName"], alloc["TaskGroup"], taskname)
@@ -453,7 +344,7 @@ class AllocWorker:
 
 
 class AllocWorkers(Dict[str, AllocWorker]):
-    def notify(self, alloc: dict):
+    def notify(self, alloc: nomadlib.Alloc):
         self.setdefault(alloc["ID"], AllocWorker()).notify(alloc)
 
     def stop(self):
@@ -507,8 +398,18 @@ class AllocWorkers(Dict[str, AllocWorker]):
 ###############################################################################
 
 
-def nomad_watch_eval(eval_: dict):
-    evalid: str = eval_["ID"]
+def nomad_start_job_and_wait(input: str):
+    assert isinstance(input, str)
+    evalid = nomad_start_job(input)
+    eval_: dict = mynomad.get(f"evaluation/{evalid}")
+    mynomad.namespace = eval_["Namespace"]
+    nomad_watch_eval(evalid)
+    jobid = eval_["JobID"]
+    return mynomad.get(f"job/{jobid}")
+
+
+def nomad_watch_eval(evalid: str):
+    assert isinstance(evalid, str), f"not a string: {evalid}"
     while True:
         eval_ = mynomad.get(f"evaluation/{evalid}")
         if eval_["Status"] != "pending":
@@ -525,92 +426,61 @@ def nomad_watch_eval(eval_: dict):
     return eval_
 
 
-class NomadJob(dict):
-    @property
-    def ID(self):
-        return self["ID"]
-
-    @property
-    def version(self):
-        return self["Version"]
-
-    @property
-    def namespace(self):
-        return self["Namespace"]
-
-    @property
-    def description(self):
-        return f"{self.ID}@{self.namespace} v{self.version}"
-
-    @property
-    def jobModifyIndex(self):
-        return self["JobModifyIndex"]
+###############################################################################
 
 
 class NomadWatchJob:
     """The main class of nomad-watch for watching over stuff"""
 
     def __init__(self, job: dict):
-        self.job = NomadJob(job)
+        self.job = nomadlib.Job(job)
         self.allocworkers = AllocWorkers()
-        self.allocs: List[dict] = []
+        self.allocs: List[nomadlib.Alloc] = []
 
     def job_finished_sane(self) -> bool:
         if len(self.allocworkers) == 0:
-            try:
-                jobjson: dict = mynomad.get(f"job/{self.job.ID}")
-                if jobjson["JobVersion"] != self.job.version:
-                    log.info(f"New version of job {self.job.description} posted")
-                    return True
-                if jobjson["Status"] == "dead":
-                    log.info(f"Job {self.job.description} is dead with no allocations")
-                    return True
-            except requests.exceptions.HTTPError as e:
-                if e.response.status_code == 404:
-                    log.info(f"Job {self.job.description} removed")
-                    return True
-                raise e
-            log.info(f"Job {self.job.description} has no allocations")
+            jobjson = nomadlib.Job(mynomad.get(f"job/{self.job.ID}"))
+            if jobjson.Version != self.job.Version:
+                log.info(f"New version of job {self.job.description()} posted")
+                return True
+            if jobjson.Status == "dead":
+                log.info(f"Job {self.job.description()} is dead with no allocations")
+                return True
+            log.info(f"Job {self.job.description()} has no allocations")
         else:
             allallocsfinished = all(
-                alloc["ClientStatus"] not in ["pending", "running"]
+                alloc.ClientStatus not in ["pending", "running"]
                 for alloc in self.allocs
             )
             if allallocsfinished:
-                log.info(f"All allocations of {self.job.description} are finished")
+                log.info(
+                    f"All {len(self.allocs)} allocations of {self.job.description()} are finished"
+                )
                 return True
         return False
 
     def job_started(self):
         for alloc in self.allocs:
             alltasksstarted = all(
-                nomad_task_events_find(task["events"], "Started")
-                for task in alloc["TaskStates"].values()
+                task.find_event("Started") for task in alloc.TaskStates.values()
             )
             if alltasksstarted:
-                log.info(
-                    f"Allocation {alloc['ID']} started {len(alloc['TaskStates'])} tasks"
-                )
+                log.info(f"Allocation {alloc.ID} started {len(alloc.TaskStates)} tasks")
                 return True
         return False
 
     def watch_job(self, finished: Optional[Callable[[], bool]] = None):
-        log.info(f"Watching job {self.job.description}")
+        log.info(f"Watching job {self.job.description()}")
         finished = finished or self.job_finished_sane
         while True:
-            try:
-                allocs: List[dict] = mynomad.get(f"job/{self.job.ID}/allocations")
-            except requests.exceptions.HTTPError as e:
-                if e.response.status_code == 404:
-                    log.info(f"Job {self.job.description} removed")
-                    return
-                raise e
+            allocs: List[dict] = mynomad.get(f"job/{self.job.ID}/allocations")
             # Filter relevant allocations only.
+            self.allocs = [nomadlib.Alloc(a) for a in allocs]
             self.allocs = [
                 alloc
-                for alloc in allocs
-                if alloc["ID"] in self.allocworkers.keys()
-                or alloc["JobVersion"] == self.job.version
+                for alloc in self.allocs
+                if alloc.ID in self.allocworkers.keys()
+                or alloc.JobVersion == self.job.Version
                 or args.all
             ]
             for alloc in self.allocs:
@@ -625,6 +495,12 @@ class NomadWatchJob:
         self.allocworkers.join()
         mynomad.session.close()
         return self.allocworkers.exitcode()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, type, value, tb):
+        self.close()
 
 
 def find_nomad_namespace(prefix: str):
@@ -704,11 +580,12 @@ def completor(cb: Callable[[], Iterable[str]]):
 @click.option(
     "-s",
     "--stream",
-    type=click.Choice("both stdout stderr out err 1 2".split()),
-    default="both",
-    help="Only monitor stdout or stderr, not both stream.",
+    type=click.Choice("all alloc stdout stderr out err 1 2".split()),
+    default=["all"],
+    multiple=True,
+    help="Print only messages from allocation and stdout or stderr of the task. This option is cummulative.",
 )
-@click.option("-v", "--verbose", count=True)
+@click.option("-v", "--verbose", count=True, help="Be verbose")
 @click.option(
     "--json",
     is_flag=True,
@@ -760,14 +637,12 @@ def cli(ctx, **kvargs):
     )
     if args.verbose > 1:
         http_client.HTTPConnection.debuglevel = 1
-    if args.stream:
-        args.stream = (
-            "both"
-            if args.stream == "both"
-            else "out"
-            if args.stream in "stdout out 1".split()
-            else "err"
-        )
+    global args_stream
+    args_stream = argparse.Namespace(
+        err=any(s in "all stderr err 2".split() for s in args.stream),
+        out=any(s in "all stdout out 1".split() for s in args.stream),
+        alloc=any(s in "all alloc".split() for s in args.stream),
+    )
     if args.follow:
         args.lines = 10
         args.all = True
@@ -778,7 +653,11 @@ def cli(ctx, **kvargs):
 cli_jobid = click.argument(
     "jobid", shell_complete=completor(lambda: (x["ID"] for x in mynomad.get("jobs")))
 )
-cli_jobfile = click.argument("jobfile", type=click.File())
+cli_jobfile = click.argument(
+    "jobfile",
+    type=click.File(lazy=True),
+    callback=lambda _, __, x: "-" if x.name == "<stdin>" else x.name,
+)
 
 ###############################################################################
 
@@ -816,17 +695,15 @@ def mode_alloc(allocid):
     exit(allocworkers.exitcode())
 
 
-@cli.command("run", help="will run specified Nomad job and then watch over it.")
+@cli.command("run", help="Will run specified Nomad job and then watch over it.")
 @cli_jobfile
 def mode_run(jobfile):
-    eval_ = mynomad.start_job(jobfile)
-    jobid = eval_["JobID"]
-    jobinit = mynomad.get(f"job/{jobid}")
+    jobinit = nomad_start_job_and_wait(jobfile)
     #
     done = threading.Event()
     do = NomadWatchJob(jobinit)
 
-    def waiter(self):
+    def waiter():
         do.watch_job()
         do.allocworkers.join()
         log.debug("Waiter exiting")
@@ -835,7 +712,6 @@ def mode_run(jobfile):
     waiterthread = threading.Thread(target=waiter, daemon=True)
     try:
         # First wait for the evaluation.
-        nomad_watch_eval(eval_)
         waiterthread.start()
         # Waiting on Event, because thread.join does not handle interrupts well.
         done.wait()
@@ -844,22 +720,19 @@ def mode_run(jobfile):
     finally:
         # On exception, stop or purge the job if needed.
         if args.purge or args.stop:
-            mynomad.stop_job(jobid)
+            mynomad.stop_job(jobinit["ID"], args.purge)
         if waiterthread and not args.all:
             waiterthread.join()
     exit(do.close())
 
 
-@cli.command("job", help="Watch over specific job")
+@cli.command("job", help="Watch over a specific job. Will not stop the job.")
 @cli_jobid
 def mode_job(jobid):
     jobid = mynomad.find_job(jobid)
     jobinit = mynomad.find_last_not_stopped_job(jobid)
-    do = NomadWatchJob(jobinit)
-    try:
+    with NomadWatchJob(jobinit) as do:
         do.watch_job()
-    except KeyboardInterrupt:
-        log.info("Received interrupt")
     exit(do.close())
 
 
@@ -868,57 +741,44 @@ def mode_job(jobid):
 )
 @cli_jobfile
 def mode_start(jobfile):
-    eval_ = mynomad.start_job(jobfile)
-    nomad_watch_eval(eval_)
-    jobid = eval_["JobID"]
-    jobinit = mynomad.get(f"job/{jobid}")
-    do = NomadWatchJob(jobinit)
-    try:
+    jobinit = nomad_start_job_and_wait(jobfile)
+    with NomadWatchJob(jobinit) as do:
         do.watch_job(do.job_started)
-    except KeyboardInterrupt:
-        log.info("Received interrupt")
-    exit(do.close())
 
 
-@cli.command("starting")
+@cli.command("starting", help="Wait until the job has started")
 @cli_jobid
 def mode_starting(jobid):
     jobid = mynomad.find_job(jobid)
     jobinit = mynomad.find_last_not_stopped_job(jobid)
-    do = NomadWatchJob(jobinit)
-    try:
+    with NomadWatchJob(jobinit) as do:
         do.watch_job(do.job_started)
-    except KeyboardInterrupt:
-        log.info("Received interrupt")
-    exit(do.close())
 
 
-@cli.command("stop")
+@cli.command("stop", help="Stop a Nomad job and then wait until it is dead")
 @cli_jobid
 def mode_stop(jobid: str):
     jobid = mynomad.find_job(jobid)
-    eval_ = mynomad.stop_job(input)
-    nomad_watch_eval(eval_)
-    jobinit = mynomad.get(f"job/{jobid}")
-    do = NomadWatchJob(jobinit)
+    resp = mynomad.stop_job(jobid, args.purge)
+    nomad_watch_eval(resp["EvalID"])
     try:
-        do.watch_job()
-    except KeyboardInterrupt:
-        log.info("Received interrupt")
-    exit(do.close())
+        jobinit = mynomad.get(f"job/{jobid}")
+        with NomadWatchJob(jobinit) as do:
+            do.watch_job()
+    except requests.exceptions.HTTPError as e:
+        if args.purge and e.response.status_code == 404:
+            log.info(f"Job {jobid} removed")
+        else:
+            raise e
 
 
-@cli.command("stopping")
+@cli.command("stopping", help="Monitor a Nomad job until it is dead")
 @cli_jobid
 def mode_stopping(jobid):
     jobid = mynomad.find_job(jobid)
     jobinit = mynomad.get(f"job/{jobid}")
-    do = NomadWatchJob(jobinit)
-    try:
+    with NomadWatchJob(jobinit) as do:
         do.watch_job()
-    except KeyboardInterrupt:
-        log.info("Received interrupt")
-    exit(do.close())
 
 
 @cli.command("test")
