@@ -6,11 +6,7 @@ import inspect
 def caller(up=0):
     return inspect.stack()[1 + up][3]
 
-def gen_job():
-    script = """
-        seq 10
-        exit 123
-    """
+def gen_job(script = """ echo hello world """):
     jobname = f"test-nomad-utils-{caller(1)}"
     return {
         "Job": {

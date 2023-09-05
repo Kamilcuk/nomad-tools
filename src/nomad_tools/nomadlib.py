@@ -1,6 +1,4 @@
 import dataclasses
-import datetime
-import enum
 import json
 import logging
 import os
@@ -27,10 +25,18 @@ class Job(AttrDict):
     Version: int
     Status: str
     Namespace: str
+    ModifyIndex: int
     JobModifyIndex: int
 
     def description(self):
         return f"{self.ID}@{self.Namespace} v{self.Version}"
+
+
+class Eval(AttrDict):
+    ID: str
+    JobID: str
+    JobModifyIndex: int
+    ModifyIndex: int
 
 
 class AllocTaskStateEvent(AttrDict):
@@ -55,9 +61,14 @@ class AllocTaskStates(AttrDict):
 
 class Alloc(AttrDict):
     ID: str
+    JobID: str
+    EvalID: str
     ClientStatus: str
-    JobVersion: int
     TaskStates: Dict[str, AllocTaskStates]
+    Namespace: str
+    ModifyIndex: int
+    # May be missing.
+    JobVersion: int
 
     def __post_init__(self):
         self.TaskStates = {
@@ -65,21 +76,11 @@ class Alloc(AttrDict):
             for k, v in (getattr(self, "TaskStates", {}) or {}).items()
         }
 
+    def is_pending_or_running(self):
+        return self.ClientStatus in ["pending", "running"]
 
-class EventTopic(enum.StrEnum):
-    Job = enum.auto()
-    Evaluation = enum.auto()
-    Allocation = enum.auto()
-
-
-@dataclasses.dataclass
-class Event:
-    topic: EventTopic
-    data: dict
-    time: Optional[datetime.datetime] = None
-
-    def __str__(self):
-        return f"Event({self.topic.name} id={self.data.get('ID')} modify={self.data.get('ModifyIndex')} status={self.data.get('Status')})"
+    def is_finished(self):
+        return not self.is_pending_or_running()
 
 
 @dataclasses.dataclass
