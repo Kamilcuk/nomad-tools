@@ -18,4 +18,8 @@ testdeps:
 
 .PHONY: test
 test:
-	pytest -v
+	env NOMAD_NAMESPACE= NOMAD_TOKEN= pytest -v tests/unit
+
+docker_test:
+	docker build .
+	timeout 60 docker run --rm "$$(docker build -q .)" bash ./tests/run_in_docker.sh

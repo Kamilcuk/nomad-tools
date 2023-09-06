@@ -1,41 +1,57 @@
+import inspect
 import shlex
 import subprocess
-import json
-import inspect
+from typing import List
+
 
 def caller(up=0):
     return inspect.stack()[1 + up][3]
 
-def gen_job(script = """ echo hello world """):
+
+def gen_job(script=""" echo hello world """):
     jobname = f"test-nomad-utils-{caller(1)}"
-    return {
-        "Job": {
-            "ID": jobname,
-            "Type": "batch",
-            "TaskGroups": [
-                {
-                    "Name": jobname,
-                    "ReschedulePolicy": {"Attempts": 0},
-                    "RestartPolicy": {"Attempts": 0},
-                    "Tasks": [
-                        {
-                            "Name": jobname,
-                            "Driver": "docker",
-                            "Config": {
-                                "image": "busybox",
-                                "command": "sh",
-                                "args": ["-xc", script],
-                            },
-                        }
-                    ],
-                }
-            ],
-        }
+    docker_task = {
+        "Driver": "docker",
+        "Config": {
+            "image": "busybox",
+            "command": "sh",
+            "args": ["-xc", script],
+        },
     }
+    raw_exec_task = {
+        "Driver": "raw_exec",
+        "Config": {
+            "command": "sh",
+            "args": ["-xc", script],
+        },
+    }
+    job = {
+        "ID": jobname,
+        "Type": "batch",
+        "TaskGroups": [
+            {
+                "Name": jobname,
+                "ReschedulePolicy": {"Attempts": 0},
+                "RestartPolicy": {"Attempts": 0},
+                "Tasks": [
+                    {
+                        **raw_exec_task,
+                        "Name": jobname,
+                    }
+                ],
+            }
+        ],
+    }
+    return {"Job": job}
+
+
+def quotearr(cmd: List[str]):
+    return " ".join(shlex.quote(x) for x in cmd)
+
 
 def run(cmd: str, check=True, text=True, **kvargs):
     cmda = shlex.split(cmd)
-    print(f"+ {shlex.join(cmda)}")
+    print(f"+ {quotearr(cmda)}")
     return subprocess.run(cmda, check=check, text=text, **kvargs)
 
 

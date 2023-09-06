@@ -9,6 +9,7 @@ import enum
 import json
 import logging
 import os
+import queue
 import re
 import shlex
 import shutil
@@ -22,7 +23,6 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 import click
 import requests
-from six.moves import queue
 
 from . import nomadlib
 
@@ -412,7 +412,7 @@ class AllocWorkers(Dict[str, AllocWorker]):
 ###############################################################################
 
 
-class Topic(enum.StrEnum):
+class Topic(enum.Enum):
     Job = enum.auto()
     Evaluation = enum.auto()
     Allocation = enum.auto()

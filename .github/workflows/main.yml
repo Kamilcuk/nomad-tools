@@ -1,16 +1,40 @@
 # .github/workflows/ci-cd.yml
 ---
+
 on:
   - push
+
+env:
+  PYTHONUNBUFFERED: 1
+
 jobs:
   test:
+    strategy:
+      matrix:
+        version:
+          - 3.7
+          - 3.11
     name: Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - run: pip install --upgrade pip
-      - run: pip install -e '.[test]'
-      - run: pytest -sxv
+      - name: setup python ${{ matrix.version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.version }}
+      - name: upgrade pip
+        run: pip install --upgrade pip
+      - name: checkout
+        uses: actions/checkout@v3
+      - name: install editable package
+        run: pip install -e '.[test]'
+      - name: run unit tests
+        run: pytest -sxv tests/unit
+      - name: install nomad server
+        run: bash ./tests/install_nomad.sh
+      - name: run nomad server
+        run: bash ./tests/start_nomad_server.sh
+      - name: run integration tests
+        run: pytest -sxv tests/integration
 
   pypi-publish:
     name: Upload release to PyPI
@@ -25,8 +49,11 @@ jobs:
     permissions:
       id-token: write  # IMPORTANT: this permission is mandatory for trusted publishing
     steps:
-      - uses: actions/checkout@v3
-      - run: pip install --upgrade build
-      - run: python -m build
+      - name: checkout
+        uses: actions/checkout@v3
+      - name: install build python package
+        run: pip install --upgrade build
+      - name: build the package
+        run: python -m build
       - name: Publish package distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
