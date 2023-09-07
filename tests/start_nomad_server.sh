@@ -3,7 +3,7 @@ set -xeuo pipefail
 
 {
 	# shellcheck disable=2024
-	nomad agent -dev -log-level=WARN > >(sed 's/.*/\x1b[36mNOMAD: &\x1b[0m/') 2>&1
+	nomad agent -dev -log-level=WARN > >(sed 's/.*/\x1b[35mNOMAD: &\x1b[0m/') 2>&1
 } &
 
 # auto kill nomad after max 10 minutes.

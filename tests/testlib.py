@@ -56,4 +56,4 @@ def run(cmd: str, check=True, text=True, **kvargs):
 
 
 def check_output(cmd: str, **kvargs):
-    return run(cmd, stdout=subprocess.STDOUT, **kvargs).stdout
+    return run(cmd, stdout=subprocess.PIPE, **kvargs).stdout

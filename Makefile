@@ -20,6 +20,7 @@ testdeps:
 test:
 	env NOMAD_NAMESPACE= NOMAD_TOKEN= pytest -v tests/unit
 
+ARGS ?=
 docker_test:
 	docker build .
-	timeout 60 docker run --rm "$$(docker build -q .)" bash ./tests/run_in_docker.sh
+	timeout 30 docker run $(shell test -t 0 && printf -- -t) --rm "$$(docker build -q .)" timeout 30 bash ./tests/run_in_docker.sh $(ARGS)
