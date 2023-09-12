@@ -31,6 +31,7 @@ nomad-vardir = "nomad_tools:nomad_vardir.cli"
 [project.optional-dependencies]
 test = [
 	"pytest",
+	"pytest-xdist",
 ]
 
 [tool.pytest.ini_options]

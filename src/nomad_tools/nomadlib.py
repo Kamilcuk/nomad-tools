@@ -4,8 +4,7 @@ import enum
 import json
 import logging
 import os
-from typing import Callable, Dict, List, Optional, TypeVar, Union
-from requests import HTTPError
+from typing import Callable, Dict, List, Optional, TypeVar
 
 import requests.adapters
 import requests.auth
@@ -54,7 +53,6 @@ class AllocTaskStates(DataDict):
     Events: List[AllocTaskStateEvent]
     State: str
 
-
     def find_event(self, type_: str) -> Optional[AllocTaskStateEvent]:
         """Find event in TaskStates task Events. Return empty dict if not found"""
         return next((e for e in self.Events if e.Type == type_), None)
@@ -91,21 +89,62 @@ class Alloc(DataDict):
         return not self.is_pending_or_running()
 
 
-class Topic(enum.Enum):
-    """Topic of an Event from Nomad event stream"""
+class EventTopic(enum.Enum):
+    """Topic of an event from Nomad event stream"""
 
+    ACLToken = enum.auto()
+    ACLPolicy = enum.auto()
+    ACLRoles = enum.auto()
+    Allocation = enum.auto()
     Job = enum.auto()
     Evaluation = enum.auto()
-    Allocation = enum.auto()
+    Deployment = enum.auto()
+    Node = enum.auto()
+    NodeDrain = enum.auto()
+    NodePool = enum.auto()
+    Service = enum.auto()
 
 
-R = TypeVar('R')
+class EventType(enum.Enum):
+    """Type of an event from Nomad event stream"""
+
+    ACLTokenUpserted = enum.auto()
+    ACLTokenDeleted = enum.auto()
+    ACLPolicyUpserted = enum.auto()
+    ACLPolicyDeleted = enum.auto()
+    ACLRoleUpserted = enum.auto()
+    ACLRoleDeleted = enum.auto()
+    AllocationCreated = enum.auto()
+    AllocationUpdated = enum.auto()
+    AllocationUpdateDesiredStatus = enum.auto()
+    DeploymentStatusUpdate = enum.auto()
+    DeploymentPromotion = enum.auto()
+    DeploymentAllocHealth = enum.auto()
+    EvaluationUpdated = enum.auto()
+    JobRegistered = enum.auto()
+    JobDeregistered = enum.auto()
+    JobBatchDeregistered = enum.auto()
+    NodeRegistration = enum.auto()
+    NodeDeregistration = enum.auto()
+    NodeEligibility = enum.auto()
+    NodeDrain = enum.auto()
+    NodeEvent = enum.auto()
+    NodePoolUpserted = enum.auto()
+    NodePoolDeleted = enum.auto()
+    PlanResult = enum.auto()
+    ServiceRegistration = enum.auto()
+    ServiceDeregistration = enum.auto()
+
+
+R = TypeVar("R")
+
 
 @dataclasses.dataclass
 class Event:
     """A single Event as returned from Nomad event stream"""
 
-    topic: Topic
+    topic: EventTopic
+    type: EventType
     data: dict
     time: Optional[datetime.datetime] = None
     stream: bool = False
@@ -123,16 +162,16 @@ class Event:
             "stream": 1 if self.stream else 0,
         }
         statusstr = " ".join(f"{k}={v}" for k, v in status.items() if v)
-        return f"Event({self.topic.name} {statusstr})"
+        return f"Event({self.topic.name}.{self.type.name} {statusstr})"
 
     def is_job(self):
-        return self.topic == Topic.Job
+        return self.topic == EventTopic.Job
 
     def is_eval(self):
-        return self.topic == Topic.Evaluation
+        return self.topic == EventTopic.Evaluation
 
     def is_alloc(self):
-        return self.topic == Topic.Allocation
+        return self.topic == EventTopic.Allocation
 
     def get_job(self) -> Optional[Job]:
         return Job(self.data) if self.is_job() else None
@@ -143,22 +182,21 @@ class Event:
     def get_alloc(self) -> Optional[Alloc]:
         return Alloc(self.data) if self.is_alloc() else None
 
-    def apply(self,
-              job: Optional[Callable[[Job], R]] = None,
-              eval: Optional[Callable[[Eval], R]] = None,
-              alloc: Optional[Callable[[Alloc], R]] = None,
-      ) -> R:
+    def apply(
+        self,
+        job: Optional[Callable[[Job], R]] = None,
+        eval: Optional[Callable[[Eval], R]] = None,
+        alloc: Optional[Callable[[Alloc], R]] = None,
+    ) -> R:
         callbacks = {}
         if job:
-            callbacks[Topic.Job] = lambda data: job(Job(data))
+            callbacks[EventTopic.Job] = lambda data: job(Job(data))
         if eval:
-            callbacks[Topic.Evaluation] = lambda data: eval(Eval(data))
+            callbacks[EventTopic.Evaluation] = lambda data: eval(Eval(data))
         if alloc:
-            callbacks[Topic.Allocation] = lambda data: alloc(Alloc(data))
+            callbacks[EventTopic.Allocation] = lambda data: alloc(Alloc(data))
         assert len(callbacks), f"At least one callback has to be specified"
         return callbacks[self.topic](self.data)
-
-
 
 
 ###############################################################################
@@ -178,8 +216,10 @@ def _default_session():
 class PermissionDenied(Exception):
     pass
 
+
 class JobNotFound(Exception):
     pass
+
 
 @dataclasses.dataclass
 class Nomad:

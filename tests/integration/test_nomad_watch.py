@@ -1,7 +1,12 @@
 import json
 import subprocess
 
-from tests.testlib import gen_job, run, caller, check_output
+from tests.testlib import check_output, gen_job, run
+
+
+def test_noamd_watch_run_0():
+    job = gen_job(script=f"echo hello world")
+    run("nomad-watch --purge --json -", input=json.dumps(job))
 
 
 def test_nomad_watch_run():
@@ -24,7 +29,8 @@ def test_nomad_watch_run():
 
 def test_nomad_watch_start():
     mark = "7bc8413c-8619-48bf-a46d-f42727724632"
-    job = gen_job(f"echo {mark}")
+    exitstatus = 234
+    job = gen_job(f"echo {mark} ; exit {exitstatus}")
     jobid = job["Job"]["ID"]
     try:
         print()
@@ -34,13 +40,15 @@ def test_nomad_watch_start():
         print(ret)
         assert mark in ret
         print()
-        ret = check_output(f"nomad-watch stop {jobid}")
+        ret = run(f"nomad-watch stop {jobid}", check=False, stdout=subprocess.PIPE)
         print(ret)
-        assert mark in ret
+        assert mark in ret.stdout
+        assert ret.returncode == exitstatus
         print()
-        ret = check_output(f"nomad-watch stopped {jobid}")
+        ret = run(f"nomad-watch stopped {jobid}", check=False, stdout=subprocess.PIPE)
         print(ret)
-        assert mark in ret
+        assert mark in ret.stdout
+        assert ret.returncode == exitstatus
         print()
         ret = check_output(f"nomad-watch --no-follow job {jobid}")
         print(ret)
@@ -59,5 +67,6 @@ def test_nomad_watch_start():
         assert mark in ret
     finally:
         print()
-        run(f"nomad-watch stop {jobid}")
+        ret = run(f"nomad-watch stop {jobid}", check=False)
+        assert ret.returncode == exitstatus
     run(f"nomad-watch --purge stop {jobid}")

@@ -1,4 +1,6 @@
+import functools
 import inspect
+import json
 import shlex
 import subprocess
 from typing import List
@@ -6,6 +8,15 @@ from typing import List
 
 def caller(up=0):
     return inspect.stack()[1 + up][3]
+
+
+@functools.lru_cache(maxsize=0)
+def nomad_has_docker():
+    nodes = json.loads(subprocess.check_output("nomad node status -json".split()))
+    for n in nodes:
+        if n["Drivers"].get("docker", {}).get("Healthy"):
+            return True
+    return False
 
 
 def gen_job(script=""" echo hello world """):
@@ -16,6 +27,7 @@ def gen_job(script=""" echo hello world """):
             "image": "busybox",
             "command": "sh",
             "args": ["-xc", script],
+            "init": True,
         },
     }
     raw_exec_task = {
@@ -25,6 +37,7 @@ def gen_job(script=""" echo hello world """):
             "args": ["-xc", script],
         },
     }
+    task = docker_task if nomad_has_docker() else raw_exec_task
     job = {
         "ID": jobname,
         "Type": "batch",
@@ -35,7 +48,7 @@ def gen_job(script=""" echo hello world """):
                 "RestartPolicy": {"Attempts": 0},
                 "Tasks": [
                     {
-                        **raw_exec_task,
+                        **task,
                         "Name": jobname,
                     }
                 ],
@@ -56,4 +69,6 @@ def run(cmd: str, check=True, text=True, **kvargs):
 
 
 def check_output(cmd: str, **kvargs):
-    return run(cmd, stdout=subprocess.PIPE, **kvargs).stdout
+    ret = run(cmd, stdout=subprocess.PIPE, **kvargs).stdout
+    assert "exception" not in ret
+    return ret

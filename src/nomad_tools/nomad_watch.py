@@ -26,9 +26,45 @@ import requests
 
 from . import nomadlib
 
+log = logging.getLogger(__name__)
+
 ###############################################################################
 
-log = logging.getLogger(__name__)
+
+def _init_colors() -> Dict[str, str]:
+    tputdict = {
+        "bold": "bold",
+        "black": "setaf 0",
+        "red": "setaf 1",
+        "green": "setaf 2",
+        "orange": "setaf 3",
+        "blue": "setaf 4",
+        "magenta": "setaf 5",
+        "cyan": "setaf 6",
+        "white": "setaf 7",
+        "reset": "sgr0",
+    }
+    empty = {k: "" for k in tputdict.keys()}
+    if not sys.stdout.isatty():
+        return empty
+    tputscript = "\n".join(tputdict.values()).replace("\n", "\nlongname\nlongname\n")
+    try:
+        longname = subprocess.check_output(f"tput longname".split(), text=True)
+        ret = subprocess.run(
+            "tput -S".split(), input=tputscript, stdout=subprocess.PIPE, text=True
+        ).stdout
+    except subprocess.CalledProcessError:
+        return empty
+    retarr = ret.split(f"{longname}{longname}")
+    assert len(tputdict.keys()) == len(
+        retarr
+    ), f"Could not split tput -S output into parts"
+    return {k: v for k, v in zip(tputdict.keys(), retarr)}
+
+
+COLORS = _init_colors()
+
+###############################################################################
 
 
 def ns2dt(ns: int):
@@ -184,40 +220,6 @@ def nomad_start_job(input: str) -> str:
 
 
 ###############################################################################
-
-
-def _init_colors() -> Dict[str, str]:
-    tputdict = {
-        "bold": "bold",
-        "black": "setaf 0",
-        "red": "setaf 1",
-        "green": "setaf 2",
-        "orange": "setaf 3",
-        "blue": "setaf 4",
-        "magenta": "setaf 5",
-        "cyan": "setaf 6",
-        "white": "setaf 7",
-        "reset": "sgr0",
-    }
-    empty = {k: "" for k in tputdict.keys()}
-    if not sys.stdout.isatty():
-        return empty
-    tputscript = "\n".join(tputdict.values()).replace("\n", "\nlongname\nlongname\n")
-    try:
-        longname = subprocess.check_output(f"tput longname".split(), text=True)
-        ret = subprocess.run(
-            "tput -S".split(), input=tputscript, stdout=subprocess.PIPE, text=True
-        ).stdout
-    except subprocess.CalledProcessError as e:
-        return empty
-    retarr = ret.split(f"{longname}{longname}")
-    assert len(tputdict.keys()) == len(
-        retarr
-    ), f"Could not split tput -S output into parts"
-    return {k: v for k, v in zip(tputdict.keys(), retarr)}
-
-
-COLORS = _init_colors()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -376,9 +378,7 @@ class TaskHandler:
             th.start()
         return ths
 
-    def notify(
-        self, alloc: nomadlib.Alloc, tk: TaskKey, task: nomadlib.AllocTaskStates
-    ):
+    def notify(self, tk: TaskKey, task: nomadlib.AllocTaskStates):
         events = task.Events
         if args_stream.alloc:
             for e in events:
@@ -419,7 +419,15 @@ class AllocWorker:
             if args.task and not args.task.search(taskname):
                 continue
             tk = TaskKey(alloc.ID, alloc.NodeName, alloc.TaskGroup, taskname)
-            self.taskhandlers.setdefault(tk, TaskHandler()).notify(alloc, tk, task)
+            self.taskhandlers.setdefault(tk, TaskHandler()).notify(tk, task)
+
+
+class ExitCode:
+    success = 0
+    any_failed = 124
+    all_failed = 125
+    any_unfinished = 126
+    no_allocations = 127
 
 
 class AllocWorkers(Dict[str, AllocWorker]):
@@ -461,61 +469,42 @@ class AllocWorkers(Dict[str, AllocWorker]):
             for w in self.values()
             for th in w.taskhandlers.values()
         ]
-        anyunfinished = any(v == -1 for v in exitcodes)
-        if anyunfinished or len(self) == 0:
-            return 4
-        onlyonetask = len(exitcodes) == 1
-        if onlyonetask:
+        if len(exitcodes) == 0:
+            return ExitCode.no_allocations
+        any_unfinished = any(v == -1 for v in exitcodes)
+        if any_unfinished:
+            return ExitCode.any_unfinished
+        only_one_task = len(exitcodes) == 1
+        if only_one_task:
             return exitcodes[0]
-        allfailed = all(v != 0 for v in exitcodes)
-        if allfailed:
-            return 3
-        anyfailed = any(v != 0 for v in exitcodes)
-        if anyfailed:
-            return 2
-        return 0
+        all_failed = all(v != 0 for v in exitcodes)
+        if all_failed:
+            return ExitCode.all_failed
+        any_failed = any(v != 0 for v in exitcodes)
+        if any_failed:
+            return ExitCode.any_failed
+        return ExitCode.success
 
 
 ###############################################################################
 
 
 Event = nomadlib.Event
-Topic = nomadlib.Topic
+EventTopic = nomadlib.EventTopic
+EventType = nomadlib.EventType
 
 
-class Db(threading.Thread):
-    """Represents relevant state cache from Nomad database"""
-
-    def __init__(
-        self,
-        topics: List[str],
-        filter_event_cb: Callable[[Event], bool] = lambda _: True,
-        init_cb: Callable[[], Iterable[Event]] = lambda: [],
-    ):
-        """
-        :param topics: Passed to nomad evnet stream as topics.
-        :param filter_event_cb: Filter the events from Nomad.
-        :param init_cb: Get initial data from Nomad.
-        """
+class DbThread(threading.Thread):
+    def __init__(self, topics: List[str], init_cb: Callable[[], Iterable[Event]]):
         super().__init__(name="db", daemon=True)
         self.topics: List[str] = topics
-        self.filter_event_cb: Callable[[Event], bool] = filter_event_cb
-        self.init_cb: Optional[Callable[[], Iterable[Event]]] = init_cb
-        self.job: Optional[nomadlib.Job] = None
-        self.allocations: Dict[str, nomadlib.Alloc] = {}
-        self.evaluations: Dict[str, nomadlib.Eval] = {}
-        self._stopevent = threading.Event()
+        self.init_cb: Callable[[], Iterable[Event]] = init_cb
         self.queue: queue.Queue[Optional[Event]] = queue.Queue()
+        self.stopevent = threading.Event()
         assert self.topics
         assert not any(not x for x in topics)
 
-    def start(self):
-        assert (
-            mynomad.namespace
-        ), "Nomad namespace has to be set before starting to listen"
-        super().start()
-
-    def run(self):
+    def _run_stream(self):
         log.debug(f"Starting listen Nomad stream with {' '.join(self.topics)}")
         with mynomad.stream(
             "event/stream",
@@ -526,21 +515,74 @@ class Db(threading.Thread):
                 events: List[dict] = data.get("Events", [])
                 for event in events:
                     e = Event(
-                        Topic[event["Topic"]],
+                        EventTopic[event["Topic"]],
+                        EventType[event["Type"]],
                         event["Payload"][event["Topic"]],
                         stream=True,
                     )
                     # log.debug(f"RECV EVENT: {e}")
                     self.queue.put(e)
-                if self._stopevent.is_set():
+                if self.stopevent.is_set():
                     break
-        log.debug("Listen Nomad stream exiting")
-        self.queue.put(None)
+
+    def _poll(self):
+        while not self.stopevent.is_set():
+            for e in self.init_cb():
+                self.queue.put(e)
+            self.stopevent.wait(1)
+
+    def run(self):
+        try:
+            try:
+                if args.polling:
+                    self._poll()
+                else:
+                    try:
+                        self._run_stream()
+                    except nomadlib.PermissionDenied as e:
+                        log.info(
+                            f"Falling to polling method because stream API returned permission denied: {e}"
+                        )
+                        self._poll()
+            finally:
+                log.debug("Nomad database thread exiting")
+                self.queue.put(None)
+        except requests.HTTPError as e:
+            log.exception("http request failed")
+            exit(-1)
+
+
+class Db:
+    """Represents relevant state cache from Nomad database"""
+
+    def __init__(
+        self,
+        topics: List[str],
+        filter_event_cb: Callable[[Event], bool],
+        init_cb: Callable[[], Iterable[Event]],
+    ):
+        """
+        :param topics: Passed to nomad evnet stream as topics.
+        :param filter_event_cb: Filter the events from Nomad.
+        :param init_cb: Get initial data from Nomad.
+        """
+        self.thread = DbThread(topics, init_cb)
+        self.filter_event_cb: Callable[[Event], bool] = filter_event_cb
+        self.init_cb_called: bool = False
+        self.job: Optional[nomadlib.Job] = None
+        self.allocations: Dict[str, nomadlib.Alloc] = {}
+        self.evaluations: Dict[str, nomadlib.Eval] = {}
+
+    def start(self):
+        assert (
+            mynomad.namespace
+        ), "Nomad namespace has to be set before starting to listen"
+        self.thread.start()
 
     def handle_event(self, e: Event) -> bool:
         if self._filter_old_event(e):
             if self.filter_event_cb(e):
-                log.debug(f"EVENT: {e}")
+                # log.debug(f"EVENT: {e}")
                 self._add_event_to_db(e)
                 return True
             else:
@@ -552,11 +594,16 @@ class Db(threading.Thread):
         return False
 
     def _add_event_to_db(self, e: Event):
-        if e.topic == Topic.Job:
-            self.job = nomadlib.Job(e.data)
-        elif e.topic == Topic.Evaluation:
+        if e.topic == EventTopic.Job:
+            if e.type == EventType.JobDeregistered:
+                self.job = None
+            else:
+                self.job = nomadlib.Job(e.data)
+        elif e.topic == EventTopic.Evaluation:
+            if e.type == EventType.JobDeregistered:
+                self.job = None
             self.evaluations[e.data["ID"]] = nomadlib.Eval(e.data)
-        elif e.topic == Topic.Allocation:
+        elif e.topic == EventTopic.Allocation:
             self.allocations[e.data["ID"]] = nomadlib.Alloc(e.data)
 
     @staticmethod
@@ -586,20 +633,23 @@ class Db(threading.Thread):
 
     def stop(self):
         log.debug("Stopping listen Nomad stream")
-        self._stopevent.set()
+        self.thread.stopevent.set()
+
+    def join(self):
+        self.thread.join()
 
     def events(self) -> Iterable[Event]:
-        assert self.is_alive(), "Thread not alive"
-        if self.init_cb:
-            for event in self.init_cb():
+        assert self.thread.is_alive(), "Thread not alive"
+        if not self.init_cb_called and self.thread.init_cb:
+            for event in self.thread.init_cb():
                 if self.handle_event(event):
                     yield event
-        self.init_cb = None
+            self.init_cb_called = True
         log.debug("Starting getting events from thread")
-        while not self.queue.empty() or (
-            self.is_alive() and not self._stopevent.is_set()
+        while not self.thread.queue.empty() or (
+            self.thread.is_alive() and not self.thread.stopevent.is_set()
         ):
-            event = self.queue.get()
+            event = self.thread.queue.get()
             if event is None:
                 break
             if self.handle_event(event):
@@ -615,9 +665,15 @@ def nomad_watch_eval(evalid: str):
         topics=[
             f"Evaluation:{evalid}",
         ],
-        filter_event_cb=lambda e: e.topic == Topic.Evaluation
+        filter_event_cb=lambda e: e.topic == EventTopic.Evaluation
         and e.data["ID"] == evalid,
-        init_cb=lambda: [Event(Topic.Evaluation, mynomad.get(f"evaluation/{evalid}"))],
+        init_cb=lambda: [
+            Event(
+                EventTopic.Evaluation,
+                EventType.EvaluationUpdated,
+                mynomad.get(f"evaluation/{evalid}"),
+            )
+        ],
     )
     db.start()
     log.info(f"Waiting for evaluation {evalid}")
@@ -679,16 +735,22 @@ class NomadJobWatcher(ABC, threading.Thread):
     def db_init_cb(self):
         """Db initialization callback"""
 
-        job: dict = mynomad.get(f"job/{self.job.ID}")
-        evaluations: List[dict] = mynomad.get(f"job/{self.job.ID}/evaluations")
-        allocations: List[dict] = mynomad.get(f"job/{self.job.ID}/allocations")
+        try:
+            job: dict = mynomad.get(f"job/{self.job.ID}")
+            evaluations: List[dict] = mynomad.get(f"job/{self.job.ID}/evaluations")
+            allocations: List[dict] = mynomad.get(f"job/{self.job.ID}/allocations")
+        except nomadlib.JobNotFound:
+            if args.purge:
+                # If args.purge, the job could have been purged and it could be fine.
+                return
+            raise
         if not allocations:
             log.info(f"Job {self.job.description()} has no allocations")
         for e in evaluations:
-            yield Event(Topic.Evaluation, e)
+            yield Event(EventTopic.Evaluation, EventType.EvaluationUpdated, e)
         for a in allocations:
-            yield Event(Topic.Allocation, a)
-        yield Event(Topic.Job, job)
+            yield Event(EventTopic.Allocation, EventType.AllocationUpdated, a)
+        yield Event(EventTopic.Job, EventType.JobRegistered, job)
 
     def db_filter_event_jobid(self, e: Event):
         return Db.apply_filters(
@@ -737,7 +799,7 @@ class NomadJobWatcher(ABC, threading.Thread):
         log.info(f"Watching job {self.job.description()}")
         no_follow_timeend = time.time() + args.shutdown_timeout
         for event in self.db.events():
-            if event.topic == Topic.Allocation:
+            if event.topic == EventTopic.Allocation:
                 alloc = nomadlib.Alloc(event.data)
                 # for alloc in self.db.allocations.values():
                 self.allocworkers.notify(alloc)
@@ -750,9 +812,6 @@ class NomadJobWatcher(ABC, threading.Thread):
         self.db.start()
         try:
             self._watch_job()
-        except nomadlib.JobNotFound:
-            # The job was purged and is not missing. All fine!
-            pass
         finally:
             self.close()
             self.done.set()
@@ -771,12 +830,30 @@ class NomadJobWatcher(ABC, threading.Thread):
         assert self.done.is_set(), f"Watcher not finished"
         return self.allocworkers.exitcode()
 
+    def join(self):
+        self.done.wait()
+
+    def stop_job(self, purge: bool):
+        if purge:
+            self.purged.set()
+        mynomad.stop_job(self.job.ID, purge)
+
+    def run_till_end(self):
+        self.run()
+
 
 class NomadJobWatcherUntilFinished(NomadJobWatcher):
     """Watcher a job until the job is dead"""
 
     def until_cb(self) -> bool:
-        if len(self.allocworkers) == 0:
+        if args.purge:
+            # If args.purge is set, then we wait until the job is completely purged.
+            if self.db.job is None:
+                log.info(f"Job {self.job.description()} purged")
+                return True
+            else:
+                return False
+        elif len(self.allocworkers) == 0:
             jobjson = self.db.job
             if jobjson is not None:
                 if jobjson.Version != self.job.Version:
@@ -795,15 +872,6 @@ class NomadJobWatcherUntilFinished(NomadJobWatcher):
                 )
                 return True
         return False
-
-    def stop_job(self, purge: bool):
-        if purge:
-            self.purged.set()
-        mynomad.stop_job(self.job.ID, purge)
-
-    def run_till_end(self):
-        self.run()
-        exit(self.exitcode())
 
 
 class NomadJobWatcherUntilStarted(NomadJobWatcher):
@@ -824,9 +892,6 @@ class NomadJobWatcherUntilStarted(NomadJobWatcher):
             )
             return True
         return False
-
-    def run_till_end(self):
-        self.run()
 
 
 ###############################################################################
@@ -911,7 +976,7 @@ class JobPath:
             mynomad.namespace = next(x for x in jobs if x["ID"] == arg[0])["Namespace"]
             try:
                 job = nomadlib.Job(mynomad.get(f"job/{jobid}"))
-            except requests.HTTPError as e:
+            except requests.HTTPError:
                 return []
             if len(arg) == 2:
                 tasks = [t.Name for tg in job.TaskGroups for t in tg.Tasks]
@@ -926,24 +991,28 @@ class JobPath:
 
 
 @click.group(
-    help="""
-    Run a Nomad job in Nomad and then print logs to stdout and wait for the job to finish.
-    Made for running batch commands and monitoring them until they are done.
-    The exit code is 0 if the job was properly done and all tasks exited with 0 exit code.
-    If the job has only one task, exit with the task exit status.
-    Othwerwise, if all tasks exited failed, exit with 3.
-    If there are failed tasks, exit with 2.
-    If there was a python exception, standard exit code is 1.
+    help=f"""
+    Run a Nomad job in Nomad and then print logs to stdout and wait for
+    the job to be completely finish. Made for running batch commands and monitoring
+    them until they are done.
+
+    \b
+    The program exits with the following status:
+        0    if mode is stop and option --purge was given and the job was purged
+        ?    if the job has one allocation, exits with the exit status of the allocation
+        0    if all tasks of the job exited with 0 exit status
+        {ExitCode.any_failed}  if any of the job allocations have failed
+        {ExitCode.all_failed}  if all job allocations have failed
+        {ExitCode.any_unfinished}  if any allocations are still running
+        {ExitCode.no_allocations}  if job has no allocations
+        1    if some other error occured
+
+    \b
     Examples:
-
-    nomad-watch --namespace default run ./some-job.nomad.hcl
-
-    nomad-watch job some-job
-
-    nomad-watch alloc af94b2
-
-    nomad-watch -N services --task redis -1f job redis
-
+        nomad-watch --namespace default run ./some-job.nomad.hcl
+        nomad-watch job some-job
+        nomad-watch alloc af94b2
+        nomad-watch -N services --task redis -1f job redis
     """,
     epilog="""
     Written by Kamil Cukrowski 2023. Licensed under GNU GPL version 3 or later.
@@ -1030,6 +1099,11 @@ class JobPath:
     help="Only watch tasks names matching this regex.",
 )
 @click.option(
+    "--polling",
+    is_flag=True,
+    help="Instead of listening to Nomad event stream, periodically poll for events",
+)
+@click.option(
     "--log-format-alloc", default=log_formats["default"].alloc, show_default=True
 )
 @click.option(
@@ -1053,7 +1127,7 @@ class JobPath:
 )
 @click.help_option("-h", "--help")
 @click.pass_context
-def cli(ctx, **kvargs):
+def cli(ctx, **_):
     global args
     args = argparse.Namespace(**ctx.params)
     #
@@ -1091,8 +1165,16 @@ def cli(ctx, **kvargs):
         format=logging_format,
         level=logging.DEBUG if args.verbose else logging.INFO,
     )
-    global log
-    log = logging.LoggerAdapter(log, COLORS)
+    # https://stackoverflow.com/questions/17558552/how-do-i-add-custom-field-to-python-log-format-string
+    old_factory = logging.getLogRecordFactory()
+
+    def record_factory(*args, **kwargs):
+        record = old_factory(*args, **kwargs)
+        for k, v in COLORS.items():
+            setattr(record, k, v)
+        return record
+
+    logging.setLogRecordFactory(record_factory)
 
 
 cli_jobid = click.argument(
@@ -1123,15 +1205,21 @@ def mode_alloc(allocid):
     log.info(f"Watching allocation {allocid}")
     db = Db(
         topics=[f"Allocation:{alloc.JobID}"],
-        filter_event_cb=lambda e: e.topic == Topic.Allocation
+        filter_event_cb=lambda e: e.topic == EventTopic.Allocation
         and e.data["ID"] == allocid,
-        init_cb=lambda: [Event(Topic.Allocation, mynomad.get(f"allocation/{allocid}"))],
+        init_cb=lambda: [
+            Event(
+                EventTopic.Allocation,
+                EventType.AllocationUpdated,
+                mynomad.get(f"allocation/{allocid}"),
+            )
+        ],
     )
     allocworkers = AllocWorkers()
     db.start()
     try:
         for event in db.events():
-            if event.topic == Topic.Allocation:
+            if event.topic == EventTopic.Allocation:
                 alloc = nomadlib.Alloc(event.data)
                 allocworkers.notify(alloc)
                 if alloc.is_finished():
@@ -1156,12 +1244,12 @@ def mode_run(jobfile):
     do = NomadJobWatcherUntilFinished(jobinit)
     do.start()
     try:
-        do.done.wait()
+        do.join()
     finally:
         # On exception, stop or purge the job if needed.
         if args.purge or args.stop:
             do.stop_job(args.purge)
-        do.done.wait()
+        do.join()
     exit(do.exitcode())
 
 
@@ -1198,7 +1286,13 @@ def mode_stop(jobid: str):
     do = NomadJobWatcherUntilFinished(jobinit)
     do.start()
     do.stop_job(args.purge)
-    do.done.wait()
+    try:
+        do.join()
+    finally:
+        do.close()
+    if args.purge and do.db.job is None:
+        exit(0)
+    exit(do.exitcode())
 
 
 @cli.command(
@@ -1208,7 +1302,9 @@ def mode_stop(jobid: str):
 @cli_jobid
 def mode_stopped(jobid):
     jobinit = nomad_find_job(jobid)
-    NomadJobWatcherUntilFinished(jobinit).run_till_end()
+    do = NomadJobWatcherUntilFinished(jobinit)
+    do.run_till_end()
+    exit(do.exitcode())
 
 
 @cli.command("test", hidden=True)

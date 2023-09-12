@@ -5,7 +5,7 @@ from tests.testlib import gen_job, run
 
 
 def test_nomad_cp():
-    jobjson = gen_job(script="sleep 60")
+    jobjson = gen_job(script="exec sleep 60")
     job = jobjson["Job"]
     jobname = job["ID"]
     ns = os.environ.get('NOMAD_NAMESPACE', 'default')
@@ -18,4 +18,4 @@ def test_nomad_cp():
         run("ls -la /tmp/root")
         run("rm -vr /tmp/root")
     finally:
-        run(f"nomad-watch --purge stop {jobname}")
+        run(f"nomad-watch --purge -v stop {jobname}", check=False)

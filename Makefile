@@ -23,4 +23,8 @@ test:
 ARGS ?=
 docker_test:
 	docker build .
-	timeout 30 docker run $(shell test -t 0 && printf -- -t) --rm "$$(docker build -q .)" timeout 30 bash ./tests/run_in_docker.sh $(ARGS)
+	time timeout -v 30 docker run $(shell test -t 0 && printf -- -t) --rm "$$(docker build -q .)" \
+		timeout 30 bash ./tests/run_in_docker.sh $(ARGS)
+
+docker_test_parallel: ARGS = -nauto
+docker_test_parallel: docker_test
