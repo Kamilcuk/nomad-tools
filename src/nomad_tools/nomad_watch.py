@@ -28,7 +28,7 @@ from . import nomadlib
 
 ###############################################################################
 
-log = logging.getLogger("nomad-watch")
+log = logging.getLogger(__name__)
 
 
 def ns2dt(ns: int):
@@ -56,9 +56,9 @@ class Test:
             job "test-nomad-watch" {
               type = "batch"
               reschedule { attempts = 0 }
-              group "cache" {
+              group "test-nomad-watch" {
                 restart { attempts = 0 }
-                task "redis" {
+                task "test-nomad-watch" {
                   driver = "docker"
                   config {
                     image = "busybox"
@@ -189,11 +189,14 @@ def nomad_start_job(input: str) -> str:
 def _init_colors() -> Dict[str, str]:
     tputdict = {
         "bold": "bold",
+        "black": "setaf 0",
         "red": "setaf 1",
         "green": "setaf 2",
         "orange": "setaf 3",
         "blue": "setaf 4",
+        "magenta": "setaf 5",
         "cyan": "setaf 6",
+        "white": "setaf 7",
         "reset": "sgr0",
     }
     empty = {k: "" for k in tputdict.keys()}
@@ -214,7 +217,7 @@ def _init_colors() -> Dict[str, str]:
     return {k: v for k, v in zip(tputdict.keys(), retarr)}
 
 
-colors = _init_colors()
+COLORS = _init_colors()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -222,13 +225,15 @@ class LogFormat:
     alloc: str
     stderr: str
     stdout: str
+    app: str
 
     @classmethod
     def mk(cls, prefix: str):
         return cls(
-            f"%(cyan)s{prefix}:A %(now)s %(message)s%(reset)s",
-            f"%(orange)s{prefix}:E %(message)s%(reset)s",
-            f"{prefix}:O %(message)s",
+            f"%(cyan)s{prefix}A %(now)s %(message)s%(reset)s",
+            f"%(orange)s{prefix}E %(message)s%(reset)s",
+            f"{prefix}O %(message)s",
+            "%(blue)s%(module)s:%(lineno)03d: %(message)s%(reset)s",
         )
 
     def astuple(self):
@@ -236,9 +241,10 @@ class LogFormat:
 
 
 log_formats: Dict[str, LogFormat] = {
-    "default": LogFormat.mk("%(allocid).6s:%(group)s:%(task)s"),
-    "long": LogFormat.mk("%(allocid)s:%(group)s:%(task)s"),
-    "short": LogFormat.mk("%(task)s"),
+    "default": LogFormat.mk("%(allocid).6s:%(group)s:%(task)s:"),
+    "long": LogFormat.mk("%(allocid)s:%(group)s:%(task)s:"),
+    "short": LogFormat.mk("%(task)s:"),
+    "onepart": LogFormat.mk(""),
 }
 
 
@@ -258,7 +264,7 @@ class TaskKey:
         return {
             **params,
             **dataclasses.asdict(self),
-            **colors,
+            **COLORS,
         }
 
     def _log(self, fmt, **kvargs: Any):
@@ -936,7 +942,7 @@ class JobPath:
 
     nomad-watch alloc af94b2
 
-    nomad-watch --all --task redis -N services job redis
+    nomad-watch -N services --task redis -1f job redis
 
     """,
     epilog="""
@@ -1023,13 +1029,25 @@ class JobPath:
     type=re.compile,
     help="Only watch tasks names matching this regex.",
 )
-@click.option("--log-format-alloc", default=log_formats["default"].alloc, show_default=True)
-@click.option("--log-format-stderr", default=log_formats["default"].stderr, show_default=True)
-@click.option("--log-format-stdout", default=log_formats["default"].stdout, show_default=True)
+@click.option(
+    "--log-format-alloc", default=log_formats["default"].alloc, show_default=True
+)
+@click.option(
+    "--log-format-stderr", default=log_formats["default"].stderr, show_default=True
+)
+@click.option(
+    "--log-format-stdout", default=log_formats["default"].stdout, show_default=True
+)
 @click.option("-l", "--log-long", is_flag=True, help="Log full allocation id")
 @click.option(
     "-S",
     "--log-short",
+    is_flag=True,
+    help="Make the format short by logging only task name.",
+)
+@click.option(
+    "-1",
+    "--log-onepart",
     is_flag=True,
     help="Make the format short by logging only task name.",
 )
@@ -1039,10 +1057,6 @@ def cli(ctx, **kvargs):
     global args
     args = argparse.Namespace(**ctx.params)
     #
-    logging.basicConfig(
-        format="%(module)s:%(lineno)03d: %(message)s",
-        level=logging.DEBUG if args.verbose else logging.INFO,
-    )
     if args.verbose > 1:
         http_client.HTTPConnection.debuglevel = 1
     global args_stream
@@ -1056,18 +1070,29 @@ def cli(ctx, **kvargs):
         args.all = True
     if args.namespace:
         os.environ["NOMAD_NAMESPACE"] = nomad_find_namespace(args.namespace)
-    if args.log_long:
-        (
-            args.log_format_alloc,
-            args.log_format_stderr,
-            args.log_format_stdout,
-        ) = log_formats["long"].astuple()
-    if args.log_short:
-        (
-            args.log_format_alloc,
-            args.log_format_stderr,
-            args.log_format_stdout,
-        ) = log_formats["short"].astuple()
+    assert [args.log_long, args.log_short, args.log_onepart].count(
+        True
+    ) <= 1, f"Only one --log-* argument can be specified at a time"
+    (
+        args.log_format_alloc,
+        args.log_format_stderr,
+        args.log_format_stdout,
+        logging_format,
+    ) = log_formats[
+        "long"
+        if args.log_long
+        else "short"
+        if args.log_short
+        else "onepart"
+        if args.log_onepart
+        else "default"
+    ].astuple()
+    logging.basicConfig(
+        format=logging_format,
+        level=logging.DEBUG if args.verbose else logging.INFO,
+    )
+    global log
+    log = logging.LoggerAdapter(log, COLORS)
 
 
 cli_jobid = click.argument(
