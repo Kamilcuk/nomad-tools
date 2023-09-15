@@ -1,9 +1,11 @@
 import functools
 import inspect
 import json
+import os
 import shlex
 import subprocess
-from typing import List
+import sys
+from typing import List, TextIO, Union
 
 
 def caller(up=0):
@@ -20,6 +22,7 @@ def nomad_has_docker():
 
 
 def gen_job(script=""" echo hello world """):
+    os.environ.setdefault("NOMAD_NAMESPACE", "default")
     jobname = f"test-nomad-utils-{caller(1)}"
     docker_task = {
         "Driver": "docker",
@@ -62,10 +65,14 @@ def quotearr(cmd: List[str]):
     return " ".join(shlex.quote(x) for x in cmd)
 
 
-def run(cmd: str, check=True, text=True, **kvargs):
+def run(
+    cmd: str, check=True, text=True, stdout: Union[int, TextIO] = sys.stderr, **kvargs
+):
     cmda = shlex.split(cmd)
-    print(f"+ {quotearr(cmda)}")
-    return subprocess.run(cmda, check=check, text=text, **kvargs)
+    print(" ", file=sys.stderr, flush=True)
+    print(f"+ {quotearr(cmda)}", file=sys.stderr, flush=True)
+    r = subprocess.run(cmda, check=check, text=text, stdout=stdout, **kvargs)
+    return r
 
 
 def check_output(cmd: str, **kvargs):
