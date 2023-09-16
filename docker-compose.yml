@@ -2,12 +2,34 @@
 version: "3"
 services:
   test:
-    build: .
+    build:
+      context: .
+      target: requirements
+    user: ${USERGROUP:?}
+    volumes:
+      - type: bind
+        source: .
+        target: /app
+        read_only: true
+    environment:
+      HOME: /tmp
+      PYTHONPATH: /app/src
     entrypoint:
       - timeout
       - "30"
       - bash
       - ./tests/run_in_docker.sh
+
+  test_full:
+    build:
+      context: .
+      target: app
+    entrypoint:
+      - timeout
+      - "30"
+      - bash
+      - ./tests/run_in_docker.sh
+
   shell:
     build:
       context: .

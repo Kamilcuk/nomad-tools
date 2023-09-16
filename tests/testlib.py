@@ -66,16 +66,28 @@ def quotearr(cmd: List[str]):
 
 
 def run(
-    cmd: str, check=True, text=True, stdout: Union[int, TextIO] = sys.stderr, **kvargs
-):
+    cmd: str, check=True, text=True, stdout: Union[int, TextIO] = sys.stderr, **kwargs
+) -> subprocess.CompletedProcess:
     cmda = shlex.split(cmd)
     print(" ", file=sys.stderr, flush=True)
     print(f"+ {quotearr(cmda)}", file=sys.stderr, flush=True)
-    r = subprocess.run(cmda, check=check, text=text, stdout=stdout, **kvargs)
+    r = subprocess.run(cmda, check=check, text=text, stdout=stdout, **kwargs)
     return r
 
 
-def check_output(cmd: str, **kvargs):
-    ret = run(cmd, stdout=subprocess.PIPE, **kvargs).stdout
+def check_output(cmd: str, **kwargs) -> str:
+    ret = run(cmd, stdout=subprocess.PIPE, **kwargs).stdout
     assert "exception" not in ret
     return ret
+
+
+def run_nomad_cp(cmd: str, **kwargs):
+    return run(f"python -m nomad_tools.nomad_cp -v {cmd}", **kwargs)
+
+
+def run_nomad_watch(cmd: str, **kwargs):
+    return run(f"python -m nomad_tools.nomad_watch -v {cmd}", **kwargs)
+
+
+def check_output_nomad_watch(cmd: str, **kwargs):
+    return check_output(f"python -m nomad_tools.nomad_watch -v {cmd}", **kwargs)

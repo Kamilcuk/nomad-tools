@@ -45,7 +45,7 @@ def _init_colors() -> Dict[str, str]:
         "reset": "sgr0",
     }
     empty = {k: "" for k in tputdict.keys()}
-    if not sys.stdout.isatty():
+    if not sys.stdout.isatty() or not sys.stderr.isatty():
         return empty
     tputscript = "\n".join(tputdict.values()).replace("\n", "\nlongname\nlongname\n")
     try:
