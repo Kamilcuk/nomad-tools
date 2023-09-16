@@ -14,7 +14,8 @@ if ! hash nomad 2>/dev/null; then
 		sudo apt-get install -y --no-install-recommends wget unzip
 	fi
 	if [[ ! -e /tmp/nomad.zip ]]; then
-		wget -O /tmp/nomad.zip https://releases.hashicorp.com/nomad/1.6.1/nomad_1.6.1_linux_amd64.zip
+		v=1.6.2
+		wget -O /tmp/nomad.zip "https://releases.hashicorp.com/nomad/${v}/nomad_${v}_linux_amd64.zip"
 	fi
 	sudo unzip /tmp/nomad.zip -d /usr/local/bin
 	sudo chmod +x /usr/local/bin/nomad
