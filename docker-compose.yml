@@ -1,0 +1,31 @@
+---
+version: "3"
+services:
+  test:
+    build: .
+    entrypoint:
+      - timeout
+      - "30"
+      - bash
+      - ./tests/run_in_docker.sh
+  shell:
+    build:
+      context: .
+      target: requirements
+    user: ${USERGROUP:?}
+    volumes:
+      - type: bind
+        source: .
+        target: /app
+        read_only: false
+    environment:
+      HOME: /tmp
+    entrypoint:
+      - bash
+      - -leuc
+      - |
+        export PATH=/tmp/.local/bin:$$PATH
+        /app/tests/start_nomad_server.sh
+        pip install -e .[test]
+        exec "$${@:-bash}"
+      - --
