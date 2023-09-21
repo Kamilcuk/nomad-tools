@@ -312,6 +312,8 @@ class AllocWorker:
 
 class ExitCode:
     success = 0
+    exception = 1
+    unfinished = 2
     any_failed = 124
     all_failed = 125
     any_unfinished = 126
@@ -437,7 +439,7 @@ class DbThread(threading.Thread):
                 self.queue.put(None)
         except requests.HTTPError as e:
             log.exception("http request failed")
-            exit(-1)
+            exit(ExitCode.exception)
 
 
 class Db:
@@ -456,7 +458,7 @@ class Db:
         """
         self.thread = DbThread(topics, init_cb)
         self.filter_event_cb: Callable[[Event], bool] = filter_event_cb
-        self.init_cb_called: bool = False
+        self.initialized = threading.Event()
         self.job: Optional[nomadlib.Job] = None
         self.allocations: Dict[str, nomadlib.Alloc] = {}
         self.evaluations: Dict[str, nomadlib.Eval] = {}
@@ -521,6 +523,7 @@ class Db:
 
     def stop(self):
         log.debug("Stopping listen Nomad stream")
+        self.initialized.set()
         self.thread.stopevent.set()
 
     def join(self):
@@ -528,11 +531,12 @@ class Db:
 
     def events(self) -> Iterable[Event]:
         assert self.thread.is_alive(), "Thread not alive"
-        if not self.init_cb_called and self.thread.init_cb:
-            for event in self.thread.init_cb():
-                if self.handle_event(event):
-                    yield event
-            self.init_cb_called = True
+        if not self.initialized.is_set():
+            if self.thread.init_cb:
+                for event in self.thread.init_cb():
+                    if self.handle_event(event):
+                        yield event
+            self.initialized.set()
         log.debug("Starting getting events from thread")
         while not self.thread.queue.empty() or (
             self.thread.is_alive() and not self.thread.stopevent.is_set()
@@ -716,27 +720,43 @@ class NomadJobWatcher(ABC, threading.Thread):
 
     def exitcode(self) -> int:
         assert self.done.is_set(), f"Watcher not finished"
+        if args.no_preserve_status:
+            # If the job has been purged when --purge,
+            # Or the job has finished.
+            if (self.db.job is None and self.purged.is_set()) or (
+                self.db.job is not None and self.db.job.Status != "dead"
+            ):
+                return ExitCode.success
+            else:
+                return ExitCode.unfinished
         return self.allocworkers.exitcode()
 
     def join(self):
         self.done.wait()
 
     def stop_job(self, purge: bool):
+        self.db.initialized.wait()
         if purge:
             self.purged.set()
         mynomad.stop_job(self.job.ID, purge)
 
     def run_till_end(self):
         self.run()
+        exit(self.exitcode())
 
 
 class NomadJobWatcherUntilFinished(NomadJobWatcher):
     """Watcher a job until the job is dead"""
 
+    # The job was found at least once.
+    foundjob: bool = False
+
     def until_cb(self) -> bool:
-        if args.purge:
-            # If args.purge is set, then we wait until the job is completely purged.
-            if self.db.job is None:
+        if self.db.job is not None:
+            self.foundjob = True
+        if self.purged.is_set():
+            # If the job was purged, then we wait until the job is completely purged.
+            if self.foundjob and self.db.job is None:
                 log.info(f"Job {self.job.description()} purged")
                 return True
             else:
@@ -765,6 +785,11 @@ class NomadJobWatcherUntilFinished(NomadJobWatcher):
 class NomadJobWatcherUntilStarted(NomadJobWatcher):
     """Watches a job until the job is started"""
 
+    # The job had allocations.
+    hadalloc: bool = False
+    # The job finished because all allocations started, not because they failed.
+    started: bool = False
+
     def until_cb(self) -> bool:
         runningallocsids = list(self.allocworkers.keys())
         tasks = [
@@ -778,9 +803,18 @@ class NomadJobWatcherUntilStarted(NomadJobWatcher):
             log.info(
                 f"Allocations {allocsstr} started {len(runningallocsids)} allocations with {len(tasks)} tasks"
             )
+            self.started = True
+            return True
+        if runningallocsids:
+            self.hadalloc = True
+        if self.hadalloc and self.db.job and self.db.job.Status == "dead":
+            log.info(f"Job {self.db.job.description()} is ")
             return True
         return False
 
+    def exitcode(self) -> int:
+        assert self.done.is_set(), f"Watcher not finished"
+        return 2 if not self.started else 0
 
 
 ###############################################################################
@@ -845,15 +879,19 @@ class JobPath:
     them until they are done.
 
     \b
-    The program exits with the following status:
-        0    if mode is stop and option --purge was given and the job was purged
-        ?    if the job has one allocation, exits with the exit status of the allocation
+    If the option --no-preserve-exit is given, then exit with the following status:
+        0    if operation was successfull - the job was run or was purged on --purge
+    Ohterwise, when mode is alloc, run, job, stop or stopped, exit with the following status:
+        ?    when the job has one task, with that task exit status
         0    if all tasks of the job exited with 0 exit status
-        {ExitCode.any_failed}  if any of the job allocations have failed
-        {ExitCode.all_failed}  if all job allocations have failed
-        {ExitCode.any_unfinished}  if any allocations are still running
-        {ExitCode.no_allocations}  if job has no allocations
-        1    if some other error occured
+        {ExitCode.any_failed}  if any of the job tasks have failed
+        {ExitCode.all_failed}  if all job tasks have failed
+        {ExitCode.any_unfinished}  if any tasks are still running
+        {ExitCode.no_allocations}  if job has no started tasks
+    When the mode is start or started, then exit with the following status:
+        0    all tasks of the job have started running
+    In either case, exit with the following status:
+        1    if some error occured, like python exception
 
     \b
     Examples:
@@ -948,6 +986,12 @@ class JobPath:
     "--polling",
     is_flag=True,
     help="Instead of listening to Nomad event stream, periodically poll for events",
+)
+@click.option(
+    "-x",
+    "--no-preserve-status",
+    is_flag=True,
+    help="Do not preserve tasks exit statuses",
 )
 @click.option(
     "--log-format-alloc", default=log_formats["default"].alloc, show_default=True
@@ -1046,6 +1090,7 @@ cli_jobfile = click.argument(
     "allocid",
     shell_complete=completor(lambda: (x["ID"] for x in mynomad.get("allocations"))),
 )
+@click.help_option("-h", "--help")
 def mode_alloc(allocid):
     allocs = mynomad.get(f"allocations", params={"prefix": allocid})
     assert len(allocs) > 0, f"Allocation with id {allocid} not found"
@@ -1090,6 +1135,7 @@ def mode_alloc(allocid):
 
 @cli.command("run", help="Run a Nomad job and then watch over it until it is finished.")
 @cli_jobfile
+@click.help_option("-h", "--help")
 def mode_run(jobfile):
     jobinit = nomad_start_job_and_wait(jobfile)
     do = NomadJobWatcherUntilFinished(jobinit)
@@ -1106,22 +1152,29 @@ def mode_run(jobfile):
 
 @cli.command("job", help="Watch a Nomad job, show its logs and events.")
 @cli_jobid
+@click.help_option("-h", "--help")
 def mode_job(jobid):
     jobinit = nomad_find_job(jobid)
     NomadJobWatcherUntilFinished(jobinit).run_till_end()
 
 
-@cli.command(
-    "start", help="Start a Nomad Job and watch it until all allocations are running"
-)
+@cli.command("start", help="Start a Nomad Job. Then act like started mode.")
 @cli_jobfile
+@click.help_option("-h", "--help")
 def mode_start(jobfile):
     jobinit = nomad_start_job_and_wait(jobfile)
     NomadJobWatcherUntilStarted(jobinit).run_till_end()
 
 
-@cli.command("started", help="Watch a Nomad job until the job is started.")
+@cli.command(
+    "started",
+    help="""
+Watch a Nomad job until the job has all allocations running.
+Exit with 2 exit status when the job has status dead.
+""",
+)
 @cli_jobid
+@click.help_option("-h", "--help")
 def mode_started(jobid):
     jobinit = nomad_find_job(jobid)
     NomadJobWatcherUntilStarted(jobinit).run_till_end()
@@ -1132,6 +1185,7 @@ def mode_started(jobid):
     help="Stop a Nomad job and then watch the job until it is stopped - has no running allocations.",
 )
 @cli_jobid
+@click.help_option("-h", "--help")
 def mode_stop(jobid: str):
     jobinit = nomad_find_job(jobid)
     do = NomadJobWatcherUntilFinished(jobinit)
@@ -1141,8 +1195,6 @@ def mode_stop(jobid: str):
         do.join()
     finally:
         do.close()
-    if args.purge and do.db.job is None:
-        exit(0)
     exit(do.exitcode())
 
 
@@ -1151,17 +1203,10 @@ def mode_stop(jobid: str):
     help="Watch a Nomad job until the job is stopped - has not running allocation.",
 )
 @cli_jobid
+@click.help_option("-h", "--help")
 def mode_stopped(jobid):
     jobinit = nomad_find_job(jobid)
-    do = NomadJobWatcherUntilFinished(jobinit)
-    do.run_till_end()
-    exit(do.exitcode())
-
-
-@cli.command("test", hidden=True)
-@click.argument("mode")
-def mode_test(mode):
-    Test(mode)
+    NomadJobWatcherUntilFinished(jobinit).run_till_end()
 
 
 ###############################################################################
