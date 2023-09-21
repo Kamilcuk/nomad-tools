@@ -24,11 +24,12 @@ test:
 test_integration:
 	pytest -sxv tests/integration -p no:cacheprovider $(ARGS)
 
-run = USERGROUP=$(shell id -u):$(shell id -g) docker compose run --build
+run = USERGROUP=$(shell id -u):$(shell id -g) docker compose run --build --rm
 docker_test:
 	$(run) test $(ARGS)
 
 docker_shell:
+	@mkdir -vp build
 	 $(run) -i shell $(ARGS)
 
 docker_test_parallel: ARGS = -nauto

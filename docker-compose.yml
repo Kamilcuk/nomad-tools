@@ -16,7 +16,7 @@ services:
       PYTHONPATH: /app/src
     entrypoint:
       - timeout
-      - "30"
+      - "60"
       - bash
       - ./tests/run_in_docker.sh
 
@@ -26,7 +26,7 @@ services:
       target: app
     entrypoint:
       - timeout
-      - "30"
+      - "60"
       - bash
       - ./tests/run_in_docker.sh
 
@@ -40,14 +40,21 @@ services:
         source: .
         target: /app
         read_only: false
+      - type: bind
+        source: ./build
+        target: /build
+        read_only: false
     environment:
       HOME: /tmp
+      PYTHONPATH: /app/src:/app
+      HISTFILE: /build/.bash_history
+      PROMPT_COMMAND: history -a
     entrypoint:
       - bash
       - -leuc
       - |
-        export PATH=/tmp/.local/bin:$$PATH
-        /app/tests/start_nomad_server.sh
-        pip install -e .[test]
+        export PATH=/tmp/.local/bin:$$PATH &&
+        /app/tests/start_nomad_server.sh &&
+        # pip install -e .[test]
         exec "$${@:-bash}"
       - --
