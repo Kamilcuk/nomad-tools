@@ -11,8 +11,6 @@ import logging
 import os
 import queue
 import re
-import shlex
-import shutil
 import subprocess
 import sys
 import threading
@@ -25,6 +23,14 @@ import click
 import requests
 
 from . import nomadlib
+from .common import (
+    _complete_set_namespace,
+    complete_job,
+    completor,
+    mynomad,
+    namespace_option,
+    nomad_find_namespace,
+)
 from .nomad_smart_start_job import nomad_smart_start_job
 
 log = logging.getLogger(__name__)
@@ -68,129 +74,12 @@ COLORS = _init_colors()
 ###############################################################################
 
 
+def ns2s(ns: int):
+    return ns / 1000000000
+
+
 def ns2dt(ns: int):
     return datetime.datetime.fromtimestamp(ns // 1000000000)
-
-
-def run(cmd, *args, check=True, **kvargs):
-    log.info(f"+ {' '.join(shlex.quote(x) for x in cmd)}")
-    return subprocess.run(cmd, *args, check=check, text=True, **kvargs)
-
-
-###############################################################################
-
-
-class Test:
-    """For running internal tests"""
-
-    def __init__(self, mode: str):
-        func = getattr(self, mode, None)
-        assert func
-        func()
-
-    def short(self):
-        spec = """
-            job "test-nomad-watch" {
-              type = "batch"
-              reschedule { attempts = 0 }
-              group "test-nomad-watch" {
-                restart { attempts = 0 }
-                task "test-nomad-watch" {
-                  driver = "docker"
-                  config {
-                    image = "busybox"
-                    args = ["sh", "-xc", <<EOF
-                        for i in $(seq 10); do echo $i; sleep 1; done
-                        exit 123
-                        EOF
-                    ]
-                  }
-                }
-              }
-            }
-            """
-        self._run(spec, stdout=None)
-
-    def test(self):
-        now = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
-        spec = f"""
-        job "test-nomad-watch" {{
-            datacenters = ["*"]
-            type = "batch"
-            reschedule {{
-                attempts = 0
-            }}
-            """
-        for i in range(2):
-            spec += f"""
-                group "{now}_group_{i}" {{
-                    restart {{
-                        attempts = 0
-                    }}
-                """
-            for j in range(2):
-                spec += f"""
-                  task "{now}_task_{i}_{j}" {{
-                    driver = "docker"
-                    config {{
-                      image = "busybox"
-                      args = ["sh", "-xc", <<EOF
-                        echo {now} group_{i} task_{i}_{j} START
-                        sleep 1
-                        echo {now} group_{i} task_{i}_{j} STOP
-                        EOF
-                      ]
-                    }}
-                  }}
-                  """
-            spec += f"""
-                }}
-                """
-        spec += f"""
-        }}
-        """
-        print(f"Running nomad job with {now}")
-        output = self._run(spec)
-        assert now in output
-
-    def _run(self, spec: str, stdout: Any = subprocess.PIPE):
-        spec = subprocess.check_output("nomad fmt -".split(), input=spec, text=True)
-        rr = run(
-            [
-                sys.argv[0],
-                *(["--purge"] if args.purge else []),
-                *(["-v"] if args.verbose else []),
-                *(["-v"] if args.verbose > 1 else []),
-                "run",
-                "-",
-            ],
-            input=spec,
-            stdout=stdout,
-            check=False,
-        )
-        if rr.returncode not in [0, 123]:
-            exit(254)
-        output = rr.stdout
-        if output:
-            outputbins: Dict[str, List[str]] = {}
-            for line in output.splitlines():
-                line = line.split(":", 1)
-                if len(line) == 2:
-                    outputbins.setdefault(line[0], []).append(line[1])
-                else:
-                    print(line)
-            for k, v in outputbins.items():
-                print(f"------ {k} -----")
-                for l in v:
-                    print(l)
-        return output
-
-
-###############################################################################
-
-mynomad = nomadlib.Nomad()
-
-
 
 
 ###############################################################################
@@ -868,48 +757,8 @@ class NomadJobWatcherUntilStarted(NomadJobWatcher):
         return False
 
 
-###############################################################################
-
-
-def nomad_find_namespace(prefix: str):
-    """Finds a nomad namespace by prefix"""
-    if prefix == "*":
-        return prefix
-    namespaces = mynomad.get("namespaces")
-    names = [x["Name"] for x in namespaces]
-    namesstr = " ".join(names)
-    matchednames = [x for x in names if x.startswith(prefix)]
-    matchednamesstr = " ".join(matchednames)
-    assert (
-        len(matchednames) > 0
-    ), f"Couldn't find namespace maching prefix {prefix} from {namesstr}"
-    assert (
-        len(matchednames) < 2
-    ), f"Prefix {prefix} matched multiple namespaces: {matchednamesstr}"
-    return matchednames[0]
-
 
 ###############################################################################
-
-
-def complete_set_namespace(ctx: click.Context):
-    namespace = ctx.params.get("namespace")
-    if namespace:
-        try:
-            os.environ["NOMAD_NAMESPACE"] = nomad_find_namespace(namespace)
-        except Exception:
-            pass
-
-
-def completor(cb: Callable[[], Iterable[str]]):
-    def completor_cb(ctx: click.Context, param: str, incomplete: str):
-        complete_set_namespace(ctx)
-        try:
-            return [x for x in cb() if x.startswith(incomplete)]
-        except Exception:
-            pass
-
-    return completor_cb
 
 
 class JobPath:
@@ -930,8 +779,8 @@ class JobPath:
         ), f"Invalid job/job@task/job@group@task specification: {param}"
 
     @staticmethod
-    def complete(ctx: click.Context, param: str, incomplete: str):
-        complete_set_namespace(ctx)
+    def complete(ctx: click.Context, _: str, incomplete: str):
+        _complete_set_namespace(ctx)
         try:
             jobs = mynomad.get("jobs")
         except requests.HTTPError:
@@ -992,14 +841,7 @@ class JobPath:
     Written by Kamil Cukrowski 2023. Licensed under GNU GPL version 3 or later.
     """,
 )
-@click.option(
-    "-N",
-    "--namespace",
-    help="Finds Nomad namespace matching given prefix and sets NOMAD_NAMESPACE environment variable.",
-    envvar="NOMAD_NAMESPACE",
-    show_default=True,
-    shell_complete=completor(lambda: (x["Name"] for x in mynomad.get("namespaces"))),
-)
+@namespace_option()
 @click.option(
     "-a",
     "--all",
@@ -1153,7 +995,7 @@ def cli(ctx, **_):
 
 cli_jobid = click.argument(
     "jobid",
-    shell_complete=completor(lambda: (x["ID"] for x in mynomad.get("jobs"))),
+    shell_complete=complete_job(),
 )
 cli_jobfile = click.argument(
     "jobfile",
