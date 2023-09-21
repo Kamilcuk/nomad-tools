@@ -4,7 +4,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from tests.testlib import check_output, gen_job, run, run_nomad_cp, run_nomad_watch
+from tests.testlib import gen_job, run, run_nomad_cp, run_nomad_watch
 
 alloc_exec = "nomad alloc exec -i=false -t=false -job"
 
@@ -14,9 +14,10 @@ class NomadTempdir:
     jobid: str
 
     def __enter__(self):
-        return check_output(
-            f"{alloc_exec} {self.jobid} sh -xeuc 'echo $NOMAD_TASK_DIR'"
-        ).strip()
+        return run(
+            f"{alloc_exec} {self.jobid} sh -xeuc 'echo $NOMAD_TASK_DIR'",
+            stdout=1,
+        ).stdout.strip()
 
     def __exit__(self, type, value, traceback):
         return run(f"{alloc_exec} {self.jobid} sh -xeuc 'rm -rv $NOMAD_TASK_DIR'")

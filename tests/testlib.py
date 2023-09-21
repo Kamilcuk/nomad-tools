@@ -5,7 +5,9 @@ import os
 import shlex
 import subprocess
 import sys
-from typing import List, TextIO, Union
+from typing import List, Optional, Union
+
+os.environ.setdefault("NOMAD_NAMESPACE", "default")
 
 
 def caller(up=0):
@@ -21,9 +23,13 @@ def nomad_has_docker():
     return False
 
 
-def gen_job(script=""" echo hello world """):
-    os.environ.setdefault("NOMAD_NAMESPACE", "default")
-    jobname = f"test-nomad-utils-{caller(1)}"
+def gen_job(script=""" echo hello world """, name: Optional[str] = None):
+    assert name is None or " " not in name
+    name = (
+        name
+        or os.environ.get("PYTEST_CURRENT_TEST", caller(1)).split(":")[-1].split(" ")[0]
+    )
+    jobname = f"test-nomad-utils-{name}"
     docker_task = {
         "Driver": "docker",
         "Config": {
@@ -66,19 +72,31 @@ def quotearr(cmd: List[str]):
 
 
 def run(
-    cmd: str, check=True, text=True, stdout: Union[int, TextIO] = sys.stderr, **kwargs
+    cmd: str,
+    check: Union[bool, int, List[int]] = True,
+    text=True,
+    stdout: Union[bool, int] = False,
+    **kwargs,
 ) -> subprocess.CompletedProcess:
     cmda = shlex.split(cmd)
     print(" ", file=sys.stderr, flush=True)
     print(f"+ {quotearr(cmda)}", file=sys.stderr, flush=True)
-    r = subprocess.run(cmda, check=check, text=text, stdout=stdout, **kwargs)
-    return r
-
-
-def check_output(cmd: str, **kwargs) -> str:
-    ret = run(cmd, stdout=subprocess.PIPE, **kwargs).stdout
-    assert "exception" not in ret
-    return ret
+    rr = subprocess.run(
+        cmda,
+        text=text,
+        stdout=subprocess.PIPE if stdout else sys.stderr,
+        **kwargs,
+    )
+    if stdout:
+        print(rr.stdout)
+    if isinstance(check, bool):
+        if check:
+            rr.check_returncode()
+    elif isinstance(check, int):
+        assert rr.returncode == check, f"{rr.returncode} {check}"
+    elif isinstance(check, list):
+        assert rr.returncode in check, f"{rr.returncode} {check}"
+    return rr
 
 
 def run_nomad_cp(cmd: str, **kwargs):
@@ -89,5 +107,5 @@ def run_nomad_watch(cmd: str, **kwargs):
     return run(f"python -m nomad_tools.nomad_watch -v {cmd}", **kwargs)
 
 
-def check_output_nomad_watch(cmd: str, **kwargs):
-    return check_output(f"python -m nomad_tools.nomad_watch -v {cmd}", **kwargs)
+def run_nomad_vardir(cmd: str, **kwargs):
+    return run(f"python -m nomad_tools.nomad_vardir -v {cmd}", **kwargs)
