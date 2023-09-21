@@ -1,6 +1,6 @@
 from typing import Dict, List, Optional
 
-from nomad_tools.datadict import DataDict
+from nomad_tools.nomadlib.datadict import DataDict
 
 
 class Simple(DataDict):
