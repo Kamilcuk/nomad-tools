@@ -1,36 +1,48 @@
 import copy
-from typing import Any, ChainMap, Union
+import enum
+from typing import Any, ChainMap, Type, Union, get_type_hints
 
 
-def all_annotations(cls) -> ChainMap:
-    """Returns a dictionary-like ChainMap that includes annotations for all
-    attributes defined in cls or inherited from superclasses."""
-    return ChainMap(
-        *(c.__annotations__ for c in cls.__mro__ if "__annotations__" in c.__dict__)
-    )
+def all_annotations(cls) -> ChainMap[str, Type]:
+    """
+    Returns a dictionary-like ChainMap that includes annotations for all
+    attributes defined in cls or inherited from superclasses.
+    Also resolve runtime type hints - https://peps.python.org/pep-0563/
+    """
+    return ChainMap(*(get_type_hints(c) for c in cls.__mro__))
 
 
-def _init_value(name: str, aname: str, atype: Any, val: Any):
+def _init_value(classname: str, dstname: str, dsttype: Any, srcval: Any):
     # print(f"Constructing {aname} with type {atype} from {val}")
-    msg = f"When constructing class {name} expected type {atype} for variable {name}, but received {type(val)} with value: {val}"
-    origin = getattr(atype, "__origin__", None)
-    if origin == list:
-        assert type(val) == origin, msg
-        return [atype.__args__[0](x) for x in val]
-    elif origin == dict:
-        assert type(val) == origin, msg
-        return {atype.__args__[0](k): atype.__args__[1](v) for k, v in val.items()}
-    elif origin == Union:
-        if type(val) in atype.__args__:
-            return val
-        assert len(atype.__args__) == 2 and atype.__args__[1] == type(
+    dstorigin = getattr(dsttype, "__origin__", None)
+
+    def msg() -> str:
+        return (
+            f"Error when constructing class {classname!r} expected type {dsttype!r} wth origin {dstorigin!r}"
+            f" for field {dstname!r}, but received {type(srcval)} with value: {srcval!r}"
+        )
+
+    if dstorigin == list:
+        assert type(srcval) == dstorigin, msg()
+        return [dsttype.__args__[0](x) for x in srcval]
+    elif dstorigin == dict:
+        assert type(srcval) == dstorigin, msg()
+        return {
+            dsttype.__args__[0](k): dsttype.__args__[1](v) for k, v in srcval.items()
+        }
+    elif dstorigin == Union:
+        if type(srcval) in dsttype.__args__:
+            return srcval
+        assert len(dsttype.__args__) == 2 and dsttype.__args__[1] == type(
             None
         ), f"Only Optional handled"
-        return _init_value(name, aname, atype.__args__[0], val)
-    elif issubclass(atype, DataDict):
-        return atype(val)
-    assert type(val) == atype, msg
-    return val
+        return _init_value(classname, dstname, dsttype.__args__[0], srcval)
+    elif issubclass(dsttype, DataDict):
+        return dsttype(srcval)
+    elif issubclass(dsttype, enum.Enum):
+        return dsttype(srcval)
+    assert type(srcval) == dsttype, msg()
+    return srcval
 
 
 def _asdict_value(fname: str, val: Any):
@@ -40,6 +52,8 @@ def _asdict_value(fname: str, val: Any):
         return {
             _asdict_value(fname, k): _asdict_value(fname, v) for k, v in val.items()
         }
+    elif isinstance(val, enum.Enum):
+        return val.value
     elif hasattr(val, fname):
         return getattr(val, fname)()
     return val

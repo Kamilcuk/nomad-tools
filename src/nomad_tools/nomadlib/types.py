@@ -1,26 +1,41 @@
 import dataclasses
 import datetime
 import enum
-import json
 import logging
-import os
 from typing import Callable, Dict, List, Optional, TypeVar
-
-import requests.adapters
-import requests.auth
 
 from .datadict import DataDict
 
 log = logging.getLogger(__name__)
 
 
+class JobTaskConfig(DataDict):
+    image: str
+    command: str
+    args: List[str]
+    network_mode: str
+    network_aliases: List[str]
+
+
 class JobTask(DataDict):
     Name: str
+    Driver: str
+    User: str
+    Config: JobTaskConfig
 
 
 class JobTaskGroup(DataDict):
     Name: str
     Tasks: List[JobTask]
+
+
+class JobStatus(enum.Enum):
+    # Pending means the job is waiting on scheduling
+    pending = "pending"
+    # Running means the job has non-terminal allocations
+    running = "running"
+    # Dead means all evaluation's and allocations are terminal
+    dead = "dead"
 
 
 class Job(DataDict):
@@ -31,6 +46,7 @@ class Job(DataDict):
     ModifyIndex: int
     JobModifyIndex: int
     TaskGroups: List[JobTaskGroup]
+    Stop: bool
 
     def description(self):
         return f"{self.ID}@v{self.Version}@{self.Namespace}"
@@ -199,135 +215,20 @@ class Event:
         return callbacks[self.topic](self.data)
 
 
-###############################################################################
+class VariableNoItems(DataDict):
+    Namespace: str
+    Path: str
+    CreateIndex: int
+    ModifyIndex: int
+    CreateTime: int
+    ModifyTime: int
 
 
-def _default_session():
-    s = requests.Session()
-    # Increase the number of connections.
-    a = requests.adapters.HTTPAdapter(
-        pool_connections=1000, pool_maxsize=1000, max_retries=3
-    )
-    s.mount("http://", a)
-    s.mount("https://", a)
-    return s
+class Variable(VariableNoItems):
+    Items: Dict[str, str]
 
 
-class PermissionDenied(Exception):
-    pass
-
-
-class JobNotFound(Exception):
-    pass
-
-
-@dataclasses.dataclass
-class Nomad:
-    """Represents connection to Nomad"""
-
-    namespace: Optional[str] = None
-    session: requests.Session = dataclasses.field(default_factory=_default_session)
-
-    def request(
-        self,
-        method,
-        url,
-        params: Optional[dict] = None,
-        *args,
-        **kvargs,
-    ):
-        params = dict(params or {})
-        params.setdefault(
-            "namespace", self.namespace or os.environ.get("NOMAD_NAMESPACE", "*")
-        )
-        ret = self.session.request(
-            method,
-            os.environ.get("NOMAD_ADDR", "http://127.0.0.1:4646") + "/v1/" + url,
-            *args,
-            auth=(
-                requests.auth.HTTPBasicAuth(*os.environ["NOMAD_HTTP_AUTH"].split(":"))
-                if "NOMAD_HTTP_AUTH" in os.environ
-                else None
-            ),
-            headers=(
-                {"X-Nomad-Token": os.environ["NOMAD_TOKEN"]}
-                if "NOMAD_TOKEN" in os.environ
-                else None
-            ),
-            params=params,
-            verify=os.environ.get("NOMAD_CACERT"),
-            cert=(
-                (os.environ["NOMAD_CLIENT_CERT"], os.environ["NOMAD_CLIENT_KEY"])
-                if "NOMAD_CLIENT_CERT" in os.environ
-                and "NOMAD_CLIENT_KEY" in os.environ
-                else None
-            ),
-            **kvargs,
-        )
-        try:
-            ret.raise_for_status()
-        except requests.HTTPError as e:
-            resp = (ret.status_code, ret.text.lower())
-            if resp == (500, "permission denied"):
-                raise PermissionDenied(str(e)) from e
-            if resp == (404, "job not found"):
-                raise JobNotFound(str(e)) from e
-        return ret
-
-    def _reqjson(self, mode, *args, **kvargs):
-        rr = self.request(mode, *args, **kvargs)
-        return rr.json()
-
-    def get(self, *args, **kvargs):
-        return self._reqjson("GET", *args, **kvargs)
-
-    def put(self, *args, **kvargs):
-        return self._reqjson("PUT", *args, **kvargs)
-
-    def post(self, *args, **kvargs):
-        return self._reqjson("POST", *args, **kvargs)
-
-    def delete(self, *args, **kvargs):
-        return self._reqjson("DELETE", *args, **kvargs)
-
-    def stream(self, *args, **kvargs):
-        stream = self.request("GET", *args, stream=True, **kvargs)
-        return stream
-
-    def start_job(self, txt: str):
-        try:
-            jobjson = json.loads(txt)
-        except json.JSONDecodeError:
-            jobjson = self.post("jobs/parse", json={"JobHCL": txt})
-        return self.post("jobs", json={"Job": jobjson, "Submission": txt})
-
-    def stop_job(self, jobid: str, purge: bool = False):
-        assert self.namespace
-        if purge:
-            log.info(f"Purging job {jobid}")
-        else:
-            log.info(f"Stopping job {jobid}")
-        resp: dict = self.delete(f"job/{jobid}", params={"purge": purge})
-        assert resp["EvalID"], f"Stopping {jobid} did not trigger evaluation: {resp}"
-        return resp
-
-    def find_job(self, jobprefix: str) -> str:
-        jobs = self.get("jobs", params={"prefix": jobprefix})
-        assert len(jobs) > 0, f"No jobs found with prefix {jobprefix}"
-        jobsnames = " ".join(f"{x['ID']}@{x['Namespace']}" for x in jobs)
-        assert len(jobs) < 2, f"Multiple jobs found with name {jobprefix}: {jobsnames}"
-        job = jobs[0]
-        self.namespace = job["Namespace"]
-        return job["ID"]
-
-    def find_last_not_stopped_job(self, jobid: str) -> dict:
-        assert self.namespace
-        jobinit = self.get(f"job/{jobid}")
-        if jobinit["Stop"]:
-            # Find last job version that is not stopped.
-            versions = self.get(f"job/{jobid}/versions")
-            notstopedjobs = [job for job in versions["Versions"] if not job["Stop"]]
-            if notstopedjobs:
-                notstopedjobs.sort(key=lambda job: -job["ModifyIndex"])
-                return notstopedjobs[0]
-        return jobinit
+class VariableNew(DataDict):
+    Namespace: str
+    Path: str
+    Items: Dict[str, str]
