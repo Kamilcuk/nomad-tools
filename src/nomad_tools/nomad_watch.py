@@ -156,8 +156,15 @@ class Logger(threading.Thread):
         self.tk = tk
         self.stderr: bool = stderr
         self.exitevent = threading.Event()
-        self.ignoredlines = []
-        self.first = True
+        self.ignoredlines: List[str] = []
+        self.first_line = True
+        # Ignore input lines if printing only trailing lines.
+        self.ignoretime_ns = (
+            0 if args.lines < 0 else args_lines_start_ns + int(args.lines_timeout * 1e9)
+        )
+        # If ignore time is in the past, it is no longer relevant anyway.
+        if self.ignoretime_ns and self.ignoretime_ns < time.time_ns():
+            self.ignoretime_ns = 0
 
     @staticmethod
     def _read_json_stream(stream: requests.Response):
@@ -165,7 +172,7 @@ class Logger(threading.Thread):
         for data in stream.iter_content(decode_unicode=True):
             for c in data:
                 txt += c
-                # Nomad is consistent, the jsons are flat.
+                # Nomad happens to be consistent, the jsons are flat.
                 if c == "}":
                     try:
                         ret = json.loads(txt)
@@ -175,31 +182,38 @@ class Logger(threading.Thread):
                         log.warn(f"error decoding json: {txt} {e}")
                     txt = ""
 
-    def _taskout(self, lines: Optional[List[str]] = None):
-        lines = lines or []
-        if self.ignoretime and (self.first or time.time() < self.ignoretime):
-            self.first = False
-            self.ignoredlines += lines
+    def _taskout(self, lines: List[str]):
+        """Output the lines"""
+        # If ignoring and this is first received line or the ignoring time is still happenning.
+        if self.ignoretime_ns and (
+            self.first_line or time.time_ns() < self.ignoretime_ns
+        ):
+            # Accumulate args.lines into ignoredlines array.
+            self.first_line = False
+            self.ignoredlines = lines
             self.ignoredlines = self.ignoredlines[: args.lines]
         else:
-            if self.ignoretime:
-                lines = self.ignoredlines
-                self.ignoredlines = []
-                self.ignoretime = 0
+            if self.ignoretime_ns:
+                # If not ignoring lines, flush the accumulated lines.
+                lines = self.ignoredlines + lines
+                self.ignoredlines.clear()
+                # Disable further accumulation of ignored lines.
+                self.ignoretime_ns = 0
+            # Print the log lines.
             for line in lines:
                 line = line.rstrip()
                 self.tk.log_task(self.stderr, line)
 
     def run(self):
-        self.ignoretime = 0 if args.lines < 0 else (time.time() + args.lines_timeout)
+        """Listen to Nomad log stream and print the logs"""
         with mynomad.stream(
             f"client/fs/logs/{self.tk.allocid}",
             params={
                 "task": self.tk.task,
                 "type": "stderr" if self.stderr else "stdout",
                 "follow": True,
-                "origin": "end" if self.ignoretime else "start",
-                "offset": 50000 if self.ignoretime else 0,
+                "origin": "end" if self.ignoretime_ns else "start",
+                "offset": 50000 if self.ignoretime_ns else 0,
             },
         ) as stream:
             for event in self._read_json_stream(stream):
@@ -211,7 +225,7 @@ class Logger(threading.Thread):
                 else:
                     # Nomad json stream periodically sends empty {}.
                     # No idea why, but I can implement timeout.
-                    self._taskout()
+                    self._taskout([])
                     if self.exitevent.is_set():
                         break
 
@@ -242,14 +256,25 @@ class TaskHandler:
         return ths
 
     def notify(self, tk: TaskKey, task: nomadlib.AllocTaskStates):
+        """Receive notification that a task state has changed"""
         events = task.Events
         if args_stream.alloc:
             for e in events:
                 msg = e.DisplayMessage
-                time = e.Time
-                if time and time not in self.messages and msg:
-                    self.messages.add(time)
-                    tk.log_alloc(ns2dt(time), msg)
+                msgtime_ns = e.Time
+                # Ignore message before ignore times.
+                if (
+                    msgtime_ns
+                    and msg
+                    and msgtime_ns not in self.messages
+                    and (
+                        not args_lines_start_ns
+                        or msgtime_ns >= args_lines_start_ns
+                        or len(self.messages) < args.lines
+                    )
+                ):
+                    self.messages.add(msgtime_ns)
+                    tk.log_alloc(ns2dt(msgtime_ns), msg)
         if (
             not self.loggers
             and task["State"] in ["running", "dead"]
@@ -881,7 +906,12 @@ class JobPath:
     default=-1,
     show_default=True,
     type=int,
-    help="Sets the tail location in best-efforted number of lines relative to the end of logs",
+    help="""
+        Sets the tail location in best-efforted number of lines relative to the end of logs.
+        Default is set to -1, which prints all the logs.
+        Set to 0 to try try best-efforted logs from the current log position.
+        See also --lines-timeout.
+        """,
 )
 @click.option(
     "--lines-timeout",
@@ -963,6 +993,7 @@ def cli(ctx, **_):
     assert [args.log_long, args.log_short, args.log_onepart].count(
         True
     ) <= 1, f"Only one --log-* argument can be specified at a time"
+    #
     (
         args.log_format_alloc,
         args.log_format_stderr,
@@ -977,10 +1008,15 @@ def cli(ctx, **_):
         if args.log_onepart
         else "default"
     ].astuple()
+    #
     logging.basicConfig(
         format=logging_format,
         level=logging.DEBUG if args.verbose else logging.INFO,
     )
+    #
+    global args_lines_start_ns
+    args_lines_start_ns = 0 if args.lines < 0 else time.time_ns()
+    #
     # https://stackoverflow.com/questions/17558552/how-do-i-add-custom-field-to-python-log-format-string
     old_factory = logging.getLogRecordFactory()
 
