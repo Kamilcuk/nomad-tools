@@ -25,6 +25,7 @@ import click
 import requests
 
 from . import nomadlib
+from .nomad_smart_start_job import nomad_smart_start_job
 
 log = logging.getLogger(__name__)
 
@@ -190,33 +191,6 @@ class Test:
 mynomad = nomadlib.Nomad()
 
 
-def nomad_start_job(input: str) -> str:
-    """Start a job from input file input."""
-    if shutil.which("nomad"):
-        jsonarg = "-json" if args.json else ""
-        cmd = shlex.split(
-            f"nomad job run -detach -verbose {jsonarg} {shlex.quote(input)}"
-        )
-        try:
-            rr = run(
-                cmd,
-                stdin=None if input == "-" else subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-            )
-        except subprocess.CalledProcessError as e:
-            # nomad will print its error, we can just exit
-            exit(e.returncode)
-        data = rr.stdout.strip()
-        for line in data.splitlines():
-            log.info(line)
-        evalid = next(
-            x.split(" ", 3)[-1] for x in data.splitlines() if "eval" in x.lower()
-        ).strip()
-    else:
-        intxt = sys.stdin if input == "-" else open(input)
-        txt: str = intxt.read()
-        evalid = mynomad.start_job(txt)["EvalID"]
-    return evalid
 
 
 ###############################################################################
@@ -695,7 +669,7 @@ def nomad_watch_eval(evalid: str):
 
 def nomad_start_job_and_wait(input: str) -> nomadlib.Job:
     assert isinstance(input, str)
-    evalid = nomad_start_job(input)
+    evalid = nomad_smart_start_job(input, args.json)
     eval_: dict = mynomad.get(f"evaluation/{evalid}")
     mynomad.namespace = eval_["Namespace"]
     nomad_watch_eval(evalid)
@@ -1183,8 +1157,7 @@ cli_jobid = click.argument(
 )
 cli_jobfile = click.argument(
     "jobfile",
-    type=click.File(lazy=True),
-    callback=lambda _, __, x: "-" if x.name == "<stdin>" else x.name,
+    shell_complete=click.File().shell_complete,
 )
 
 ###############################################################################
