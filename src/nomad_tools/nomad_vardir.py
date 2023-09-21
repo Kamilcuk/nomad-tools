@@ -7,9 +7,17 @@ import logging
 import os
 import subprocess
 import tempfile
+from itertools import chain
 from pathlib import Path
 from shlex import quote, split
-from typing import Dict, List
+from typing import Dict
+
+import click
+
+from .nomadlib.connection import VariableConflict
+
+from .common import complete_job, mynomad, namespace_option
+from .nomadlib import VariableNotFound
 
 log = logging.getLogger(__file__)
 
@@ -20,47 +28,61 @@ def dryrunstr():
     return "DRYRUN: " if args.dryrun else ""
 
 
-def quotearr(cmd: List[str]):
-    return " ".join(quote(x) for x in cmd)
-
-
-def run(cmd: List[str], check=True, **kvargs):
-    log.info(f"{dryrunstr()}+ {quotearr(cmd)}")
-    if not args.dryrun:
-        return subprocess.run(cmd, text=True, check=check, **kvargs)
-
-
-def run_stdout(cmd: List[str], check=True):
-    log.info(f"+ {quotearr(cmd)}")
-    rr = subprocess.run(cmd, check=check, text=True, stdout=subprocess.PIPE)
-    assert rr is not None
-    return rr.stdout
-
-
 def get_namespace_job_from_nomad_service_file(file: Path):
     try:
         with file.open() as f:
             jobjson = json.load(f)
     except json.JSONDecodeError:
-        jobjson = json.loads(run_stdout("nomad job run -output".split() + [str(file)]))
+        jobjson = json.loads(
+            subprocess.check_output(
+                "nomad job run -output".split() + [str(file)], text=True
+            )
+        )
     return jobjson["Job"]["Namespace"], jobjson["Job"]["ID"]
+
+
+def create_tree(dir: Path, data: Dict[str, str]):
+    """Create files with pahts as keys from data and content as values from data in directory dir"""
+    dir.mkdir(parents=True, exist_ok=True)
+    for k, v in data.items():
+        p = dir / k
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with p.open("w+") as f:
+            f.write(v)
+
 
 ###############################################################################
 
-class NomadVarDir:
+
+class NomadVarDirMain:
+    def __init__(self, ctx):
+        global args
+        args = argparse.Namespace(**{**vars(args), **ctx.params})
+        logging.basicConfig(
+            format="%(module)s: %(message)s",
+            level=logging.DEBUG if args.verbose else logging.INFO,
+        )
+        if args.path:
+            assert not args.service, "--service can't be passed with --path"
+            assert not args.job, "--job can't be passed with --path"
+        elif args.service:
+            assert not args.job, "--service can't be passed with --job"
+            args.namespace, args.job = get_namespace_job_from_nomad_service_file(
+                args.service
+            )
+            os.environ["NOMAD_NAMESPACE"] = args.namespace
+        elif args.job:
+            args.path = f"nomad/job/{args.job}"
+        else:
+            assert 0, "One of --path --service or --job has to be given."
+        self.get_old_items()
+
     def get_old_items(self):
         try:
-            olditems: dict = json.loads(
-                run_stdout(
-                    split(
-                        f"nomad var get -namespace={quote(args.namespace)} -out=json nomad/jobs/{quote(args.job)}"
-                    ),
-                    check=False,
-                )
-            )["Items"]
-        except Exception:
+            olditems = mynomad.variables.read(args.path).Items
+        except VariableNotFound:
             olditems = {}
-        self.olditems = olditems
+        self.olditems: Dict[str, str] = olditems
         return olditems
 
     def gen_new_items(self):
@@ -82,153 +104,191 @@ class NomadVarDir:
                 assert (
                     filesize_mb < limit_mb
                 ), f"{file} size is {filesize_mb} greater than {limit_mb} mb, exiting"
-        self.newitems = {str(file): file.read_text() for file in files}
-        if args.D:
+        self.newitems: Dict[str, str] = {str(file): file.read_text() for file in files}
+        if "D" in args and args.D:
             assert all("=" in x for x in args.D), "-D options have to be var=value"
             self.newitems.update({k: v for x in args.D for k, v in x.split("=", 2)})
-        if not args.clear:
+        if "clear" in args and not args.clear:
             self.newitems = {**self.olditems, **self.newitems}
         return self.newitems
 
-    @staticmethod
-    def create_tree(dir: Path, data: Dict[str, str]):
-        for k, v in data.items():
-            p = dir / k
-            p.parent.mkdir(parents=True, exist_ok=True)
-            with p.open("w+") as f:
-                f.write(v)
+    def show_diff_11(self):
+        if not distutils.spawn.find_executable("diff"):
+            log.warning("diff executable not found")
+            return
+        with tempfile.NamedTemporaryFile("w", prefix="nomad-var-dir_") as tmpf:
+            for k in sorted(
+                list(set(chain(self.newitems.keys(), self.olditems.keys())))
+            ):
+                old = self.olditems.get(k, "")
+                tmpf.seek(0)
+                tmpf.write(old)
+                tmpf.flush()
+                #
+                newfile = (
+                    (k if Path(k).exists else "-")
+                    if k in self.newitems
+                    else subprocess.DEVNULL
+                )
+                stdin = self.newitems[k] if newfile == "-" else None
+                subprocess.run(
+                    split(f"diff --color -u {quote(tmpf.name)} {newfile}"),
+                    input=stdin,
+                    text=True,
+                )
 
-    def show_diff(self):
-        newitems = dict(self.newitems, _metadata="")
-        olditems = dict(self.olditems, _metadata="")
+    def show_diff(self) -> bool:
+        newitems = dict(self.newitems)
+        olditems = dict(self.olditems)
         if distutils.spawn.find_executable("diff"):
             with tempfile.TemporaryDirectory(prefix="nomad-var-dir_") as tmpd:
                 tmpd = Path(tmpd)
-                self.create_tree(tmpd / "nomad", olditems)
-                self.create_tree(tmpd / "local", newitems)
+                create_tree(tmpd / "nomad", olditems)
+                create_tree(tmpd / "local", newitems)
                 cmd = "diff --color -ru nomad local"
                 log.info(f"+ {cmd}")
                 subprocess.run(split(cmd), cwd=tmpd)
-
-    def mode_put(self):
-        keysstr = " ".join(self.newitems.keys())
-        log.info(
-            f"Putting var nomad/jobs/{args.job}@{args.namespace} with keys: {keysstr}"
-        )
-        putargs = (
-            f" -check-index={quote(args.check_index)}" if args.check_index else ""
-        ) + (" -force" if args.force else "")
-        run(
-            split(
-                f"nomad var put -namespace={quote(args.namespace)} {putargs} -in=json nomad/jobs/{quote(args.job)} -"
-            ),
-            input=json.dumps({"Items": self.newitems}),
-        )
-
-    def mode_get(self):
-        for file, content in self.olditems.items():
-            file = Path(file)
-            if file.exists() and file.is_file() and file.read_text() == content:
-                log.info(f"nochange {file}")
-            else:
-                log.info(f"{dryrunstr()}writting {file}")
-                if not args.dryrun:
-                    file.parent.mkdir(exist_ok=True, parents=True)
-                    with file.open("w+") as f:
-                        f.write(content)
+        return newitems != olditems
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Given a list of files puts the file content into a nomad variable storage.",
-        epilog="Written by Kamil Cukrowski 2023. All right reserved.",
-        formatter_class=argparse.RawTextHelpFormatter,
-    )
-    parser.add_argument("-n", "--dryrun", action="store_true")
-    parser.add_argument("-v", "--verbose", action="store_true")
-    parser.add_argument("--namespace", default=os.environ.get("NOMAD_NAMESPACE"))
-    parser.add_argument("--job", help="Job name to upload the variables to")
-    parser.add_argument(
-        "-s",
-        "--service",
-        type=Path,
-        help="Get namespace and job name from this nomad service file",
-    )
-    parser.add_argument(
-        "-D",
-        type=str,
-        help="Additional var=value to store in nomad variables",
-        action="append",
-    )
-    parser.add_argument(
-        "--disable-size-check",
-        action="store_true",
-        help="Disable checking if the file is smaller than 10mb",
-    )
-    parser.add_argument("--clear", help="clear keys that are not found in files")
-    subparsers = parser.add_subparsers(dest="mode", help="mode to run")
-    #
-    parser_put = subparsers.add_parser(
-        "put",
-        help="recursively scan given paths and upload them with filenames as key to nomad variable store",
-    )
-    parser_put.add_argument(
-        "--force", action="store_true", help="Pass -force to nomad var put"
-    )
-    parser_put.add_argument("-check-index", help="pass -check-index to nomad var put")
-    parser_put.add_argument(
-        "--relative",
-        type=Path,
-        help="Files have paths relative to this directory instead of current working directory",
-    )
-    parser_put.add_argument("paths", type=Path, help="List of files to put", nargs="+")
-    #
-    parser_diff = subparsers.add_parser(
-        "diff", help="just like put, but stop after showing diff"
-    )
-    parser_diff.add_argument(
-        "--relative",
-        type=Path,
-        help="Files have paths relative to this directory instead of current working directory",
-    )
-    parser_diff.add_argument(
-        "paths", type=Path, help="List of files to put", nargs="+", default=[Path.cwd()]
-    )
-    #
-    parser_get = subparsers.add_parser(
-        "get",
-        help="Get files stored in nomad variables adnd store them in specific directory",
-    )
-    parser_get.add_argument("dest", type=Path, help="Place to unpack the files")
-    #
-    args = parser.parse_args()
-    logging.basicConfig(
-        format="%(module)s: %(message)s",
-        level=logging.DEBUG if args.verbose else logging.INFO,
-    )
-    if args.service:
-        assert not args.job, "--service can't be passed with --job"
-        args.namespace, args.job = get_namespace_job_from_nomad_service_file(
-            args.service
-        )
-    if not args.job or not args.namespace:
-        exit("Either --service or both --job and --namespace has to be given")
-    return args
+###############################################################################
 
-def cli():
+
+@click.group(
+    help="Given a list of files puts the file content into a nomad variable storage.",
+    epilog="Written by Kamil Cukrowski 2023. All right reserved.",
+)
+@click.option("-n", "--dryrun", is_flag=True)
+@click.option("-v", "--verbose", is_flag=True)
+@namespace_option()
+@click.option("-p", "--path", help="The path of the variable to save")
+@click.option(
+    "-j",
+    "--job",
+    help="Equal to --path=nomad/job/<JOB>",
+    shell_complete=complete_job,
+)
+@click.option(
+    "-s",
+    "--service",
+    type=click.Path(exists=True, dir_okay=False),
+    help="Get namespace and job name from this nomad service file",
+)
+@click.option(
+    "--disable-size-check",
+    is_flag=True,
+    help="Disable checking if the file is smaller than 10mb",
+)
+@click.pass_context
+@click.help_option("-h", "--help")
+def cli(ctx, **kwargs):
     global args
-    args = parse_args()
-    nvd = NomadVarDir()
-    nvd.get_old_items()
-    if args.mode == "put" or args.mode == "diff":
-        nvd.gen_new_items()
-        nvd.show_diff()
-        if args.mode == "put":
-            nvd.mode_put()
-    elif args.mode == "get":
-        nvd.mode_get()
+    args = argparse.Namespace(**ctx.params)
+
+
+@cli.command(
+    "put",
+    help="Recursively scan files in given PATHS and upload filenames as key and file content as value to nomad variable store.",
+)
+@click.option("--force", is_flag=True, help="Like nomad var put -force")
+@click.option("--check-index", type=int, help="Like nomad var put -check-index")
+@click.option(
+    "--relative",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="Files have paths relative to this directory instead of current working directory",
+)
+@click.option(
+    "-D",
+    "D",
+    type=str,
+    help="Additional var=value to store in nomad variables",
+    multiple=True,
+)
+@click.option("--clear", is_flag=True, help="Remove keys that are not found in files")
+@click.argument(
+    "paths",
+    type=click.Path(exists=True, path_type=Path),
+    nargs=-1,
+)
+@click.help_option("-h", "--help")
+@click.pass_context
+def mode_put(ctx, **kvargs):
+    nvd = NomadVarDirMain(ctx)
+    print(ctx.params)
+    if args.force:
+        assert args.check_index is None, "either --force or --check-index"
+    nvd.gen_new_items()
+    if not nvd.show_diff():
+        log.info("No difference in var {args.path}@{args.namespace}")
     else:
-        assert False, f"Internal error when parsing arguments: {args.mode}"
+        keysstr = " ".join(nvd.newitems.keys())
+        log.info(
+            f"{dryrunstr()}Putting var {args.path}@{args.namespace} with keys: {keysstr}"
+        )
+        if not args.dryrun:
+            try:
+                mynomad.variables.create(
+                    args.path,
+                    nvd.newitems,
+                    cas=args.check_index
+                    if args.check_index is not None
+                    else 0
+                    if not args.force
+                    else None,
+                )
+            except VariableConflict as e:
+                raise Exception(
+                    f"Variable update conflict. Pass --check-index={e.variable.ModifyIndex}"
+                ) from e
+
+
+@cli.command("diff", help="Show only diff")
+@click.option(
+    "--relative",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="Files have paths relative to this directory instead of current working directory",
+)
+@click.argument(
+    "paths",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    nargs=-1,
+)
+@click.pass_context
+@click.help_option("-h", "--help")
+def mode_diff(ctx, **kwargs):
+    nvd = NomadVarDirMain(ctx)
+    nvd.gen_new_items()
+    isdiff = nvd.show_diff()
+    exit(2 if isdiff else 0)
+
+
+@cli.command(
+    "get",
+    help="Get files stored in nomad variables adnd store them in specific directory",
+)
+@click.argument(
+    "dest",
+    type=click.Path(file_okay=False, writable=True, path_type=Path),
+)
+@click.pass_context
+@click.help_option("-h", "--help")
+def mode_get(ctx, **kwargs):
+    nvd = NomadVarDirMain(ctx)
+    #
+    args.dest.mkdir(exist_ok=True, parents=True)
+    for file, content in nvd.olditems.items():
+        file = args.dest / file
+        if file.exists() and file.is_file() and file.read_text() == content:
+            log.info(f"nochange {file}")
+        else:
+            log.info(f"{dryrunstr()}writting {file}")
+            if not args.dryrun:
+                file.parent.mkdir(exist_ok=True, parents=True)
+                with file.open("w+") as f:
+                    f.write(content)
+
+
+###############################################################################
 
 if __name__ == "__main__":
-    cli()
+    cli.main()
