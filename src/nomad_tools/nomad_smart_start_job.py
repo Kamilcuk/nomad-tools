@@ -10,7 +10,7 @@ import subprocess
 import sys
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional, TextIO, Union
+from typing import Optional, TextIO, Tuple, Union
 
 from .common import mynomad
 
@@ -122,7 +122,7 @@ class Detail(ABC):
             input=input,
         )
 
-    def api_start(self):
+    def read_dict(self) -> Tuple[str, dict]:
         content = self.read()
         # Assume input is a string with valid job specification.
         try:
@@ -132,6 +132,10 @@ class Detail(ABC):
             if self.forcejson:
                 raise
             data = json.loads(mynomad.jobhcl2json(content))
+        return content, data
+
+    def api_start(self):
+        content, data = self.read_dict()
         evalid = mynomad.start_job(data, content)["EvalID"]
         return evalid
 

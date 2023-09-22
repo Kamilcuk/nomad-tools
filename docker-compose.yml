@@ -11,6 +11,7 @@ services:
         source: .
         target: /app
         read_only: true
+    init: true
     environment:
       HOME: /tmp
       PYTHONPATH: /app/src

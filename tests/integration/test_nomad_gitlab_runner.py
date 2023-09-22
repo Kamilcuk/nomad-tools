@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 from shlex import quote
@@ -31,26 +32,34 @@ def cycle(script: str, config: str = ""):
     with tempfile.NamedTemporaryFile("w") as configfile:
         configfile.write(dedent(config))
         configfile.flush()
-        nomad_gitlab_runner(configfile, "config")
-        nomad_gitlab_runner(configfile, "prepare")
+        driverconfig = json.loads(nomad_gitlab_runner(configfile, "config", stdout=1).stdout)
+        assert isinstance(driverconfig["builds_dir"], str)
+        assert isinstance(driverconfig["cache_dir"], str)
+        driverenv = driverconfig["job_env"]
+        assert all(isinstance(key, str) for key in driverenv.keys())
+        assert all(isinstance(val, str) for val in driverenv.values())
+        nomad_gitlab_runner(configfile, "prepare", env=driverenv)
         try:
             with tempfile.NamedTemporaryFile("w") as scriptfile:
                 scriptfile.write(dedent(script))
                 scriptfile.flush()
                 nomad_gitlab_runner(
-                    configfile, f"run {quote(scriptfile.name)} build_script"
+                    configfile,
+                    f"run {quote(scriptfile.name)} build_script",
+                    env=driverenv,
                 )
         finally:
-            nomad_gitlab_runner(configfile, "cleanup")
+            nomad_gitlab_runner(configfile, "cleanup", env=driverenv)
 
 
-def test_1():
+def test_nomad_gitlab_runner_1():
     cycle(
         """
         #!/bin/bash
         echo hello world
         """,
         """
+        [default]
         mode = "raw_exec"
         """,
     )

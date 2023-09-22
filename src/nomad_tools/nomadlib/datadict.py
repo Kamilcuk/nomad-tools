@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import copy
 import enum
 from typing import Any, ChainMap, Type, Union, get_type_hints
@@ -115,8 +117,26 @@ class DataDict:
         return self.__dict__.items()
 
     def asdict(self):
+        """Convert datadict to a dictionary"""
         fname = self.asdict.__name__
         return {k: _asdict_value(fname, v) for k, v in self.__dict__.items()}
+
+    def update(self, o: Union[DataDict, dict]):
+        """Update values with other values"""
+        if isinstance(o, DataDict):
+            self.__dict__.update(o)
+        else:
+            self.__dict__.update(self.__class__(o))
+        return self
+
+    def remove_none(self, recursive=True):
+        """Remove all elements that are set to None"""
+        self.__dict__ = {
+            key: val.remove_none() if recursive and isinstance(val, DataDict) else val
+            for key, val in self.__dict__.items()
+            if val is not None
+        }
+        return self
 
     def __repr__(self):
         data = " ".join(f"{k}={self.__dict__[k]!r}" for k in sorted(self.__dict__))
