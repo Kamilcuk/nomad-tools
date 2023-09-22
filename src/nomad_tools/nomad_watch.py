@@ -37,6 +37,20 @@ log = logging.getLogger(__name__)
 
 ###############################################################################
 
+args = argparse.Namespace()
+
+
+@dataclasses.dataclass
+class Argsstream:
+    out: bool
+    err: bool
+    alloc: bool
+
+
+args_stream: Argsstream
+
+args_lines_start_ns: int = 0
+
 
 def _init_colors() -> Dict[str, str]:
     tputdict = {
@@ -82,35 +96,101 @@ def ns2dt(ns: int):
     return datetime.datetime.fromtimestamp(ns // 1000000000)
 
 
+def composed(*decs):
+    def deco(f):
+        for dec in reversed(decs):
+            f = dec(f)
+        return f
+
+    return deco
+
+
 ###############################################################################
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class LogFormat:
     alloc: str
     stderr: str
     stdout: str
-    app: str
+    module: str
 
     @classmethod
-    def mk(cls, prefix: str):
+    def mk(cls, prefix: str, log_timestamp: bool = False):
+        now = " %(asctime)s" if log_timestamp else ""
         return cls(
-            f"%(cyan)s{prefix}A %(now)s %(message)s%(reset)s",
-            f"%(orange)s{prefix}E %(message)s%(reset)s",
-            f"{prefix}O %(message)s",
-            "%(blue)s%(module)s:%(lineno)03d: %(message)s%(reset)s",
+            f"%(cyan)s{prefix}A %(asctime)s %(message)s%(reset)s",
+            f"%(orange)s{prefix}E{now} %(message)s%(reset)s",
+            f"{prefix}O{now} %(message)s",
+            f"%(blue)s%(module)s:%(lineno)03d:{now} %(message)s%(reset)s",
         )
 
     def astuple(self):
         return dataclasses.astuple(self)
 
 
-log_formats: Dict[str, LogFormat] = {
-    "default": LogFormat.mk("%(allocid).6s:%(group)s:%(task)s:"),
-    "long": LogFormat.mk("%(allocid)s:%(group)s:%(task)s:"),
-    "short": LogFormat.mk("%(task)s:"),
-    "onepart": LogFormat.mk(""),
-}
+log_format = LogFormat.mk("%(allocid).6s:%(group)s:%(task)s:")
+
+
+def click_log_options():
+    """All logging options"""
+    return composed(
+        click.option(
+            "-S",
+            "--log-timestamp",
+            is_flag=True,
+            help="Additionally add timestamp of the logs from the task. The timestamp is when the log was received. Nomad does not store timestamp of logs sadly.",
+        ),
+        click.option("--log-format-alloc", default=log_format.alloc, show_default=True),
+        click.option(
+            "--log-format-stderr", default=log_format.stderr, show_default=True
+        ),
+        click.option(
+            "--log-format-stdout", default=log_format.stdout, show_default=True
+        ),
+        click.option(
+            "-l", "--log-long-alloc", is_flag=True, help="Log full length allocation id"
+        ),
+        click.option(
+            "-G",
+            "--log-no-group",
+            is_flag=True,
+            help="Do not log group",
+        ),
+        click.option(
+            "-T",
+            "--log-no-task",
+            is_flag=True,
+            help="Do not log task",
+        ),
+        click.option(
+            "-1",
+            "--log-only-task",
+            is_flag=True,
+            help="Prefix the lines only with task name.",
+        ),
+        click.option(
+            "-0",
+            "--log-none",
+            is_flag=True,
+            help="Log only stream prefix",
+        ),
+    )
+
+
+def log_format_choose():
+    global log_format
+    log_format.alloc = args.log_format_alloc
+    log_format.stderr = args.log_format_stderr
+    log_format.stdout = args.log_format_stdout
+    alloc = "%(allocid)s" if args.log_long_alloc else "%(allocid).6s"
+    group = "" if args.log_no_group else "%(group)s:"
+    task = "" if args.log_no_task else "%(task)s:"
+    log_format = LogFormat.mk(f"{alloc}:{group}{task}", args.log_timestamp)
+    if args.log_only_task:
+        log_format = LogFormat.mk("%(task)s:", args.log_timestamp)
+    if args.log_none:
+        log_format = LogFormat.mk("", args.log_timestamp)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -136,12 +216,13 @@ class TaskKey:
         print(fmt % self._params(kvargs), flush=True)
 
     def log_alloc(self, now: datetime.datetime, message: str):
-        self._log(args.log_format_alloc, now=now, message=message)
+        self._log(log_format.alloc, asctime=now, message=message)
 
     def log_task(self, stderr: bool, message: str):
         self._log(
-            args.log_format_stderr if stderr else args.log_format_stdout,
+            log_format.stderr if stderr else log_format.stdout,
             message=message,
+            asctime=datetime.datetime.now(),
         )
 
 
@@ -911,7 +992,7 @@ class JobPath:
 @click.option(
     "-s",
     "--stream",
-    type=click.Choice("all alloc a stdout stderr out err o e 1 2".split()),
+    type=click.Choice("all alloc a stdout out o 1 stderr err e 2".split()),
     default=["all"],
     multiple=True,
     help="Print only messages from allocation and stdout or stderr of the task. This option is cummulative.",
@@ -920,17 +1001,17 @@ class JobPath:
 @click.option(
     "--json",
     is_flag=True,
-    help="job input is in json form, passed to nomad command with --json",
+    help="job input is in json form, passed to nomad command with -json",
 )
 @click.option(
     "--stop",
     is_flag=True,
-    help="In run mode, make sure to stop the job before exit.",
+    help="Only relevant in stop mode. Stop the job before exiting.",
 )
 @click.option(
     "--purge",
     is_flag=True,
-    help="In run mode, stop and purge the job before exiting.",
+    help="Only relevant in run and stop modes. Purge the job.",
 )
 @click.option(
     "-n",
@@ -940,7 +1021,7 @@ class JobPath:
     type=int,
     help="""
         Sets the tail location in best-efforted number of lines relative to the end of logs.
-        Default is set to -1, which prints all the logs.
+        Default prints all the logs.
         Set to 0 to try try best-efforted logs from the current log position.
         See also --lines-timeout.
         """,
@@ -953,7 +1034,7 @@ class JobPath:
     help="When using --lines the number of lines is best-efforted by ignoring lines for specific time",
 )
 @click.option(
-    "--shutdown_timeout",
+    "--shutdown-timeout",
     default=2,
     show_default=True,
     type=float,
@@ -987,28 +1068,7 @@ class JobPath:
     is_flag=True,
     help="Do not preserve tasks exit statuses",
 )
-@click.option(
-    "--log-format-alloc", default=log_formats["default"].alloc, show_default=True
-)
-@click.option(
-    "--log-format-stderr", default=log_formats["default"].stderr, show_default=True
-)
-@click.option(
-    "--log-format-stdout", default=log_formats["default"].stdout, show_default=True
-)
-@click.option("-l", "--log-long", is_flag=True, help="Log full allocation id")
-@click.option(
-    "-S",
-    "--log-short",
-    is_flag=True,
-    help="Make the format short by logging only task name.",
-)
-@click.option(
-    "-1",
-    "--log-onepart",
-    is_flag=True,
-    help="Make the format short by logging only task name.",
-)
+@click_log_options()
 @click.help_option("-h", "--help")
 @click.pass_context
 def cli(ctx, **_):
@@ -1018,7 +1078,7 @@ def cli(ctx, **_):
     if args.verbose > 1:
         http_client.HTTPConnection.debuglevel = 1
     global args_stream
-    args_stream = argparse.Namespace(
+    args_stream = Argsstream(
         err=any(s in "all stderr err e 2".split() for s in args.stream),
         out=any(s in "all stdout out o 1".split() for s in args.stream),
         alloc=any(s in "all alloc a".split() for s in args.stream),
@@ -1028,33 +1088,16 @@ def cli(ctx, **_):
         args.all = True
     if args.namespace:
         os.environ["NOMAD_NAMESPACE"] = nomad_find_namespace(args.namespace)
-    assert [args.log_long, args.log_short, args.log_onepart].count(
-        True
-    ) <= 1, f"Only one --log-* argument can be specified at a time"
-    #
-    (
-        args.log_format_alloc,
-        args.log_format_stderr,
-        args.log_format_stdout,
-        logging_format,
-    ) = log_formats[
-        "long"
-        if args.log_long
-        else "short"
-        if args.log_short
-        else "onepart"
-        if args.log_onepart
-        else "default"
-    ].astuple()
+    log_format_choose()
     #
     logging.basicConfig(
-        format=logging_format,
+        format=log_format.module,
         level=logging.DEBUG if args.verbose else logging.INFO,
     )
     #
-    global args_lines_start_ns
-    args_lines_start_ns = 0 if args.lines < 0 else time.time_ns()
-    #
+    if args.lines >= 0:
+        global args_lines_start_ns
+        args_lines_start_ns = time.time_ns()
     # https://stackoverflow.com/questions/17558552/how-do-i-add-custom-field-to-python-log-format-string
     old_factory = logging.getLogRecordFactory()
 
