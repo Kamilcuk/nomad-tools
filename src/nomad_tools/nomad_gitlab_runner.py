@@ -81,9 +81,7 @@ def get_package_file(file: str) -> str:
 
 
 # Default job name template name
-default_jobname_template = (
-    "gitlabrunner.${CUSTOM_ENV_CI_PROJECT_PATH_SLUG}.${CUSTOM_ENV_CI_CONCURRENT_ID}"
-)
+default_jobname_template = "gitlabrunner.${CUSTOM_ENV_CI_RUNNER_ID}.${CUSTOM_ENV_CI_PROJECT_PATH_SLUG}.${CUSTOM_ENV_CI_CONCURRENT_ID}"
 
 
 class ConfigOverride(DataDict):
@@ -140,7 +138,8 @@ class ConfigDocker(ConfigDriver):
             "Name": default_jobname_template + "-clone",
             "Driver": "docker",
             "Config": {
-                "image": "gitlab/gitlab-runner-helper:x86_64-436955cb",
+                "image": "gitlab/gitlab-runner:alpine-v16.3.1",
+                "entrypoint": [],
                 "command": "sleep",
                 "args": [
                     "${CUSTOM_ENV_CI_JOB_TIMEOUT}",
@@ -567,7 +566,9 @@ class Jobenv:
         # Template the job - expand all ${CUSTOM_ENV_*} references.
         jobjson = json.dumps(nomadjob.asdict())
         try:
-            jobjson = OnlyBracedCustomEnvTemplate(jobjson).substitute(NotCustomEnvIsFine())
+            jobjson = OnlyBracedCustomEnvTemplate(jobjson).substitute(
+                NotCustomEnvIsFine()
+            )
         except ValueError:
             log.exception(f"{jobjson}")
             raise
@@ -681,7 +682,9 @@ def cli(verbose: int, configpath: Path, section: str):
         ), f"All items in config have to be in a section. {key} is not"
     configs = {key: val for key, val in data.items()}
     global config
-    config = Config({**configs.get("default", {}), **configs.get(section, {})}).remove_none()
+    config = Config(
+        {**configs.get("default", {}), **configs.get(section, {})}
+    ).remove_none()
     if verbose:
         config.verbose = 1
     #
@@ -723,7 +726,7 @@ def mode_config():
 def mode_prepare():
     je = Jobenv()
     purge_previous_nomad_job(je.jobname)
-    nomad_watch.cli.main(["start", json.dumps({"Job": je.job.asdict()})])
+    nomad_watch.cli.main(["-G", "start", json.dumps({"Job": je.job.asdict()})])
 
 
 @cli.command("run", help="https://docs.gitlab.com/runner/executors/custom.html#run")
@@ -751,7 +754,7 @@ def mode_run(script: str, stage: str):
 )
 def mode_cleanup():
     je = Jobenv()
-    nomad_watch.cli(
+    nomad_watch.cli.main(
         (["--purge"] if config.purge else []) + ["-xn0", "stop", je.jobname]
     )
 
@@ -764,6 +767,7 @@ def mode_showconfig():
         "CI_PROJECT_PATH_SLUG",
         "CI_CONCURRENT_ID",
         "CI_JOB_TIMEOUT",
+        "CI_RUNNER_ID",
     ]
     os.environ.update({f"CUSTOM_ENV_{i}": f"CUSTOM_ENV_{i}_VAL" for i in arr})
     print(Jobenv.create_job_env())

@@ -16,7 +16,8 @@ def nomad_gitlab_runner(
     defaults: Dict[str, str] = dict(
         CUSTOM_ENV_CI_PROJECT_PATH_SLUG="test",
         CUSTOM_ENV_CI_CONCURRENT_ID="123",
-        CUSTOM_ENV_CI_JOB_TIMEOUT="10",
+        CUSTOM_ENV_CI_JOB_TIMEOUT="60",
+        CUSTOM_ENV_CI_RUNNER_ID="runnerid",
     )
     for k, v in defaults.items():
         env.setdefault(k, v)
@@ -32,7 +33,9 @@ def cycle(script: str, config: str = ""):
     with tempfile.NamedTemporaryFile("w") as configfile:
         configfile.write(dedent(config))
         configfile.flush()
-        driverconfig = json.loads(nomad_gitlab_runner(configfile, "config", stdout=1).stdout)
+        driverconfig = json.loads(
+            nomad_gitlab_runner(configfile, "config", stdout=1).stdout
+        )
         assert isinstance(driverconfig["builds_dir"], str)
         assert isinstance(driverconfig["cache_dir"], str)
         driverenv = driverconfig["job_env"]

@@ -25,6 +25,8 @@ def test_nomad_gitlab_runner_templater():
     assert nomad_gitlab_runner.OnlyBracedCustomEnvTemplate(txt).substitute() == txt
     txt = "${CUSTOM_ENV_ABC}"
     assert (
-        nomad_gitlab_runner.OnlyBracedCustomEnvTemplate(txt).substitute({"CUSTOM_ENV_ABC": 123})
+        nomad_gitlab_runner.OnlyBracedCustomEnvTemplate(txt).substitute(
+            {"CUSTOM_ENV_ABC": 123}
+        )
         == "123"
     )
