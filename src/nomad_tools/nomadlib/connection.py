@@ -136,7 +136,9 @@ class NomadConn(Requestor):
                 else None
             ),
             params=params,
-            verify=os.environ.get("NOMAD_CACERT"),
+            verify=False
+            if "NOMAD_SKIP_VERIFY" in os.environ
+            else os.environ.get("NOMAD_CACERT"),
             cert=(
                 (os.environ["NOMAD_CLIENT_CERT"], os.environ["NOMAD_CLIENT_KEY"])
                 if "NOMAD_CLIENT_CERT" in os.environ
