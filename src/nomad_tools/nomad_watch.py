@@ -752,33 +752,27 @@ class NomadJobWatcherUntilFinished(NomadJobWatcher):
     foundjob: bool = False
 
     def until_cb(self) -> bool:
-        if self.db.job is not None:
+        if self.db.job is None:
             self.foundjob = True
+        if not self.foundjob:
+            return False
         if self.purged.is_set():
             # If the job was purged, then we wait until the job is completely purged.
-            if self.foundjob and self.db.job is None:
-                log.info(f"Job {self.job.description()} purged")
+            if self.db.job is None:
+                log.info(f"Job {self.job.description()} purged. Exiting.")
                 return True
-            else:
-                return False
-        elif len(self.allocworkers) == 0:
+            return False
+        if self.db.job:
             jobjson = self.db.job
             if jobjson is not None:
                 if jobjson.Version != self.job.Version:
-                    log.info(f"New version of job {self.job.description()} posted")
-                    return True
-                if jobjson.Status == "dead":
                     log.info(
-                        f"Job {self.job.description()} is dead with no allocations"
+                        f"New version of job {self.job.description()} was posted. Exiting."
                     )
                     return True
-        else:
-            allallocsfinished = all(alloc.is_finished() for alloc in self.allocs)
-            if allallocsfinished:
-                log.info(
-                    f"All {len(self.allocs)} allocations of {self.job.description()} are finished"
-                )
-                return True
+                if jobjson.Status == "dead":
+                    log.info(f"Job {self.job.description()} is dead. Exiting.")
+                    return True
         return False
 
 
