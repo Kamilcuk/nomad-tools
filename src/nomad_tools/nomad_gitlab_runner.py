@@ -229,7 +229,7 @@ class Config(DataDict):
     NOMAD_LICENSE: Optional[str] = os.environ.get("NOMAD_LICENSE")
 
     # Mode to execute with. Has to be set.
-    mode: str
+    mode: str = "docker"
     # Enable debugging?
     verbose: int = 0
     # Should the job be purged after we are done?
@@ -261,9 +261,6 @@ class Config(DataDict):
             ConfigMode.custom: self.custom,
             ConfigMode.docker: self.docker,
         }
-        assert (
-            "mode" in self and self.mode is not None
-        ), f"mode option has to be set in config file"
         try:
             cd = ConfigMode[self.mode]
         except KeyError:
