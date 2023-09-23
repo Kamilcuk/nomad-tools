@@ -14,10 +14,9 @@ from typing import Dict
 
 import click
 
-from .nomadlib.connection import VariableConflict
-
-from .common import complete_job, mynomad, namespace_option
+from .common import common_options, complete_job, mynomad, namespace_option
 from .nomadlib import VariableNotFound
+from .nomadlib.connection import VariableConflict
 
 log = logging.getLogger(__file__)
 
@@ -180,7 +179,7 @@ class NomadVarDirMain:
     help="Disable checking if the file is smaller than 10mb",
 )
 @click.pass_context
-@click.help_option("-h", "--help")
+@common_options()
 def cli(ctx, **kwargs):
     global args
     args = argparse.Namespace(**ctx.params)
@@ -210,7 +209,7 @@ def cli(ctx, **kwargs):
     type=click.Path(exists=True, path_type=Path),
     nargs=-1,
 )
-@click.help_option("-h", "--help")
+@common_options()
 @click.pass_context
 def mode_put(ctx, **kvargs):
     nvd = NomadVarDirMain(ctx)
@@ -254,7 +253,7 @@ def mode_put(ctx, **kvargs):
     nargs=-1,
 )
 @click.pass_context
-@click.help_option("-h", "--help")
+@common_options()
 def mode_diff(ctx, **kwargs):
     nvd = NomadVarDirMain(ctx)
     nvd.gen_new_items()
@@ -271,7 +270,7 @@ def mode_diff(ctx, **kwargs):
     type=click.Path(file_okay=False, writable=True, path_type=Path),
 )
 @click.pass_context
-@click.help_option("-h", "--help")
+@common_options()
 def mode_get(ctx, **kwargs):
     nvd = NomadVarDirMain(ctx)
     #

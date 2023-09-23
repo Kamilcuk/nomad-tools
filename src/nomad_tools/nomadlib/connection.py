@@ -101,7 +101,7 @@ class VariableConn(_Conn):
         return self.r.delete(var_path)
 
 
-class NomadConn(Requestor):
+class Nomadlib(Requestor):
     """Represents connection to Nomad"""
 
     def __init__(self, namespace: str = "", session: Optional[requests.Session] = None):

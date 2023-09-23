@@ -2,10 +2,11 @@ import os
 from typing import Callable, Iterable
 
 import click
+import pkg_resources
 
-from .nomadlib import NomadConn
+from .nomadlib import Nomadlib
 
-mynomad = NomadConn()
+mynomad = Nomadlib()
 
 
 def nomad_find_namespace(prefix: str):
@@ -62,5 +63,41 @@ def namespace_option():
         ),
     )
 
+
 def complete_job():
     return completor(lambda: (x["ID"] for x in mynomad.get("jobs")))
+
+
+def composed(*decs):
+    def deco(f):
+        for dec in reversed(decs):
+            f = dec(f)
+        return f
+
+    return deco
+
+
+def get_version():
+    return pkg_resources.get_distribution(__package__).version
+
+
+def _print_version(ctx, param, value):
+    if not value or ctx.resilient_parsing:
+        return
+    # Copied from version_option()
+    prog_name = ctx.find_root().info_name
+    click.echo(f"{prog_name}, version {get_version()}")
+    ctx.exit()
+
+
+def common_options():
+    return composed(
+        click.help_option("-h", "--help"),
+        click.option(
+            "--version",
+            is_flag=True,
+            callback=_print_version,
+            expose_value=False,
+            is_eager=True,
+        ),
+    )

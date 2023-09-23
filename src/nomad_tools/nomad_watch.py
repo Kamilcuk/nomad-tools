@@ -25,8 +25,10 @@ import requests
 from . import nomadlib
 from .common import (
     _complete_set_namespace,
+    common_options,
     complete_job,
     completor,
+    composed,
     mynomad,
     namespace_option,
     nomad_find_namespace,
@@ -93,16 +95,7 @@ def ns2s(ns: int):
 
 
 def ns2dt(ns: int):
-    return datetime.datetime.fromtimestamp(ns // 1000000000)
-
-
-def composed(*decs):
-    def deco(f):
-        for dec in reversed(decs):
-            f = dec(f)
-        return f
-
-    return deco
+    return datetime.datetime.fromtimestamp(ns // 1000000000).astimezone()
 
 
 ###############################################################################
@@ -1069,7 +1062,7 @@ class JobPath:
     help="Do not preserve tasks exit statuses",
 )
 @click_log_options()
-@click.help_option("-h", "--help")
+@common_options()
 @click.pass_context
 def cli(ctx, **_):
     global args
@@ -1127,7 +1120,7 @@ cli_jobfile = click.argument(
     "allocid",
     shell_complete=completor(lambda: (x["ID"] for x in mynomad.get("allocations"))),
 )
-@click.help_option("-h", "--help")
+@common_options()
 def mode_alloc(allocid):
     allocs = mynomad.get(f"allocations", params={"prefix": allocid})
     assert len(allocs) > 0, f"Allocation with id {allocid} not found"
@@ -1172,7 +1165,7 @@ def mode_alloc(allocid):
 
 @cli.command("run", help="Run a Nomad job and then watch over it until it is finished.")
 @cli_jobfile
-@click.help_option("-h", "--help")
+@common_options()
 def mode_run(jobfile):
     jobinit = nomad_start_job_and_wait(jobfile)
     do = NomadJobWatcherUntilFinished(jobinit)
@@ -1189,7 +1182,7 @@ def mode_run(jobfile):
 
 @cli.command("job", help="Watch a Nomad job, show its logs and events.")
 @cli_jobid
-@click.help_option("-h", "--help")
+@common_options()
 def mode_job(jobid):
     jobinit = nomad_find_job(jobid)
     NomadJobWatcherUntilFinished(jobinit).run_till_end()
@@ -1197,7 +1190,7 @@ def mode_job(jobid):
 
 @cli.command("start", help="Start a Nomad Job. Then act like started mode.")
 @cli_jobfile
-@click.help_option("-h", "--help")
+@common_options()
 def mode_start(jobfile):
     jobinit = nomad_start_job_and_wait(jobfile)
     NomadJobWatcherUntilStarted(jobinit).run_till_end()
@@ -1211,7 +1204,7 @@ Exit with 2 exit status when the job has status dead.
 """,
 )
 @cli_jobid
-@click.help_option("-h", "--help")
+@common_options()
 def mode_started(jobid):
     jobinit = nomad_find_job(jobid)
     NomadJobWatcherUntilStarted(jobinit).run_till_end()
@@ -1222,7 +1215,7 @@ def mode_started(jobid):
     help="Stop a Nomad job and then watch the job until it is stopped - has no running allocations.",
 )
 @cli_jobid
-@click.help_option("-h", "--help")
+@common_options()
 def mode_stop(jobid: str):
     jobinit = nomad_find_job(jobid)
     do = NomadJobWatcherUntilFinished(jobinit)
@@ -1240,7 +1233,7 @@ def mode_stop(jobid: str):
     help="Watch a Nomad job until the job is stopped - has not running allocation.",
 )
 @cli_jobid
-@click.help_option("-h", "--help")
+@common_options()
 def mode_stopped(jobid):
     jobinit = nomad_find_job(jobid)
     NomadJobWatcherUntilFinished(jobinit).run_till_end()

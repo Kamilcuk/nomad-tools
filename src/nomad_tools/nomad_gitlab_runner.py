@@ -23,7 +23,8 @@ from typing import Dict, List, Optional, Union
 import click
 import tomli
 
-from . import nomad_watch
+from . import nomad_watch, nomadlib
+from .common import common_options, get_version, mynomad
 from .nomadlib.datadict import DataDict
 from .nomadlib.types import Job, JobTask, JobTaskConfig
 
@@ -600,6 +601,11 @@ class Jobenv:
 ###############################################################################
 
 
+class BuildFailure(Exception):
+    code: int = 76
+    """Quite a special exit status returned by script.sh when the build script has failed."""
+
+
 @click.group(
     help="""
 This is a script to execute Nomad job from custom gitlab executor.
@@ -668,8 +674,8 @@ The value defaults to CUSTOM_ENV_CI_RUNNER_ID which is set to the unique ID of t
     envvar="CUSTOM_ENV_CI_RUNNER_ID",
     show_default=True,
 )
-@click.help_option("-h", "--help")
-def cli(verbose: int, configpath: Path, section: str):
+@common_options()
+def main(verbose: int, configpath: Path, section: str):
     # Read configuration
     with configpath.open("rb") as f:
         data = tomli.load(f)
@@ -696,7 +702,7 @@ def cli(verbose: int, configpath: Path, section: str):
         os.environ.setdefault("CUSTOM_ENV_CI_JOB_IMAGE", dc["image"])
 
 
-@cli.command(
+@main.command(
     "config", help="https://docs.gitlab.com/runner/executors/custom.html#config"
 )
 def mode_config():
@@ -708,16 +714,16 @@ def mode_config():
         "hostname": socket.gethostname(),
         "driver": {
             "name": "nomad-gitlab-runner",
-            "version": "v0.0.1",
+            "version": get_version(),
         },
         "job_env": Jobenv.create_job_env(),
     }
     driver_config_json = json.dumps(driver_config)
     log.debug(f"driver_config={driver_config_json}")
-    print(driver_config_json, flush=True)
+    click.echo(driver_config_json)
 
 
-@cli.command(
+@main.command(
     "prepare", help="https://docs.gitlab.com/runner/executors/custom.html#prepare"
 )
 def mode_prepare():
@@ -726,7 +732,7 @@ def mode_prepare():
     nomad_watch.cli.main(["-G", "start", json.dumps({"Job": je.job.asdict()})])
 
 
-@cli.command("run", help="https://docs.gitlab.com/runner/executors/custom.html#run")
+@main.command("run", help="https://docs.gitlab.com/runner/executors/custom.html#run")
 @click.argument("script")
 @click.argument("stage")
 def mode_run(script: str, stage: str):
@@ -746,7 +752,7 @@ def mode_run(script: str, stage: str):
     )
 
 
-@cli.command(
+@main.command(
     "cleanup", help="https://docs.gitlab.com/runner/executors/custom.html#cleanup"
 )
 def mode_cleanup():
@@ -756,7 +762,7 @@ def mode_cleanup():
     )
 
 
-@cli.command("showconfig", help="Show current configuration")
+@main.command("showconfig", help="Show current configuration")
 def mode_showconfig():
     print(json.dumps(config.asdict(), indent=2))
     print()
@@ -772,5 +778,18 @@ def mode_showconfig():
 
 ###############################################################################
 
+
+def cli(*args, **kvargs) -> int:
+    try:
+        main.main(*args, **kvargs)
+    except BuildFailure:
+        log.debug(f"build failure")
+        return int(os.environ.get("BUILD_FAILURE_EXIT_CODE", BuildFailure.code))
+    except Exception as e:
+        log.exception(e)
+        return int(os.environ.get("SYSTEM_FAILURE_EXIT_CODE", 111))
+    return 0
+
+
 if __name__ == "__main__":
-    cli.main()
+    exit(cli())

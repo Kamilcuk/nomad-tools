@@ -16,6 +16,8 @@ from typing import List, Optional, Union
 
 import click
 
+from .common import common_options
+
 log = logging.getLogger(Path(__file__).name)
 
 
@@ -370,7 +372,7 @@ Written by Kamil Cukrowski 2023. Licensed under GNU GPL version or later.
 @click.option("--test", is_flag=True, help="Run tests")
 @click.argument("source")
 @click.argument("dest")
-@click.help_option("-h", "--help")
+@common_options()
 def cli(**kwargs):
     global args
     args = argparse.Namespace(**kwargs)
