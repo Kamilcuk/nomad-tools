@@ -20,31 +20,37 @@ def _init_value(classname: str, dstname: str, dsttype: Any, srcval: Any):
 
     def msg() -> str:
         return (
-            f"Error when constructing class {classname!r} expected type {dsttype!r} wth origin {dstorigin!r}"
+            f"Error when constructing class {classname!r} expected type {dsttype!r} with origin {dstorigin!r}"
             f" for field {dstname!r}, but received {type(srcval)} with value: {srcval!r}"
         )
 
-    if dstorigin == list:
-        assert type(srcval) == dstorigin, msg()
-        return [dsttype.__args__[0](x) for x in srcval]
-    elif dstorigin == dict:
-        assert type(srcval) == dstorigin, msg()
-        return {
-            dsttype.__args__[0](k): dsttype.__args__[1](v) for k, v in srcval.items()
-        }
-    elif dstorigin == Union:
-        if type(srcval) in dsttype.__args__:
-            return srcval
-        assert len(dsttype.__args__) == 2 and dsttype.__args__[1] == type(
-            None
-        ), f"Only Optional handled"
-        return _init_value(classname, dstname, dsttype.__args__[0], srcval)
-    elif issubclass(dsttype, DataDict):
-        return dsttype(srcval)
-    elif issubclass(dsttype, enum.Enum):
-        return dsttype(srcval)
-    assert type(srcval) == dsttype, msg()
-    return srcval
+    try:
+        if dstorigin == list:
+            assert type(srcval) == dstorigin, msg()
+            return [dsttype.__args__[0](x) for x in srcval]
+        elif dstorigin == dict:
+            assert type(srcval) == dstorigin, msg()
+            return {
+                dsttype.__args__[0](k): dsttype.__args__[1](v)
+                for k, v in srcval.items()
+            }
+        elif dstorigin == Union:
+            if type(srcval) in dsttype.__args__:
+                return srcval
+            assert len(dsttype.__args__) == 2 and dsttype.__args__[1] == type(
+                None
+            ), f"Only Optional handled"
+            return _init_value(classname, dstname, dsttype.__args__[0], srcval)
+        elif issubclass(dsttype, DataDict):
+            return dsttype(srcval)
+        elif issubclass(dsttype, enum.Enum):
+            return dsttype(srcval)
+        assert type(srcval) == dsttype, msg()
+        return srcval
+    except AssertionError:
+        raise
+    except Exception:
+        raise Exception(msg())
 
 
 def _asdict_value(fname: str, val: Any):
