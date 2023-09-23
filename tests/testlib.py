@@ -5,13 +5,21 @@ import os
 import shlex
 import subprocess
 import sys
+import time
 from typing import List, Optional, Union
 
 os.environ.setdefault("NOMAD_NAMESPACE", "default")
-
+from nomad_tools import nomadlib
 
 def caller(up=0):
     return inspect.stack()[1 + up][3]
+
+def job_exists(jobname):
+    try:
+        nomadlib.Nomadlib().get(f"job/{jobname}")
+        return True
+    except nomadlib.JobNotFound:
+        return False
 
 
 @functools.lru_cache(maxsize=0)
@@ -23,7 +31,9 @@ def nomad_has_docker():
     return False
 
 
-def gen_job(script=""" echo hello world """, name: Optional[str] = None):
+def gen_job(
+    script=""" echo hello world """, name: Optional[str] = None, mode: str = "raw_exec"
+):
     assert name is None or " " not in name
     name = (
         name
@@ -46,10 +56,13 @@ def gen_job(script=""" echo hello world """, name: Optional[str] = None):
             "args": ["-xc", script],
         },
     }
-    task = docker_task if nomad_has_docker() else raw_exec_task
+    task = raw_exec_task if mode == "raw_exec" else docker_task
     job = {
         "ID": jobname,
         "Type": "batch",
+        "Meta": {
+            "TIME": f"{time.time_ns()}",
+        },
         "TaskGroups": [
             {
                 "Name": jobname,
@@ -88,24 +101,28 @@ def run(
         **kwargs,
     )
     if stdout:
-        print(rr.stdout)
+        print("STDOUT:", rr.stdout)
     if isinstance(check, bool):
         if check:
             rr.check_returncode()
     elif isinstance(check, int):
-        assert rr.returncode == check, f"{rr.returncode} {check}"
+        assert (
+            rr.returncode == check
+        ), f"Command {rr} died with {rr.returncode} != {check}"
     elif isinstance(check, list):
-        assert rr.returncode in check, f"{rr.returncode} {check}"
+        assert (
+            rr.returncode in check
+        ), f"Command {rr} died with {rr.returncode} not in {check}"
     return rr
 
 
 def run_nomad_cp(cmd: str, **kwargs):
-    return run(f"python -m nomad_tools.nomad_cp -v {cmd}", **kwargs)
+    return run(f"python3 -m nomad_tools.nomad_cp -v {cmd}", **kwargs)
 
 
 def run_nomad_watch(cmd: str, **kwargs):
-    return run(f"python -m nomad_tools.nomad_watch -v {cmd}", **kwargs)
+    return run(f"python3 -m nomad_tools.nomad_watch -v {cmd}", **kwargs)
 
 
 def run_nomad_vardir(cmd: str, **kwargs):
-    return run(f"python -m nomad_tools.nomad_vardir -v {cmd}", **kwargs)
+    return run(f"python3 -m nomad_tools.nomad_vardir -v {cmd}", **kwargs)

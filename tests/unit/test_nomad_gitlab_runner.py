@@ -14,7 +14,7 @@ mode = "docker"
         configfile.write(dedent(config))
         configfile.flush()
         run(
-            f"python -m nomad_tools.nomad_gitlab_runner -vvc {configfile.name} showconfig",
+            f"python3 -m nomad_tools.nomad_gitlab_runner -vvc {configfile.name} showconfig",
         )
 
 

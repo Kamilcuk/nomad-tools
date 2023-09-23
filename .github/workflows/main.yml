@@ -30,9 +30,9 @@ jobs:
       - name: run unit tests
         run: pytest -sxv tests/unit
       - name: install nomad server
-        run: bash ./tests/install_nomad.sh
+        run: bash ./tests/provision.sh nomad_install
       - name: run nomad server
-        run: bash ./tests/start_nomad_server.sh
+        run: bash ./tests/provision.sh nomad_start
       - name: run integration tests
         run: pytest -sxv tests/integration
 
