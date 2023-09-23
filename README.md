@@ -78,8 +78,11 @@ Options:
   -v, --verbose                   Be verbose
   --json                          job input is in json form, passed to nomad
                                   command with -json
-  --stop                          Only relevant in stop mode. Stop the job
-                                  before exiting.
+  --stop                          Only relevant in run mode. Stop the job before
+                                  exiting.
+  --purge-successful              Only relevant in run and stop modes. Purge the
+                                  job only if all job tasks finished
+                                  successfully.
   --purge                         Only relevant in run and stop modes. Purge the
                                   job.
   -n, --lines INTEGER             Sets the tail location in best-efforted number
@@ -100,10 +103,11 @@ Options:
   --polling                       Instead of listening to Nomad event stream,
                                   periodically poll for events
   -x, --no-preserve-status        Do not preserve tasks exit statuses
-  -S, --log-timestamp             Additionally add timestamp of the logs from
+  -T, --log-timestamp             Additionally add timestamp of the logs from
                                   the task. The timestamp is when the log was
                                   received. Nomad does not store timestamp of
                                   logs sadly.
+  --log-timestamp-format TEXT     [default: %Y-%m-%dT%H:%M:%S%z]
   --log-format-alloc TEXT         [default:
                                   %(cyan)s%(allocid).6s:%(group)s:%(task)s:A
                                   %(asctime)s %(message)s%(reset)s]
@@ -112,12 +116,13 @@ Options:
                                   %(message)s%(reset)s]
   --log-format-stdout TEXT        [default: %(allocid).6s:%(group)s:%(task)s:O
                                   %(message)s]
-  -l, --log-long-alloc            Log full length allocation id
+  --log-long-alloc                Log full length allocation id
   -G, --log-no-group              Do not log group
-  -T, --log-no-task               Do not log task
+  --log-no-task                   Do not log task
   -1, --log-only-task             Prefix the lines only with task name.
   -0, --log-none                  Log only stream prefix
   -h, --help                      Show this message and exit.
+  --version
 
 Commands:
   alloc    Watch over specific allocation
@@ -143,6 +148,7 @@ Usage: nomad-watch alloc [OPTIONS] ALLOCID
 
 Options:
   -h, --help  Show this message and exit.
+  --version
 
 ```
 
@@ -156,6 +162,7 @@ Usage: nomad-watch run [OPTIONS] JOBFILE
 
 Options:
   -h, --help  Show this message and exit.
+  --version
 
 ```
 
@@ -169,6 +176,7 @@ Usage: nomad-watch job [OPTIONS] JOBID
 
 Options:
   -h, --help  Show this message and exit.
+  --version
 
 ```
 
@@ -182,6 +190,7 @@ Usage: nomad-watch start [OPTIONS] JOBFILE
 
 Options:
   -h, --help  Show this message and exit.
+  --version
 
 ```
 
@@ -196,6 +205,7 @@ Usage: nomad-watch started [OPTIONS] JOBID
 
 Options:
   -h, --help  Show this message and exit.
+  --version
 
 ```
 
@@ -210,6 +220,7 @@ Usage: nomad-watch stop [OPTIONS] JOBID
 
 Options:
   -h, --help  Show this message and exit.
+  --version
 
 ```
 
@@ -223,6 +234,7 @@ Usage: nomad-watch stopped [OPTIONS] JOBID
 
 Options:
   -h, --help  Show this message and exit.
+  --version
 
 ```
 
@@ -253,6 +265,7 @@ Options:
   -s, --service FILE    Get namespace and job name from this nomad service file
   --disable-size-check  Disable checking if the file is smaller than 10mb
   -h, --help            Show this message and exit.
+  --version
 
 Commands:
   diff  Show only diff
@@ -280,6 +293,7 @@ Options:
   -D TEXT                Additional var=value to store in nomad variables
   --clear                Remove keys that are not found in files
   -h, --help             Show this message and exit.
+  --version
 
 ```
 
@@ -295,6 +309,7 @@ Options:
   --relative DIRECTORY  Files have paths relative to this directory instead of
                         current working directory
   -h, --help            Show this message and exit.
+  --version
 
 ```
 
@@ -308,6 +323,7 @@ Usage: nomad-vardir get [OPTIONS] DEST
 
 Options:
   -h, --help  Show this message and exit.
+  --version
 
 ```
 
@@ -351,6 +367,7 @@ Options:
                                   job ID.
   --test                          Run tests
   -h, --help                      Show this message and exit.
+  --version
 
   Written by Kamil Cukrowski 2023. Licensed under GNU GPL version 3 or later.
   License.
@@ -373,13 +390,12 @@ Custom gitlab executor driver on Nomad.
 + nomad-gitlab-runner --help
 Usage: nomad-gitlab-runner [OPTIONS] COMMAND [ARGS]...
 
-  This is a script to execute Nomad job from custom gitlab executor.
+  This is a script implemeting custom gitlab-runner executor to run jobs in
+  Nomad job from custom gitlab executor.
 
-  Example /etc/gitlab-runner/config.toml configuration file:
+  The /etc/gitlab-runner/config.yaml configuration file should look like:
     [[runners]]
-    ...
     id = 27898742
-    ...
     executor = "custom"
     [runners.custom]
       config_exec = "nomad-gitlab-runner"
@@ -391,40 +407,63 @@ Usage: nomad-gitlab-runner [OPTIONS] COMMAND [ARGS]...
       cleanup_exec = "nomad-gitlab-runner"
       cleanup_args = ["cleanup"]
 
-  Example /etc/gitlab-runner/nomad.toml configuration file:
-      [default]
-      # You can use NOMAD_* variables here
-      NOMAD_TOKEN = 1234567
-  
-      # Id of the runner from config.toml file allows overriding the values for speicfic runner.
-      [27898742]
-      # Mode to use - "raw_exec", "exec", "docker" or "custom"
-      mode = "raw_exec"
-      verbose = 0
-      CPU = 2048
-      MemoryMB = 2048
-      # If it possible to override some things. This is TOML syntax.
-      [27898742.override.job]
-      [27898742.override.task]
-      [27898742.override.task_config]
-      # for example https://developer.hashicorp.com/nomad/docs/drivers/docker#logging
-      [27898742.override.task_config.logging]
-      type = "fluentd"
-      [27898742.override.task_config.logging.config]
-      fluentd-address = "localhost:24224"
-      tag = "your_tag"
+  Example /etc/gitlab-runner/nomad-gitlab-runner.yaml configuration file:
+      ---
+      default:
+          # You can use NOMAD_* variables here
+          NOMAD_TOKEN: "1234567"
+          NOMAD_ADDR: "http://127.0.0.1:4646"
+      # Id of the runner from config.yaml file allows overriding the values for specific runner.
+      27898742:
+          # Mode to use - "raw_exec", "exec", "docker" or "custom"
+          mode: "docker"
+          purge: false
+          verbose: 0
+          CPU: 2048
+          MemoryMB: 2048
+          docker:
+              image: "alpine"
+              privileged: false
+              services:
+                  privileged: true
+          # If it possible to override some things.
+          override:
+              task_config:
+                  cpuset_cpus: "1-3"
+
+  Example .gitlab-ci.yml with dockerd service:
+      ---
+      docker_dind_tls:
+          image: docker:24.0.5
+          services:
+              - docker:24.0.5-dind
+          variables:
+              DOCKER_HOST: tcp://docker:2376
+              DOCKER_TLS_CERTDIR: "/alloc"
+              DOCKER_TLS_VERIFY: 1
+          script;
+              - docker info
+      docker_dind_notls:
+          image: docker:24.0.5
+          services:
+              - docker:24.0.5-dind
+          variables:
+              DOCKER_HOST: tcp://docker:2375
+          script;
+              - docker info
 
 
 
 Options:
   -v, --verbose
   -c, --config FILE   Path to configuration file.  [default: /etc/gitlab-
-                      runner/nomad.toml]
+                      runner/nomad-gitlab-runner.yaml]
   -s, --section TEXT  An additional section read from configuration file to
                       merge with defaults. The value defaults to
                       CUSTOM_ENV_CI_RUNNER_ID which is set to the unique ID of
                       the runner being used.
   -h, --help          Show this message and exit.
+  --version
 
 Commands:
   cleanup     https://docs.gitlab.com/runner/executors/custom.html#cleanup

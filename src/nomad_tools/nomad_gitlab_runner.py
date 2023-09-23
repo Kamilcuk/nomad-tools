@@ -673,7 +673,7 @@ The value defaults to CUSTOM_ENV_CI_RUNNER_ID which is set to the unique ID of t
     show_default=True,
 )
 @common_options()
-def main(verbose: int, configpath: Path, section: str):
+def cli(verbose: int, configpath: Path, section: str):
     # Read configuration
     configcontent = configpath.read_text()
     data = yaml.safe_load(configcontent)
@@ -701,7 +701,7 @@ def main(verbose: int, configpath: Path, section: str):
         os.environ.setdefault("CUSTOM_ENV_CI_JOB_IMAGE", dc["image"])
 
 
-@main.command(
+@cli.command(
     "config", help="https://docs.gitlab.com/runner/executors/custom.html#config"
 )
 def mode_config():
@@ -722,7 +722,7 @@ def mode_config():
     click.echo(driver_config_json)
 
 
-@main.command(
+@cli.command(
     "prepare", help="https://docs.gitlab.com/runner/executors/custom.html#prepare"
 )
 def mode_prepare():
@@ -733,7 +733,7 @@ def mode_prepare():
     run_nomad_watch(f"start {quote(jobjson)}")
 
 
-@main.command("run", help="https://docs.gitlab.com/runner/executors/custom.html#run")
+@cli.command("run", help="https://docs.gitlab.com/runner/executors/custom.html#run")
 @click.argument("script")
 @click.argument("stage")
 def mode_run(script: str, stage: str):
@@ -754,7 +754,7 @@ def mode_run(script: str, stage: str):
         rr.check_returncode()
 
 
-@main.command(
+@cli.command(
     "cleanup", help="https://docs.gitlab.com/runner/executors/custom.html#cleanup"
 )
 def mode_cleanup():
@@ -766,7 +766,7 @@ def mode_cleanup():
     )
 
 
-@main.command("showconfig", help="Show current configuration")
+@cli.command("showconfig", help="Show current configuration")
 def mode_showconfig():
     print(json.dumps(config.asdict(), indent=2))
     print()
@@ -784,9 +784,9 @@ def mode_showconfig():
 ###############################################################################
 
 
-def cli(*args, **kvargs) -> int:
+def main(*args, **kvargs) -> int:
     try:
-        main.main(*args, **kvargs)
+        cli.main(*args, **kvargs)
     except BuildFailure:
         log.debug(f"build failure")
         return int(os.environ.get("BUILD_FAILURE_EXIT_CODE", BuildFailure.code))
@@ -797,4 +797,4 @@ def cli(*args, **kvargs) -> int:
 
 
 if __name__ == "__main__":
-    exit(cli())
+    exit(main())

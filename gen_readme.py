@@ -32,7 +32,7 @@ class Command:
     def gen(self, cmd=None):
         cmdarr: List[str] = [*([cmd.name] if cmd and cmd.name else []), "--help"]
         ret = runner.invoke(self.obj.cli, cmdarr, prog_name=self.cmdname())
-        assert ret.exit_code == 0
+        assert ret.exit_code == 0, f"{self.obj} {cmdarr} {ret}"
         help = ret.output
         return f"""
 

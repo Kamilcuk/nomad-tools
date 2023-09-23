@@ -27,7 +27,7 @@ documentation = "https://gitlab.com/Kamcuk/nomad-tools"
 nomad-watch = "nomad_tools:nomad_watch.cli"
 nomad-cp = "nomad_tools:nomad_cp.cli"
 nomad-vardir = "nomad_tools:nomad_vardir.cli"
-nomad-gitlab-runner = "nomad_tools:nomad_gitlab_runner.cli"
+nomad-gitlab-runner = "nomad_tools:nomad_gitlab_runner.main"
 
 [project.optional-dependencies]
 test = [
