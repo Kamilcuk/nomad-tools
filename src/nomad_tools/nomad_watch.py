@@ -1178,7 +1178,7 @@ class JobPath:
 
     \b
     If the option --no-preserve-exit is given, then exit with the following status:
-        0    if operation was successfull - the job was run or was purged on --purge
+        0    if operation was successful - the job was run or was purged on --purge
     Ohterwise, when mode is alloc, run, job, stop or stopped, exit with the following status:
         ?    when the job has one task, with that task exit status
         0    if all tasks of the job exited with 0 exit status

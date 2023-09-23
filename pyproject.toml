@@ -13,8 +13,8 @@ license = {text = "GPL-3.0-or-later"}
 dependencies = [
 	"click",
 	"requests",
-	"tomli",
 	"setuptools",
+	"pyyaml",
 ]
 dynamic = ["version"]
 
@@ -31,6 +31,7 @@ nomad-gitlab-runner = "nomad_tools:nomad_gitlab_runner.cli"
 
 [project.optional-dependencies]
 test = [
+	"tomli",
 	"pytest",
 	"pytest-xdist",
 ]
@@ -38,6 +39,10 @@ test = [
 [tool.pytest.ini_options]
 minversion = "6.0"
 addopts = "--tb=short"
+log_cli = true
+log_cli_level = "DEBUG"
+log_cli_format = "%(asctime)s %(levelname)s %(filename)s:%(lineno)s %(message)s"
+log_cli_date_format = "%H:%M:%S"
 testpaths = [
 	"tests/unit",
 ]

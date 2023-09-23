@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import dataclasses
 import datetime
 import enum
 import functools
@@ -21,7 +20,7 @@ from textwrap import dedent
 from typing import Dict, List, Optional, Union
 
 import click
-import tomli
+import yaml
 
 from . import nomad_watch, nomadlib
 from .common import common_options, get_version, mynomad
@@ -54,35 +53,71 @@ def ns2dt(ns: int):
     return datetime.datetime.fromtimestamp(ns // 1000000000)
 
 
-###############################################################################
-
-
-@functools.lru_cache(maxsize=0)
-def get_gitlab_env():
-    """Get all gitlab exported environment variables and remove CUSTOM_ENV_ from front"""
-    ret = {
-        k.replace("CUSTOM_ENV_", ""): v
-        for k, v in os.environ.items()
-        if k.startswith("CUSTOM_ENV_")
-    }
-    ret.update({f"CUSTOM_ENV_{k}": v for k, v in ret.items()})
-    # log.debug(f"env={ret}")
-    return ret
-
-
 @functools.lru_cache(maxsize=0)
 def get_package_file(file: str) -> str:
     """Get a file relative to current package"""
-    res = pkgutil.get_data(__package__, file)
+    res = pkgutil.get_data(__package__, "nomad_gitlab_runner/" + file)
     assert res is not None, f"Could not find {file}"
     return res.decode()
 
 
+def get_CUSTOM_ENV() -> Dict[str, str]:
+    return {
+        k[len("CUSTOM_ENV_") :]: v
+        for k, v in os.environ.items()
+        if k.startswith("CUSTOM_ENV_")
+    }
+
+
+def print_env():
+    log.fatal("\n".join(f"{k}={quote(v)}" for k, v in os.environ.items()))
+
+
 ###############################################################################
 
 
-# Default job name template name
-default_jobname_template = "gitlabrunner.${CUSTOM_ENV_CI_RUNNER_ID}.${CUSTOM_ENV_CI_PROJECT_PATH_SLUG}.${CUSTOM_ENV_CI_CONCURRENT_ID}"
+class ServiceSpec(DataDict):
+    """
+    Specification of services as given to use by Gitlab
+    https://docs.gitlab.com/ee/ci/yaml/#services
+    """
+
+    name: str
+    alias: str = ""
+    entrypoint: Optional[List[str]] = None
+    command: Optional[List[str]] = None
+
+    def __post_init__(self):
+        if not self.alias:
+            self.alias = self.name.split("/")[-1].split(":")[0]
+
+    @staticmethod
+    def get() -> List[ServiceSpec]:
+        """Read the Gitlab environment variable to extract the service"""
+        CI_JOB_SERVICES = os.environ.get("CUSTOM_ENV_CI_JOB_SERVICES")
+        data: List[Union[str, Dict[str, str]]] = (
+            json.loads(CI_JOB_SERVICES) if CI_JOB_SERVICES else []
+        )
+        assert isinstance(
+            data, list
+        ), f"CUSTOM_ENV_CI_JOB_SERVICES is not a list: {CI_JOB_SERVICES}"
+        ret: List[ServiceSpec] = []
+        for x in data:
+            if isinstance(x, str):
+                s = ServiceSpec(name=x)
+                ret += [s]
+            elif isinstance(x, dict):
+                s = ServiceSpec(x)
+                ret += [s]
+            else:
+                raise Exception(f"Invalid service specification element: {x}")
+        return ret
+
+
+###############################################################################
+
+
+main_task_name: str = "ci-task"
 
 
 class ConfigOverride(DataDict):
@@ -93,36 +128,100 @@ class ConfigOverride(DataDict):
     task_config: JobTaskConfig = JobTaskConfig()
 
 
+class ConfigCustom(DataDict):
+    """Configuration for custom executor"""
+
+    builds_dir: str = ""
+    """https://docs.gitlab.com/runner/executors/custom.html#config"""
+    cache_dir: str = ""
+    """https://docs.gitlab.com/runner/executors/custom.html#config"""
+    builds_dir_is_shared: Optional[bool] = None
+    """https://docs.gitlab.com/runner/executors/custom.html#config"""
+    task: JobTask = JobTask()
+    """The task specification to execute."""
+    user: str = ""
+    """User to execute the task."""
+
+    def apply(self, nomadjob: Job):
+        assert not ServiceSpec.get(), f"Services only handled in Docker mode"
+        assert nomadjob
+
+    def get_task_for_stage(self, stage: str) -> str:
+        assert stage
+        return main_task_name
+
+
 class ConfigDockerService(DataDict):
     """Configuration of docker service extract from gitlab job"""
 
-    # A image capabable of executing docker commands used for creating docker network for intercommunication.
-    docker_image: str = "docker"
+    privileged: bool = True
+    """Are the services running as privileged. As usuall, needed for docker:dind"""
+    waiter_image: str = "docker:24.0.6-cli"
+    """A image with POSIX sh and docker that waits for services to have open ports"""
+
+    def service_waiter(self, services: List[ServiceSpec]) -> JobTask:
+        """https://docs.gitlab.com/ee/ci/services/#how-the-health-check-of-services-works"""
+        return JobTask(
+            {
+                "Name": "ci-wait",
+                "Driver": "docker",
+                "Config": {
+                    "image": self.waiter_image,
+                    "command": "sh",
+                    "args": [
+                        "-c",
+                        nomadlib.escape(get_package_file("waiter.sh")),
+                        "waiter",
+                        "300",
+                        *[s.alias for s in services],
+                    ],
+                    "mount": [
+                        {
+                            "type": "bind",
+                            "source": "/var/run/docker.sock",
+                            "target": "/var/run/docker.sock",
+                            "readonly": True,
+                        }
+                    ],
+                },
+                "Lifecycle": {
+                    "Hook": "prestart",
+                },
+            }
+        )
+
+    def service_task(self, s: ServiceSpec):
+        """Task that will run specific service. Generated from specification given to us by Gitlab"""
+        return JobTask(
+            {
+                "Name": s.alias,
+                "Driver": "docker",
+                "Config": {
+                    "image": s.name,
+                    **({"entrypoint": s.entrypoint} if s.entrypoint else {}),
+                    **({"args": s.command} if s.command else {}),
+                    "network_aliases": [s.alias],
+                    "privileged": True,
+                },
+                "Env": get_CUSTOM_ENV(),
+                "Resources": {
+                    "CPU": config.CPU,
+                    "MemoryMB": config.MemoryMB,
+                },
+                "Lifecycle": {
+                    "Hook": "prestart",
+                    "Sidecar": True,
+                },
+            }
+        )
 
 
-class ConfigDriver(DataDict):
-    """Configuration for custom executor"""
-
-    # https://docs.gitlab.com/runner/executors/custom.html#config
-    builds_dir: str
-    # https://docs.gitlab.com/runner/executors/custom.html#config
-    cache_dir: str
-    # https://docs.gitlab.com/runner/executors/custom.html#config
-    builds_dir_is_shared: bool
-    # The script to execute when running gitlab generated scripts.
-    script: str = ""
-    # The task specification to execute.
-    task: JobTask = JobTask()
-
-
-class ConfigDocker(ConfigDriver):
+class ConfigDocker(ConfigCustom):
     builds_dir: str = "/alloc"
     cache_dir: str = "/alloc"
     builds_dir_is_shared: bool = False
-    script: str = get_package_file("nomad_gitlab_runner/docker.sh")
     task: JobTask = JobTask(
         {
-            "Name": default_jobname_template,
             "Driver": "docker",
             "Config": {
                 "image": "${CUSTOM_ENV_CI_JOB_IMAGE}",
@@ -133,10 +232,9 @@ class ConfigDocker(ConfigDriver):
             },
         }
     )
-    #
     clone_task: JobTask = JobTask(
         {
-            "Name": default_jobname_template + "-clone",
+            "Name": "ci-sync",
             "Driver": "docker",
             "Config": {
                 "image": "gitlab/gitlab-runner:alpine-v16.3.1",
@@ -146,24 +244,58 @@ class ConfigDocker(ConfigDriver):
                     "${CUSTOM_ENV_CI_JOB_TIMEOUT}",
                 ],
             },
+            "RestartPolicy": {"Attempts": 0},
+            "Lifecycle": {
+                "Hook": "prestart",
+                "Sidecar": True,
+            },
+            "Resources": {
+                "CPU": 100,
+                "MemoryMB": 200,
+            },
         }
     )
-    # defualt docker image
+    """The task speficiation used to clone git and send artifacts. Has to have git, git-lfs and gitlab-runner."""
     image: str = "alpine"
-    # docker service configuration
+    """defualt docker image"""
     service: ConfigDockerService = ConfigDockerService()
+    """docker service configuration"""
+
+    def apply(self, nomadjob: Job):
+        # Docker has additional cloning job.
+        nomadjob.TaskGroups[0].Tasks += [self.clone_task]
+        # Handle services.
+        services = ServiceSpec.get()
+        if not services:
+            return
+        # Using bridge network!
+        nomadjob.TaskGroups[0]["Networks"] = [{"Mode": "bridge"}]
+        # The list of tasks to run:
+        nomadjob.TaskGroups[0].Tasks += [
+            self.service.service_waiter(services),
+            *[self.service.service_task(s) for s in services],
+        ]
+        # Apply extra_hosts of services to every task.
+        extra_hosts = [f"{s.alias}:127.0.0.1" for s in services]
+        for task in nomadjob.TaskGroups[0].Tasks:
+            task.Config.extra_hosts = extra_hosts
+
+    def get_task_for_stage(self, stage: str) -> str:
+        return (
+            main_task_name
+            if stage.startswith("step_") or stage.startswith("build_")
+            else self.clone_task.Name
+        )
 
 
-class ConfigExec(ConfigDriver):
+class ConfigExec(ConfigCustom):
     builds_dir: str = "/local"
     cache_dir: str = "/local"
     builds_dir_is_shared: bool = ConfigDocker.builds_dir_is_shared
-    script: str = get_package_file("nomad_gitlab_runner/docker.sh")
+    user: str = "gitlab-runner"
     task: JobTask = JobTask(
         {
-            "Name": default_jobname_template,
             "Driver": "exec",
-            "User": "gitlab-runner:gitlab-runner",
             "Config": {
                 "command": "sleep",
                 "args": [
@@ -174,17 +306,14 @@ class ConfigExec(ConfigDriver):
     )
 
 
-class ConfigRawExec(ConfigDriver):
+class ConfigRawExec(ConfigCustom):
     builds_dir: str = "/var/lib/gitlab-runner/builds"
     cache_dir: str = "/var/lib/gitlab-runner/cache"
     builds_dir_is_shared: bool = True
-    script: str = get_package_file("nomad_gitlab_runner/exec.sh")
+    user: str = "gitlab-runner"
     task: JobTask = JobTask(
         {
-            "Name": default_jobname_template,
             "Driver": "raw_exec",
-            # https://github.com/hashicorp/nomad/issues/5397
-            # "User": "0",
             "Config": {
                 "command": "${NOMAD_TASK_DIR}/command.sh",
             },
@@ -206,9 +335,9 @@ class ConfigRawExec(ConfigDriver):
 
 
 class ConfigMode(enum.Enum):
-    raw_exec = enum.auto()
     docker = enum.auto()
     exec = enum.auto()
+    raw_exec = enum.auto()
     custom = enum.auto()
 
 
@@ -229,23 +358,32 @@ class Config(DataDict):
     NOMAD_LICENSE_PATH: Optional[str] = os.environ.get("NOMAD_LICENSE_PATH")
     NOMAD_LICENSE: Optional[str] = os.environ.get("NOMAD_LICENSE")
 
-    # Mode to execute with. Has to be set.
     mode: str = "docker"
-    # Enable debugging?
+    """Mode to execute with. Has to be set."""
     verbose: int = 0
-    # Should the job be purged after we are done?
-    purge: bool = True
-    # The job name
-    jobname: str = default_jobname_template
-    # The defualt job constraints.
-    CPU: int = 1024
-    MemoryMB: int = 1024
-
+    """Enable debugging?"""
+    purge: bool = False
+    """Should the job be purged after we are done?"""
+    purge_successful: bool = True
+    """Should the successful Nomad jobs be purged after we are done?"""
+    jobname: str = "gitlabrunner.${CUSTOM_ENV_CI_RUNNER_ID}.${CUSTOM_ENV_CI_PROJECT_PATH_SLUG}.${CUSTOM_ENV_CI_JOB_ID}"
+    """The job name"""
+    CPU: Optional[int] = None
+    """The defualt job constraints."""
+    MemoryMB: Optional[int] = None
+    """The defualt job constraints."""
+    script: str = get_package_file("script.sh")
+    """See https://docs.gitlab.com/runner/executors/custom.html#config"""
     override: ConfigOverride = ConfigOverride()
-    custom: ConfigDriver = ConfigDriver()
-    exec: ConfigExec = ConfigExec()
-    raw_exec: ConfigRawExec = ConfigRawExec()
+    """Override Nomad job specification contents"""
     docker: ConfigDocker = ConfigDocker()
+    """Relevant in docker mode """
+    exec: ConfigExec = ConfigExec()
+    """Relevant in exec mode """
+    raw_exec: ConfigRawExec = ConfigRawExec()
+    """Relevant in raw_exec mode """
+    custom: ConfigCustom = ConfigCustom()
+    """Relevant in custom mode """
 
     def __post_init__(self):
         """Update environment variables from configuration - to set NOMAD_TOKEN variable"""
@@ -255,8 +393,8 @@ class Config(DataDict):
                 os.environ[k] = v
 
     @functools.lru_cache(maxsize=0)
-    def get_driverconfig(self) -> ConfigDriver:
-        modes: Dict[ConfigMode, ConfigDriver] = {
+    def get_driverconfig(self) -> ConfigCustom:
+        modes: Dict[ConfigMode, ConfigCustom] = {
             ConfigMode.raw_exec: self.raw_exec,
             ConfigMode.exec: self.exec,
             ConfigMode.custom: self.custom,
@@ -266,22 +404,37 @@ class Config(DataDict):
             cd = ConfigMode[self.mode]
         except KeyError:
             raise Exception(f"Not a valid driver: {self.mode}")
-        cc: ConfigDriver = modes[cd]
+        cc: ConfigCustom = modes[cd]
         return cc
 
-    def _get_task(self) -> JobTask:
+    def _add_meta(self, job: Job):
+        dc = self.get_driverconfig()
+        task = job.TaskGroups[0].Tasks[0]
+        job.Meta = job.Meta if "Meta" in job and job.Meta else {}
+        job.Meta.update(
+            {
+                "CI_JOB_URL": os.environ.get("CUSTOM_ENV_CI_JOB_URL", ""),
+                "CI_JOB_NAME": os.environ.get("CUSTOM_ENV_CI_JOB_NAME", ""),
+                "CI_PROJECT_URL": os.environ.get("CUSTOM_ENV_CI_PROJECT_URL", ""),
+                "CI_DRIVER": task.Driver,
+                "CI_RUNUSER": dc.user,
+            }
+        )
+
+    def _gen_main_task(self) -> JobTask:
         """Get the task to run, apply transformations and configuration as needed"""
         task: JobTask = self.get_driverconfig().task
         assert task, f"is invalid: {task}"
-        assert "Name" in task
         assert "Config" in task
         task = JobTask(
             {
+                "Name": main_task_name,
                 "RestartPolicy": {"Attempts": 0},
                 "Resources": {
                     "CPU": self.CPU,
                     "MemoryMB": self.MemoryMB,
                 },
+                "Env": get_CUSTOM_ENV(),
                 **task.asdict(),
                 # Apply override on task.
                 **self.override.task,
@@ -293,218 +446,53 @@ class Config(DataDict):
         )
         return task
 
-    def get_script(self) -> str:
-        return self.get_driverconfig().script
-
     def get_nomad_job(self) -> Job:
-        return Job(
+        nomadjob = Job(
             {
                 "ID": self.jobname,
                 "Type": "batch",
                 "TaskGroups": [
                     {
-                        "Name": self.jobname,
+                        "Name": "g",
                         "ReschedulePolicy": {"Attempts": 0},
                         "RestartPolicy": {"Attempts": 0},
-                        "Tasks": [self._get_task()],
+                        "Tasks": [self._gen_main_task()],
                     }
                 ],
                 # Apply overrides
                 **self.override.job.asdict(),
             }
         )
+        self._add_meta(nomadjob)
+        # Apply driver specific configuration. I.e. docker.
+        self.get_driverconfig().apply(nomadjob)
+        return nomadjob
 
 
 ###############################################################################
 
 
-class ServiceSpec(DataDict):
-    """
-    Specification of services as given to use by Gitlab
-    https://docs.gitlab.com/ee/ci/yaml/#services
-    """
-
-    name: str
-    alias: Optional[str] = None
-    entrypoint: Optional[List[str]] = None
-    command: Optional[List[str]] = None
-
-    @staticmethod
-    def get() -> List[ServiceSpec]:
-        """Read the Gitlab environment variable to extract the service"""
-        CI_JOB_SERVICES = os.environ.get("CUSTOM_ENV_CI_JOB_SERVICES")
-        data: List[Union[str, Dict[str, str]]] = (
-            json.loads(CI_JOB_SERVICES) if CI_JOB_SERVICES else []
-        )
-        ret: List[ServiceSpec] = []
-        for x in data:
-            if isinstance(x, str):
-                s = ServiceSpec(name=x)
-                ret += [s]
-            elif isinstance(x, dict):
-                s = ServiceSpec(x)
-                ret += [s]
-            else:
-                raise Exception(f"Invalid service specification element: {x}")
-        return ret
-
-    def get_alias(self):
-        """Alias defaults to name"""
-        return self.alias if self.alias is not None else self.name
-
-
-@dataclasses.dataclass
-class DockerServices:
-    """Execute services in docker and manage"""
-
-    services: List[ServiceSpec]
-
-    @staticmethod
-    def get_network():
-        """Get the name of the docker network we will be creating"""
-        return default_jobname_template
-
-    def docker_task(self, cmd: str, lifecycle: Dict[str, Dict[str, str]]):
-        """A task to manipulate docker on the host. Currently mounting docker.sock"""
-        return JobTask(
-            {
-                "Name": "remove_docker_network",
-                "Driver": "docker",
-                "Config": {
-                    "image": config.docker.service.docker_image,
-                    "args": cmd.split(),
-                    "mount": [
-                        {
-                            "type": "bind",
-                            "source": "/var/run/docker.sock",
-                            "target": "/var/run/docker.sock",
-                            "readonly": True,
-                        }
-                    ],
-                },
-                "Resources": {
-                    "CPU": config.CPU,
-                    "MemoryMB": config.MemoryMB,
-                },
-                **lifecycle,
-            }
-        )
-
-    def create_network_task(self):
-        """Task to create the docker network. Will be run before all other tasks"""
-        return self.docker_task(
-            f"docker network create {self.get_network}",
-            {
-                "Lifecycle": {
-                    "Hook": "prestart",
-                },
-            },
-        )
-
-    def service_task(self, s: ServiceSpec):
-        """Task that will run specific service. Generated from specification given to us by Gitlab"""
-        return JobTask(
-            {
-                "Name": s.name,
-                "Driver": "docker",
-                "Config": {
-                    "image": s.name,
-                    **({} if s.entrypoint is None else {"entrypoint": s.entrypoint}),
-                    **(
-                        {}
-                        if s.command is None
-                        else {
-                            **({} if not s.command else {"command": s.command[0]}),
-                            **({} if len(s.command) <= 1 else {"args": s.command[1:]}),
-                        }
-                    ),
-                    "network_mode": self.get_network(),
-                    "network_aliases": [s.get_alias()],
-                    "privileged": True,
-                },
-                "Resources": {
-                    "CPU": config.CPU,
-                    "MemoryMB": config.MemoryMB,
-                },
-            }
-        )
-
-    def remove_network_task(self):
-        """Task to remove docker network - cleanup"""
-        return self.docker_task(
-            f"docker network rm {self.get_network}",
-            {
-                "Lifecycle": {
-                    "Hook": "poststop",
-                },
-            },
-        )
-
-    def apply(self, task: JobTask) -> List[JobTask]:
-        """Apply the services to the task. Return list of tasks to run"""
-        assert task.Driver == "docker", f"Task has to be docker: {task}"
-        # Put the task also in the same network.
-        task.Config.network_mode = self.get_network()
-        # The task should start after services have started.
-        # TODO: start after healthcheck is healthy.
-        task["Lifecycle"] = {"Hook": "poststart"}
-        # The list of tasks to run:
-        tasks: List[JobTask] = [
-            self.create_network_task(),
-            task,
-            *[self.service_task(x) for x in self.services],
-            self.remove_network_task(),
-        ]
-        return tasks
-
-
-def apply_services(nomadjob: Job):
-    """Apply services from gitlab spec unto nomad job specification"""
-    services = ServiceSpec.get()
-    if services:
-        assert (
-            config.mode == ConfigMode.docker
-        ), "services are only implemented in docker mode"
-        ds = DockerServices(services)
-        nomadjob.TaskGroups[0].Tasks = ds.apply(nomadjob.TaskGroups[0].Tasks[0])
-    dc = config.get_driverconfig()
-    if isinstance(dc, ConfigDocker):
-        # Docker has additional cloning job.
-        nomadjob.TaskGroups[0].Tasks += [
-            JobTask(
-                {
-                    "RestartPolicy": {"Attempts": 0},
-                    "Resources": {
-                        "CPU": config.CPU,
-                        "MemoryMB": config.MemoryMB,
-                    },
-                    "Lifecycle": {
-                        "Hook": "prestart",
-                        "Sidecar": True,
-                    },
-                    **dc.clone_task.asdict(),
-                }
-            )
-        ]
-
-
-###############################################################################
+def run_nomad_watch(cmd: str):
+    cmdarr = ["-TG", *split(cmd)]
+    cmd = quotearr(cmdarr)
+    log.debug(f"+ nomad-watch {cmd}")
+    try:
+        return nomad_watch.cli.main(cmdarr, standalone_mode=False)
+    except SystemExit as e:
+        if not (e is None or e == 0):
+            raise
 
 
 def purge_previous_nomad_job(jobname: str):
-    rr = run(
-        f"nomad job inspect {jobname}", check=False, stdout=subprocess.PIPE, quiet=True
-    )
-    assert rr.returncode in [
-        0,
-        1,
-    ], f"Invalid nomad job inspect {jobname} output - it should be either 0 or 1"
-    if rr.returncode == 0:
-        job = Job(json.loads(rr.stdout)["Job"])
-        assert (
-            job.Stop == True or job.Status == "dead"
-        ), f"Job {job.description()} already exists and is not stopped or not dead. Bailing out"
-        run(f"nomad job stop -purge {jobname}")
+    try:
+        jobdata = mynomad.get("job/{jobname}")
+    except nomadlib.JobNotFound:
+        return
+    job = Job(jobdata["Job"])
+    assert (
+        job.Stop == True or job.Status == "dead"
+    ), f"Job {job.description()} already exists and is not stopped or not dead. Bailing out"
+    run_nomad_watch(f"--purge -xn0 stop {quote(jobname)}")
 
 
 ###############################################################################
@@ -557,23 +545,24 @@ class Jobenv:
         self.assert_job(self.job)
 
     @classmethod
-    def create_job_env(cls) -> Dict[str, str]:
+    def create_job(cls) -> Job:
         global config
         nomadjob: Job = config.get_nomad_job()
-        apply_services(nomadjob)
         # Template the job - expand all ${CUSTOM_ENV_*} references.
         jobjson = json.dumps(nomadjob.asdict())
         try:
-            jobjson = OnlyBracedCustomEnvTemplate(jobjson).substitute(
-                NotCustomEnvIsFine()
-            )
+            jobjson = OnlyBracedCustomEnvTemplate(jobjson).substitute(os.environ)
         except ValueError:
             log.exception(f"{jobjson}")
             raise
         nomadjob = Job(json.loads(jobjson))
         cls.assert_job(nomadjob)
+        return nomadjob
+
+    @classmethod
+    def create_job_env(cls) -> Dict[str, str]:
         return {
-            "NOMAD_GITLAB_RUNNER_JOB": jobjson,
+            "NOMAD_GITLAB_RUNNER_JOB": json.dumps(cls.create_job().asdict()),
         }
 
     @staticmethod
@@ -584,18 +573,6 @@ class Jobenv:
     @property
     def jobname(self):
         return self.job.ID
-
-    def get_clone_task_name(self) -> str:
-        # log.info(f"names = {[x.Name for x in self.job.TaskGroups[0].Tasks]}")
-        return next(
-            (
-                x.Name
-                for x in self.job.TaskGroups[0].Tasks
-                # The container has to have specific name. Synchronized with ConfigDocker
-                if x.Name == self.jobname + "-clone" and x.Driver == "docker"
-            ),
-            self.jobname,
-        )
 
 
 ###############################################################################
@@ -608,14 +585,12 @@ class BuildFailure(Exception):
 
 @click.group(
     help="""
-This is a script to execute Nomad job from custom gitlab executor.
+This is a script implemeting custom gitlab-runner executor to run jobs in Nomad job from custom gitlab executor.
 
 \b
-Example /etc/gitlab-runner/config.toml configuration file:
+The /etc/gitlab-runner/config.yaml configuration file should look like:
   [[runners]]
-  ...
   id = 27898742
-  ...
   executor = "custom"
   [runners.custom]
     config_exec = "nomad-gitlab-runner"
@@ -628,28 +603,51 @@ Example /etc/gitlab-runner/config.toml configuration file:
     cleanup_args = ["cleanup"]
 
 \b
-Example /etc/gitlab-runner/nomad.toml configuration file:
-    [default]
-    # You can use NOMAD_* variables here
-    NOMAD_TOKEN = 1234567
+Example /etc/gitlab-runner/nomad-gitlab-runner.yaml configuration file:
+    ---
+    default:
+        # You can use NOMAD_* variables here
+        NOMAD_TOKEN: "1234567"
+        NOMAD_ADDR: "http://127.0.0.1:4646"
+    # Id of the runner from config.yaml file allows overriding the values for specific runner.
+    27898742:
+        # Mode to use - "raw_exec", "exec", "docker" or "custom"
+        mode: "docker"
+        purge: false
+        verbose: 0
+        CPU: 2048
+        MemoryMB: 2048
+        docker:
+            image: "alpine"
+            privileged: false
+            services:
+                privileged: true
+        # If it possible to override some things.
+        override:
+            task_config:
+                cpuset_cpus: "1-3"
+
 \b
-    # Id of the runner from config.toml file allows overriding the values for speicfic runner.
-    [27898742]
-    # Mode to use - "raw_exec", "exec", "docker" or "custom"
-    mode = "raw_exec"
-    verbose = 0
-    CPU = 2048
-    MemoryMB = 2048
-    # If it possible to override some things. This is TOML syntax.
-    [27898742.override.job]
-    [27898742.override.task]
-    [27898742.override.task_config]
-    # for example https://developer.hashicorp.com/nomad/docs/drivers/docker#logging
-    [27898742.override.task_config.logging]
-    type = "fluentd"
-    [27898742.override.task_config.logging.config]
-    fluentd-address = "localhost:24224"
-    tag = "your_tag"
+Example .gitlab-ci.yml with dockerd service:
+    ---
+    docker_dind_tls:
+        image: docker:24.0.5
+        services:
+            - docker:24.0.5-dind
+        variables:
+            DOCKER_HOST: tcp://docker:2376
+            DOCKER_TLS_CERTDIR: "/alloc"
+            DOCKER_TLS_VERIFY: 1
+        script;
+            - docker info
+    docker_dind_notls:
+        image: docker:24.0.5
+        services:
+            - docker:24.0.5-dind
+        variables:
+            DOCKER_HOST: tcp://docker:2375
+        script;
+            - docker info
 
         """,
     epilog="Written by Kamil Cukrowski 2023. Licensed under GNU GPL version or later.",
@@ -660,7 +658,7 @@ Example /etc/gitlab-runner/nomad.toml configuration file:
     "--config",
     "configpath",
     type=click.Path(dir_okay=False, exists=True, path_type=Path),
-    default=Path("/etc/gitlab-runner/nomad.toml"),
+    default=Path("/etc/gitlab-runner/nomad-gitlab-runner.yaml"),
     help="""Path to configuration file.""",
     show_default=True,
 )
@@ -677,8 +675,8 @@ The value defaults to CUSTOM_ENV_CI_RUNNER_ID which is set to the unique ID of t
 @common_options()
 def main(verbose: int, configpath: Path, section: str):
     # Read configuration
-    with configpath.open("rb") as f:
-        data = tomli.load(f)
+    configcontent = configpath.read_text()
+    data = yaml.safe_load(configcontent)
     for key, val in data.items():
         assert isinstance(
             val, dict
@@ -692,7 +690,8 @@ def main(verbose: int, configpath: Path, section: str):
         config.verbose = 1
     #
     logging.basicConfig(
-        format="%(module)s:%(lineno)s: %(message)s",
+        format="%(asctime)s:%(module)s:%(lineno)s: %(levelname)s %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S%z",
         level=logging.DEBUG if config.verbose else logging.INFO,
     )
     log.debug(f"+ {sys.argv}")
@@ -727,29 +726,32 @@ def mode_config():
     "prepare", help="https://docs.gitlab.com/runner/executors/custom.html#prepare"
 )
 def mode_prepare():
+    # print_env()
     je = Jobenv()
     purge_previous_nomad_job(je.jobname)
-    nomad_watch.cli.main(["-G", "start", json.dumps({"Job": je.job.asdict()})])
+    jobjson = json.dumps({"Job": je.job.asdict()})
+    run_nomad_watch(f"start {quote(jobjson)}")
 
 
 @main.command("run", help="https://docs.gitlab.com/runner/executors/custom.html#run")
 @click.argument("script")
 @click.argument("stage")
 def mode_run(script: str, stage: str):
-    assert stage
     je = Jobenv()
     set_x = "-x" if config.verbose > 1 else ""
     # Execute all except step_ and build_ in that special gitlab docker container.
-    taskname = (
-        je.jobname
-        if stage.startswith("step_") or stage.startswith("build_")
-        else je.get_clone_task_name()
-    )
-    run(
-        f"nomad alloc exec -task {taskname} -job {je.jobname} sh -c {quote(config.get_script())} gitlabrunner {set_x}",
+    taskname = config.get_driverconfig().get_task_for_stage(stage)
+    rr = run(
+        f"nomad alloc exec -t=false -task {quote(taskname)} -job {quote(je.jobname)}"
+        f" sh -c {quote(config.script)} gitlabrunner {set_x} -- {quote(stage)}",
         stdin=open(script),
         quiet=True,
+        check=False,
     )
+    if rr.returncode == BuildFailure.code:
+        raise BuildFailure()
+    else:
+        rr.check_returncode()
 
 
 @main.command(
@@ -757,8 +759,10 @@ def mode_run(script: str, stage: str):
 )
 def mode_cleanup():
     je = Jobenv()
-    nomad_watch.cli.main(
-        (["--purge"] if config.purge else []) + ["-xn0", "stop", je.jobname]
+    run_nomad_watch(
+        f" {'--purge' if config.purge else ''}"
+        f" {'--purge-successful' if config.purge_successful else ''}"
+        f" -xn0 stop {quote(je.jobname)}"
     )
 
 
@@ -771,9 +775,10 @@ def mode_showconfig():
         "CI_CONCURRENT_ID",
         "CI_JOB_TIMEOUT",
         "CI_RUNNER_ID",
+        "CI_JOB_ID",
     ]
     os.environ.update({f"CUSTOM_ENV_{i}": f"CUSTOM_ENV_{i}_VAL" for i in arr})
-    print(Jobenv.create_job_env())
+    print(json.dumps(Jobenv.create_job().asdict(), indent=2))
 
 
 ###############################################################################

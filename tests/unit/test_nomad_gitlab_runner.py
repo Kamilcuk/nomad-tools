@@ -1,20 +1,17 @@
-import tempfile
 from textwrap import dedent
 
 from nomad_tools import nomad_gitlab_runner
-from tests.testlib import run
+from tests.testlib import NamedTemporaryFileContent, run
 
 
 def test_nomad_gitlab_runner_showconfig():
     config = """
-[default]
-mode = "docker"
+default:
+    mode: docker
 """
-    with tempfile.NamedTemporaryFile("w") as configfile:
-        configfile.write(dedent(config))
-        configfile.flush()
+    with NamedTemporaryFileContent(dedent(config)) as configfile:
         run(
-            f"python3 -m nomad_tools.nomad_gitlab_runner -vvc {configfile.name} showconfig",
+            f"python3 -m nomad_tools.nomad_gitlab_runner -vvc {configfile} showconfig",
         )
 
 

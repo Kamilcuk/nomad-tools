@@ -1,3 +1,4 @@
+import dataclasses
 import functools
 import inspect
 import json
@@ -6,13 +7,17 @@ import shlex
 import subprocess
 import sys
 import time
-from typing import List, Optional, Union
+from typing import IO, List, Optional, Union
 
 os.environ.setdefault("NOMAD_NAMESPACE", "default")
+import tempfile
+
 from nomad_tools import nomadlib
+
 
 def caller(up=0):
     return inspect.stack()[1 + up][3]
+
 
 def job_exists(jobname):
     try:
@@ -29,6 +34,23 @@ def nomad_has_docker():
         if n["Drivers"].get("docker", {}).get("Healthy"):
             return True
     return False
+
+
+@dataclasses.dataclass
+class NamedTemporaryFileContent:
+    content: str
+    suffix: Optional[str] = None
+    file: Optional[IO] = None
+
+    def __enter__(self):
+        self.file = tempfile.NamedTemporaryFile("w", suffix=self.suffix)
+        self.file.write(self.content)
+        self.file.flush()
+        return self.file.name
+
+    def __exit__(self, *args):
+        if self.file:
+            self.file.close()
 
 
 def gen_job(

@@ -14,7 +14,7 @@ nomad_install() {
 	if ! hash nomad 2>/dev/null; then
 		wget -O- https://apt.releases.hashicorp.com/gpg |
 			gpg --dearmor |
-			sudo tee /usr/share/keyrings/hashicorp-archive-keyring.gpg
+			sudo tee /usr/share/keyrings/hashicorp-archive-keyring.gpg >/dev/null
 		echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" |
 			sudo tee /etc/apt/sources.list.d/hashicorp.list
 		sudo apt-get update
@@ -33,7 +33,7 @@ nomad_start() {
 		return
 	fi
 	sudo cp -v ./tests/nomad.hcl /etc/nomad.d/nomad.hcl
-	nomad agent -dev -config /etc/nomad.d &
+	sudo nomad agent -dev -config /etc/nomad.d &
 	NOMADPID=$!
 	# Wait for nomad
 	now=$(date +%s)
@@ -62,12 +62,12 @@ _nomad_tools_profile() {
 }
 
 vagrant() {
+	cd /app
 	nomad_install
 	nomad_start
 	nomad -autocomplete-install || :
 	sudo -uvagrant nomad -autocomplete-install || :
 	apt-get install --no-install-recommends -y python3-pip python3-lib2to3 bash-completion make
-	cd /app
 	python3 --version
 	python3 -m pip install --upgrade pip
 	sudo -uvagrant python3 -m pip install --user -e ".[test]"

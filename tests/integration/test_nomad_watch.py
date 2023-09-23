@@ -1,8 +1,17 @@
 import datetime
 import json
-from typing import List
+import time
+from typing import Dict, List
 
-from tests.testlib import caller, gen_job, nomad_has_docker, run, run_nomad_watch
+from nomad_tools import nomadlib
+from tests.testlib import (
+    caller,
+    gen_job,
+    job_exists,
+    nomad_has_docker,
+    run,
+    run_nomad_watch,
+)
 
 
 def test_nomad_watch_run_0():
@@ -29,7 +38,7 @@ def test_nomad_watch_run():
 def test_nomad_watch_start():
     mark = "7bc8413c-8619-48bf-a46d-f42727724632"
     exitstatus = 234
-    job = gen_job(script=f"echo {mark} ; exit {exitstatus}")
+    job = gen_job(script=f"sleep 1; echo {mark} ; exit {exitstatus}")
     jobid = job["Job"]["ID"]
     try:
         run_nomad_watch("--json start -", input=json.dumps(job))
@@ -73,7 +82,7 @@ def test_nomad_watch_run_short():
         }}
         """
     print(spec)
-    output = run_nomad_watch("--purge run -", input=spec, stdout=1).stdout
+    output = run_nomad_watch("run -", input=spec, stdout=1).stdout
     assert output.count("sleep 0.123") == 5
     assert output.count("MARK ") == 10
 
@@ -127,3 +136,114 @@ def test_nomad_watch_run_multiple():
     output = run_nomad_watch("--purge run -", input=spec, stdout=1).stdout
     for i in hastohave:
         assert output.count(i) == 2
+
+
+def test_nomad_watch_purge_successful_0():
+    job = gen_job("exit 0")
+    jobid = job["Job"]["ID"]
+    run_nomad_watch(
+        "--purge-successful --json run -", input=json.dumps(job), check=[0]
+    )
+    assert not job_exists(jobid)
+
+
+def test_nomad_watch_purge_successful_123():
+    job = gen_job("exit 123")
+    jobid = job["Job"]["ID"]
+    try:
+        run_nomad_watch(
+            "--purge-successful --json run -", input=json.dumps(job), check=[123]
+        )
+        assert job_exists(jobid)
+    finally:
+        run_nomad_watch(f"-x --purge stop {jobid}")
+        assert not job_exists(jobid)
+
+
+def gen_task(name: str, script: str, add: dict = {}):
+    return {
+        "Name": name,
+        "Driver": "raw_exec",
+        "config": {"command": "sh", "args": ["-xc", nomadlib.escape(script)]},
+        **add,
+    }
+
+
+def test_nomad_watch_starting_with_preinit_tasks():
+    jobid = caller()
+    job = {
+        "Job": {
+            "ID": jobid,
+            "Type": "batch",
+            "Meta": {
+                "TIME": f"{time.time_ns()}",
+            },
+            "TaskGroups": [
+                {
+                    "Name": jobid,
+                    "Tasks": [
+                        gen_task("main", "sleep 60"),
+                        gen_task(
+                            "prestart",
+                            "echo prestart",
+                            {"Lifecycle": {"Hook": "prestart"}},
+                        ),
+                        gen_task(
+                            "prestart_sidecar",
+                            "sleep 60",
+                            {
+                                "Lifecycle": {
+                                    "Hook": "prestart",
+                                    "Sidecar": True,
+                                }
+                            },
+                        ),
+                        gen_task(
+                            "poststart",
+                            "sleep 60",
+                            {"Lifecycle": {"Hook": "poststart"}},
+                        ),
+                        gen_task(
+                            "poststop", "sleep 1", {"Lifecycle": {"Hook": "poststop"}}
+                        ),
+                    ],
+                }
+            ],
+        }
+    }
+    try:
+        run_nomad_watch("--json start -", input=json.dumps(job))
+        assert job_exists(jobid)
+        allocs = [
+            nomadlib.Alloc(x)
+            for x in nomadlib.Nomadlib().get(f"job/{jobid}/allocations")
+        ]
+        allocs = [x for x in allocs if x.ClientStatus == "running"]
+        assert allocs
+        allocs.sort(key=lambda x: x.ModifyIndex, reverse=True)
+        lastalloc: nomadlib.Alloc = allocs[0]
+        states: Dict[str, nomadlib.AllocTaskState] = lastalloc.get_taskstates()
+        assert states["main"].was_started()
+        assert not states["main"].FinishedAt
+        assert states["prestart"].was_started()
+        assert states["prestart"].FinishedAt
+        assert states["prestart_sidecar"].was_started()
+        assert not states["prestart_sidecar"].FinishedAt
+        assert states["poststart"].was_started()
+        assert not states["poststart"].FinishedAt
+        assert not states["poststop"].was_started()
+        #
+    finally:
+        run_nomad_watch(f"-x stop {jobid}")
+    assert job_exists(jobid)
+    allocs = [
+        nomadlib.Alloc(x) for x in nomadlib.Nomadlib().get(f"job/{jobid}/allocations")
+    ]
+    assert allocs
+    allocs.sort(key=lambda x: x.ModifyIndex, reverse=True)
+    lastalloc: nomadlib.Alloc = allocs[0]
+    states: Dict[str, nomadlib.AllocTaskState] = lastalloc.get_taskstates()
+    assert all([s.FinishedAt for s in states.values()]), f"{states}"
+    #
+    run_nomad_watch(f"-xn0 --purge stop {jobid}")
+    assert not job_exists(jobid)
