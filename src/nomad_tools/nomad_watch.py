@@ -109,7 +109,7 @@ def ns2dt(ns: int):
 ###############################################################################
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class LogFormat:
     alloc: str
     stderr: str
@@ -118,13 +118,21 @@ class LogFormat:
 
     @classmethod
     def mk(cls, prefix: str, log_timestamp: bool = False):
-        now = " %(asctime)s" if log_timestamp else ""
-        return cls(
-            f"%(cyan)s{prefix}A %(asctime)s %(message)s%(reset)s",
-            f"%(orange)s{prefix}E{now} %(message)s%(reset)s",
-            f"{prefix}O{now} %(message)s",
-            f"%(blue)s%(module)s:%(lineno)03d:{now} %(message)s%(reset)s",
+        now = "%(asctime)s:" if log_timestamp else ""
+        alloc_now = "" if log_timestamp else " %(asctime)s"
+        lf = cls(
+            f"{now}{prefix}A{alloc_now} %(message)s",
+            f"{now}{prefix}E %(message)s",
+            f"{now}{prefix}O %(message)s",
+            f"{now}%(module)s:%(lineno)03d: %(levelname)s %(message)s",
         )
+        lf = cls(
+            f"%(cyan)s{lf.alloc}%(reset)s",
+            f"%(orange)s{lf.stderr}%(reset)s",
+            lf.stdout,
+            f"%(blue)s{lf.module}%(reset)s",
+        )
+        return lf
 
     def astuple(self):
         return dataclasses.astuple(self)
@@ -137,10 +145,15 @@ def click_log_options():
     """All logging options"""
     return composed(
         click.option(
-            "-S",
+            "-T",
             "--log-timestamp",
             is_flag=True,
             help="Additionally add timestamp of the logs from the task. The timestamp is when the log was received. Nomad does not store timestamp of logs sadly.",
+        ),
+        click.option(
+            "--log-timestamp-format",
+            default="%Y-%m-%dT%H:%M:%S%z",
+            show_default=True,
         ),
         click.option("--log-format-alloc", default=log_format.alloc, show_default=True),
         click.option(
@@ -150,7 +163,7 @@ def click_log_options():
             "--log-format-stdout", default=log_format.stdout, show_default=True
         ),
         click.option(
-            "-l", "--log-long-alloc", is_flag=True, help="Log full length allocation id"
+            "--log-long-alloc", is_flag=True, help="Log full length allocation id"
         ),
         click.option(
             "-G",
@@ -159,7 +172,6 @@ def click_log_options():
             help="Do not log group",
         ),
         click.option(
-            "-T",
             "--log-no-task",
             is_flag=True,
             help="Do not log task",
@@ -181,9 +193,12 @@ def click_log_options():
 
 def log_format_choose():
     global log_format
-    log_format.alloc = args.log_format_alloc
-    log_format.stderr = args.log_format_stderr
-    log_format.stdout = args.log_format_stdout
+    log_format = LogFormat(
+        args.log_format_alloc,
+        args.log_format_stderr,
+        args.log_format_stdout,
+        log_format.module,
+    )
     alloc = "%(allocid)s" if args.log_long_alloc else "%(allocid).6s"
     group = "" if args.log_no_group else "%(group)s:"
     task = "" if args.log_no_task else "%(task)s:"
@@ -211,19 +226,20 @@ class TaskKey:
             **params,
             **dataclasses.asdict(self),
             **COLORS,
+            "asctime": params["now"].strftime(args.log_timestamp_format),
         }
 
     def _log(self, fmt, **kvargs: Any):
         print(fmt % self._params(kvargs), flush=True)
 
     def log_alloc(self, now: datetime.datetime, message: str):
-        self._log(log_format.alloc, asctime=now, message=message)
+        self._log(log_format.alloc, now=now, message=message)
 
     def log_task(self, stderr: bool, message: str):
         self._log(
             log_format.stderr if stderr else log_format.stdout,
             message=message,
-            asctime=datetime.datetime.now(),
+            now=datetime.datetime.now().astimezone(),
         )
 
 
@@ -1089,26 +1105,28 @@ def cli(ctx, **_):
         args.all = True
     if args.namespace:
         os.environ["NOMAD_NAMESPACE"] = nomad_find_namespace(args.namespace)
-    log_format_choose()
-    #
-    logging.basicConfig(
-        format=log_format.module,
-        level=logging.DEBUG if args.verbose else logging.INFO,
-    )
     #
     if args.lines >= 0:
         global args_lines_start_ns
         args_lines_start_ns = time.time_ns()
-    # https://stackoverflow.com/questions/17558552/how-do-i-add-custom-field-to-python-log-format-string
-    old_factory = logging.getLogRecordFactory()
+    # init logging
+    if True:
+        log_format_choose()
+        logging.basicConfig(
+            format=log_format.module,
+            datefmt=args.log_timestamp_format,
+            level=logging.DEBUG if args.verbose else logging.INFO,
+        )
+        # https://stackoverflow.com/questions/17558552/how-do-i-add-custom-field-to-python-log-format-string
+        old_factory = logging.getLogRecordFactory()
 
-    def record_factory(*args, **kwargs):
-        record = old_factory(*args, **kwargs)
-        for k, v in COLORS.items():
-            setattr(record, k, v)
-        return record
+        def record_factory(*args, **kwargs):
+            record = old_factory(*args, **kwargs)
+            for k, v in COLORS.items():
+                setattr(record, k, v)
+            return record
 
-    logging.setLogRecordFactory(record_factory)
+        logging.setLogRecordFactory(record_factory)
 
 
 cli_jobid = click.argument(
