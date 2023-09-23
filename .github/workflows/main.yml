@@ -27,6 +27,8 @@ jobs:
         uses: actions/checkout@v3
       - name: install editable package
         run: pip install -e '.[test]'
+      - name: run pyright
+        uses: jakebailey/pyright-action@v1
       - name: run unit tests
         run: pytest -sxv tests/unit
       - name: install nomad server
@@ -35,6 +37,7 @@ jobs:
         run: bash ./tests/provision.sh nomad_start
       - name: run integration tests
         run: pytest -sxv tests/integration
+
 
   pypi-publish:
     name: Upload release to PyPI
