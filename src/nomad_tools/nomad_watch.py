@@ -72,16 +72,24 @@ def _init_colors() -> Dict[str, str]:
         return empty
     tputscript = "\n".join(tputdict.values()).replace("\n", "\nlongname\nlongname\n")
     try:
-        longname = subprocess.check_output(f"tput longname".split(), text=True)
-        ret = subprocess.run(
-            "tput -S".split(), input=tputscript, stdout=subprocess.PIPE, text=True
+        longname = subprocess.run(
+            f"tput longname".split(),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
         ).stdout
-    except subprocess.CalledProcessError:
+        ret = subprocess.run(
+            "tput -S".split(),
+            input=tputscript,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        ).stdout
+    except (subprocess.CalledProcessError, FileNotFoundError):
         return empty
     retarr = ret.split(f"{longname}{longname}")
-    assert len(tputdict.keys()) == len(
-        retarr
-    ), f"Could not split tput -S output into parts"
+    if len(tputdict.keys()) != len(retarr):
+        return empty
     return {k: v for k, v in zip(tputdict.keys(), retarr)}
 
 
