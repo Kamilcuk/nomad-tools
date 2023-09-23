@@ -1,3 +1,4 @@
+from __future__ import annotations
 import dataclasses
 import datetime
 import enum
@@ -9,12 +10,30 @@ from .datadict import DataDict
 log = logging.getLogger(__name__)
 
 
+class DockerMounts(DataDict):
+    type: str
+    target: str
+    source: str
+    readonly: bool
+
+
 class JobTaskConfig(DataDict):
     image: str
     command: str
     args: List[str]
     network_mode: str
     network_aliases: List[str]
+    volumes: List[str]
+    mounts: List[DockerMounts]
+    extra_hosts: List[str]
+
+
+class JobTaskLifecycle(DataDict):
+    Hook: str
+    Sidecar: bool
+
+    def get_sidecar(self) -> bool:
+        return self.get("Sidecar", False)
 
 
 class JobTask(DataDict):
@@ -22,6 +41,8 @@ class JobTask(DataDict):
     Driver: str
     User: str
     Config: JobTaskConfig
+    Lifecycle: Optional[JobTaskLifecycle]
+    Env: Optional[Dict[str, str]]
 
 
 class JobTaskGroup(DataDict):
@@ -30,15 +51,17 @@ class JobTaskGroup(DataDict):
 
 
 class JobStatus(enum.Enum):
-    # Pending means the job is waiting on scheduling
     pending = "pending"
-    # Running means the job has non-terminal allocations
+    """Pending means the job is waiting on scheduling"""
     running = "running"
-    # Dead means all evaluation's and allocations are terminal
+    """Running means the job has non-terminal allocations"""
     dead = "dead"
+    """Dead means all evaluation's and allocations are terminal"""
 
 
 class Job(DataDict):
+    """Returned aby job/<id> API. DO NOT mix with JobsJob"""
+
     ID: str
     Version: int
     Status: str
@@ -47,9 +70,16 @@ class Job(DataDict):
     JobModifyIndex: int
     TaskGroups: List[JobTaskGroup]
     Stop: bool
+    Meta: Optional[Dict[str, str]]
 
     def description(self):
         return f"{self.ID}@v{self.Version}@{self.Namespace}"
+
+
+class JobsJob(DataDict):
+    """Returned aby jobs API. DO NOT mix with Job"""
+
+    ID: str
 
 
 class Eval(DataDict):
@@ -57,6 +87,68 @@ class Eval(DataDict):
     JobID: str
     JobModifyIndex: int
     ModifyIndex: int
+    Status: str
+
+
+class AllocTaskStateEventType:
+    TaskSetupFailure = "Setup Failure"
+    """indicates that the task could not be started due to a a setup failure."""
+    TaskDriverFailure = "Driver Failure"
+    """indicates that the task could not be started due to a failure in the driver. TaskDriverFailure is considered Recoverable."""
+    TaskReceived = "Received"
+    """signals that the task has been pulled by the client at the given timestamp."""
+    TaskFailedValidation = "Failed Validation"
+    """indicates the task was invalid and as such was not run. TaskFailedValidation is not considered Recoverable."""
+    TaskStarted = "Started"
+    """signals that the task was started and its timestamp can be used to determine the running length of the task."""
+    TaskTerminated = "Terminated"
+    """indicates that the task was started and exited."""
+    TaskKilling = "Killing"
+    """indicates a kill signal has been sent to the task."""
+    TaskKilled = "Killed"
+    """indicates a user has killed the task."""
+    TaskRestarting = "Restarting"
+    """indicates that task terminated and is being restarted."""
+    TaskNotRestarting = "Not Restarting"
+    """indicates that the task has failed and is not being restarted because it has exceeded its restart policy."""
+    TaskRestartSignal = "Restart Signaled"
+    """indicates that the task has been signaled to be restarted"""
+    TaskSignaling = "Signaling"
+    """indicates that the task is being signalled."""
+    TaskDownloadingArtifacts = "Downloading Artifacts"
+    """means the task is downloading the artifacts specified in the task."""
+    TaskArtifactDownloadFailed = "Failed Artifact Download"
+    """indicates that downloading the artifacts failed."""
+    TaskBuildingTaskDir = "Building Task Directory"
+    """indicates that the task directory/chroot is being built."""
+    TaskSetup = "Task Setup"
+    """indicates the task runner is setting up the task environment"""
+    TaskDiskExceeded = "Disk Resources Exceeded"
+    """indicates that one of the tasks in a taskgroup has exceeded the requested disk resources."""
+    TaskSiblingFailed = "Sibling Task Failed"
+    """indicates that a sibling task in the task group has failed."""
+    TaskDriverMessage = "Driver"
+    """is an informational event message emitted by drivers such as when they're performing a long running action like downloading an image."""
+    TaskLeaderDead = "Leader Task Dead"
+    """indicates that the leader task within the has finished."""
+    TaskMainDead = "Main Tasks Dead"
+    """indicates that the main tasks have dead"""
+    TaskHookFailed = "Task hook failed"
+    """indicates that one of the hooks for a task failed."""
+    TaskHookMessage = "Task hook message"
+    """indicates that one of the hooks for a task emitted a message."""
+    TaskRestoreFailed = "Failed Restoring Task"
+    """indicates Nomad was unable to reattach to a restored task."""
+    TaskPluginUnhealthy = "Plugin became unhealthy"
+    """indicates that a plugin managed by Nomad became unhealthy"""
+    TaskPluginHealthy = "Plugin became healthy"
+    """indicates that a plugin managed by Nomad became healthy"""
+    TaskClientReconnected = "Reconnected"
+    """indicates that the client running the task disconnected."""
+    TaskWaitingShuttingDownDelay = "Waiting for shutdown delay"
+    """indicates that the task is waiting for shutdown delay before being TaskKilled"""
+    TaskSkippingShutdownDelay = "Skipping shutdown delay"
+    """indicates that the task operation was configured to ignore the shutdown delay value set for the tas."""
 
 
 class AllocTaskStateEvent(DataDict):
@@ -65,13 +157,21 @@ class AllocTaskStateEvent(DataDict):
     Type: str
 
 
-class AllocTaskStates(DataDict):
+class AllocTaskState(DataDict):
     Events: List[AllocTaskStateEvent]
     State: str
+    Failed: bool
+    FinishedAt: Optional[str]
+    LastRestart: Optional[str]
+    Restarts: int
+    StartedAt: Optional[str]
 
     def find_event(self, type_: str) -> Optional[AllocTaskStateEvent]:
         """Find event in TaskStates task Events. Return empty dict if not found"""
         return next((e for e in self.Events if e.Type == type_), None)
+
+    def was_started(self):
+        return self.find_event(AllocTaskStateEventType.TaskStarted) is not None
 
 
 class Alloc(DataDict):
@@ -84,16 +184,16 @@ class Alloc(DataDict):
     ModifyIndex: int
     TaskGroup: str
     # Also may be missing!
-    TaskStates: Optional[Dict[str, AllocTaskStates]] = None
+    TaskStates: Optional[Dict[str, AllocTaskState]] = None
     # May be missing!
     JobVersion: int
 
-    def taskstates(self) -> Dict[str, AllocTaskStates]:
+    def get_taskstates(self) -> Dict[str, AllocTaskState]:
         """The same as TaskStates but returns an empty dict in case the field is None"""
         return self.get("TaskStates") or {}
 
-    def tasks(self):
-        return [k for k in self.taskstates().keys()]
+    def get_tasknames(self):
+        return [k for k in self.get_taskstates().keys()]
 
     def is_pending_or_running(self):
         return self.ClientStatus in ["pending", "running"]
@@ -232,3 +332,37 @@ class VariableNew(DataDict):
     Namespace: str
     Path: str
     Items: Dict[str, str]
+
+class JobSummaryChildren(DataDict):
+    Pending: int
+    Running: int
+    Dead: int
+
+class JobSummarySummary(DataDict):
+    Queued: int = 0
+    Complete: int = 0
+    Failed: int = 0
+    Running: int = 0
+    Starting: int = 0
+    Lost: int = 0
+
+    def __iadd__(self, o: JobSummarySummary) -> JobSummarySummary:
+        for k in set(self.asdict()) | set(o.asdict()):
+            self[k] = self.get(k, 0) + o.get(k, 0)
+        return self
+
+class JobSummary(DataDict):
+    JobID: str
+    Summary: Dict[str, JobSummarySummary]
+    Children: JobSummaryChildren
+    CreateIndex: int
+    ModifyIndex: int
+
+    def get_sum_summary(self) -> JobSummarySummary:
+        """Sum all summaries into one"""
+        ret = JobSummarySummary({})
+        for s in self.Summary.values():
+            ret += s
+        return ret
+
+
