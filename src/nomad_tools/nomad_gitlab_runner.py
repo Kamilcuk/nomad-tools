@@ -479,7 +479,7 @@ def run_nomad_watch(cmd: str):
     try:
         return nomad_watch.cli.main(cmdarr, standalone_mode=False)
     except SystemExit as e:
-        if not (e is None or e == 0):
+        if not (e.code is None or e.code == 0):
             raise
 
 
