@@ -117,7 +117,11 @@ class LogFormat:
     module: str
 
     @classmethod
-    def mk(cls, prefix: str, log_timestamp: bool = False):
+    def mk(
+        cls,
+        prefix: str = "%(allocid).6s:%(group)s:%(task)s:",
+        log_timestamp: bool = False,
+    ):
         now = "%(asctime)s:" if log_timestamp else ""
         alloc_now = "" if log_timestamp else " %(asctime)s"
         lf = cls(
@@ -138,7 +142,7 @@ class LogFormat:
         return dataclasses.astuple(self)
 
 
-log_format = LogFormat.mk("%(allocid).6s:%(group)s:%(task)s:")
+log_format = LogFormat.mk()
 
 
 def click_log_options():
@@ -154,6 +158,12 @@ def click_log_options():
             "--log-timestamp-format",
             default="%Y-%m-%dT%H:%M:%S%z",
             show_default=True,
+        ),
+        click.option(
+            "-H",
+            "--log-timestamp-hour",
+            is_flag=True,
+            help="Alias for --log-timestamp --log-timestamp-format %H:%M:%S",
         ),
         click.option("--log-format-alloc", default=log_format.alloc, show_default=True),
         click.option(
@@ -203,10 +213,16 @@ def log_format_choose():
     group = "" if args.log_no_group else "%(group)s:"
     task = "" if args.log_no_task else "%(task)s:"
     log_format = LogFormat.mk(f"{alloc}:{group}{task}", args.log_timestamp)
+    args.log_timestamp = args.log_timestamp_hour or args.log_timestamp
+    args.log_timestamp_format = (
+        "%H:%M:%S" if args.log_timestamp_hour else args.log_timestamp_format
+    )
     if args.log_only_task:
         log_format = LogFormat.mk("%(task)s:", args.log_timestamp)
-    if args.log_none:
+    elif args.log_none:
         log_format = LogFormat.mk("", args.log_timestamp)
+    else:
+        log_format = LogFormat.mk(log_timestamp=args.log_timestamp)
     #
     logging.basicConfig(
         format=log_format.module,
