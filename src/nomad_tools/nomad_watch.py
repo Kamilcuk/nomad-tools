@@ -1199,24 +1199,24 @@ class JobPath:
 
 @click.group(
     help=f"""
-    Run a Nomad job in Nomad and then print logs to stdout and wait for
-    the job to be completely finish. Made for running batch commands and monitoring
-    them until they are done.
+    Run a Nomad job in Nomad. Watch over the job and print all job
+    allocation events and tasks stdouts and tasks stderrs logs. Depending
+    on mode, wait for a specific event to happen to finish watching.
+    The script is intended to help debugging issues with running jobs
+    in Nomad and for synchronizing with execution of batch jobs in Nomad.
 
     \b
     If the option --no-preserve-exit is given, then exit with the following status:
         0    if operation was successful - the job was run or was purged on --purge
     Ohterwise, when mode is alloc, run, job, stop or stopped, exit with the following status:
-        ?    when the job has one task, with that task exit status
-        0    if all tasks of the job exited with 0 exit status
-        {ExitCode.any_failed_tasks}  if any of the job tasks have failed
-        {ExitCode.all_failed_tasks}  if all job tasks have failed
-        {ExitCode.any_unfinished_tasks}  if any tasks are still running
-        {ExitCode.no_allocations}  if job has no started tasks
-    When the mode is start or started, then exit with the following status:
-        0    all tasks of the job have started running
-    In either case, exit with the following status:
-        1    if some error occured, like python exception
+        ?    when the job has one task, with that task exit status,
+        0    if all tasks of the job exited with 0 exit status,
+        {ExitCode.any_failed_tasks}  if any of the job tasks have failed,
+        {ExitCode.all_failed_tasks}  if all job tasks have failed,
+        {ExitCode.any_unfinished_tasks}  if any tasks are still running,
+        {ExitCode.no_allocations}  if job has no started tasks.
+    In any case, exit with the following status:
+        1    if some error occured, like python exception.
 
     \b
     Examples:
@@ -1240,33 +1240,39 @@ class JobPath:
         """,
 )
 @click.option(
-    "-s",
-    "--stream",
-    type=click.Choice("all alloc a stdout out o 1 stderr err e 2".split()),
+    "-o",
+    "--out",
+    type=click.Choice("all alloc A stdout out O 1 stderr err E 2 none".split()),
     default=["all"],
     multiple=True,
-    help="Print only messages from allocation and stdout or stderr of the task. This option is cummulative.",
+    show_default=True,
+    help="Choose which stream of messages to print - allocation, stdout, stderr. This option is cummulative.",
 )
-@click.option("-v", "--verbose", count=True, help="Be verbose")
+@click.option("-v", "--verbose", count=True, help="Be more verbose.")
+@click.option("-q", "--quiet", count=True, help="Be less verbose.")
 @click.option(
     "--json",
     is_flag=True,
-    help="job input is in json form, passed to nomad command with -json",
+    help="Job input is in json form. Passed to nomad command line interface with -json.",
 )
 @click.option(
-    "--stop",
+    "-d",
+    "--detach",
     is_flag=True,
-    help="Only relevant in run mode. Stop the job before exiting.",
+    help="Relevant in run mode only. Do not stop the job after it has finished or on interrupt.",
 )
 @click.option(
     "--purge-successful",
     is_flag=True,
-    help="Only relevant in run and stop modes. Purge the job only if all job tasks finished successfully.",
+    help="""
+        Relevant in run and stop modes.
+        When stopping the job, purge it when all job summary metrics are zero except nonzero complete metric.
+        """,
 )
 @click.option(
     "--purge",
     is_flag=True,
-    help="Only relevant in run and stop modes. Purge the job.",
+    help="Relevant in run and stop modes. When stopping the job, purge it.",
 )
 @click.option(
     "-n",
@@ -1286,14 +1292,14 @@ class JobPath:
     default=0.5,
     show_default=True,
     type=float,
-    help="When using --lines the number of lines is best-efforted by ignoring lines for specific time",
+    help="When using --lines the number of lines is best-efforted by ignoring lines for this specific time",
 )
 @click.option(
     "--shutdown-timeout",
     default=2,
     show_default=True,
     type=float,
-    help="Rather leave at 2 if you want all the logs.",
+    help="The time to wait to make sure task loggers received all logs when exiting.",
 )
 @click.option(
     "-f",
@@ -1315,20 +1321,20 @@ class JobPath:
 @click.option(
     "--polling",
     is_flag=True,
-    help="Instead of listening to Nomad event stream, periodically poll for events",
+    help="Instead of listening to Nomad event stream, periodically poll for events.",
 )
 @click.option(
     "-x",
     "--no-preserve-status",
     is_flag=True,
-    help="Do not preserve tasks exit statuses",
+    help="Do not preserve tasks exit statuses.",
 )
 @click_log_options()
 @common_options()
-@click.pass_context
-def cli(ctx, **_):
+def cli(**kwargs):
     global args
-    args = argparse.Namespace(**ctx.params)
+    args = argparse.Namespace(**kwargs)
+    args.verbose -= args.quiet
     #
     if args.verbose > 1:
         http_client.HTTPConnection.debuglevel = 1
@@ -1355,6 +1361,10 @@ cli_jobid = click.argument(
     "jobid",
     shell_complete=complete_job(),
 )
+cli_jobfile_help = """
+JOBFILE can be file with a HCL or JSON nomad job or
+it can be a string containing a HCL or JSON nomad job.
+"""
 cli_jobfile = click.argument(
     "jobfile",
     shell_complete=click.File().shell_complete,
@@ -1363,7 +1373,7 @@ cli_jobfile = click.argument(
 ###############################################################################
 
 
-@cli.command("alloc", help="Watch over specific allocation")
+@cli.command("alloc", help="Watch over specific allocation.")
 @click.argument(
     "allocid",
     shell_complete=completor(lambda: (x["ID"] for x in mynomad.get("allocations"))),
@@ -1375,9 +1385,17 @@ def mode_alloc(allocid):
     assert len(allocs) < 2, f"Multiple allocations found starting with id {allocid}"
     alloc = nomadlib.Alloc(allocs[0])
     mynomad.namespace = alloc.Namespace
+    NomadAllocationWatcher(alloc).run_and_exit()
 
 
-@cli.command("run", help="Run a Nomad job and then watch over it until it is finished.")
+@cli.command(
+    "run",
+    help=f"""
+Run a Nomad job and then watch over it until the job is dead and has no pending or running job allocations.
+Stop the job on interrupt or when finished, unless --no-stop option is given.
+{cli_jobfile_help}
+""",
+)
 @cli_jobfile
 @common_options()
 def mode_run(jobfile):
@@ -1388,17 +1406,20 @@ def mode_run(jobfile):
     finally:
         # On normal execution, the job is stopped.
         # On KeyboardException, job is still running.
-        if args.stop or args.purge or args.purge_successful:
+        if not args.detach:
             purge: bool = args.purge or (
                 args.purge_successful and do.job_finished_successfully()
             )
             do.stop_job(purge)
-        do.wait()
+            do.wait()
         do.stop()
     exit(do.get_exitcode())
 
 
-@cli.command("job", help="Watch a Nomad job, show its logs and events.")
+@cli.command(
+    "job",
+    help="Watch a Nomad job. Show the job allocation events and logs.",
+)
 @cli_jobid
 @common_options()
 def mode_job(jobid):
@@ -1406,7 +1427,9 @@ def mode_job(jobid):
     NomadJobWatcherUntilFinished(jobinit).run_and_exit()
 
 
-@cli.command("start", help="Start a Nomad Job. Then act like started mode.")
+@cli.command(
+    "start", help=f"Start a Nomad Job. Then act like mode started. {cli_jobfile_help}"
+)
 @cli_jobfile
 @common_options()
 def mode_start(jobfile):
@@ -1417,8 +1440,13 @@ def mode_start(jobfile):
 @cli.command(
     "started",
     help="""
-Watch a Nomad job until the job has all allocations running.
-Exit with 2 exit status when the job has status dead.
+Watch a Nomad job until the jobs main tasks are running or have been run.
+Main tasks are all tasks without lifetime or sidecar prestart tasks or poststart tasks.
+
+\b
+Exit with the following status:
+    0    all tasks of the job have started running,
+    2    the job was stopped before any of the tasks could start.
 """,
 )
 @cli_jobid
@@ -1430,7 +1458,7 @@ def mode_started(jobid):
 
 @cli.command(
     "stop",
-    help="Stop a Nomad job and then watch the job until it is stopped - has no running allocations.",
+    help="Stop a Nomad job. Then watch the job until the job is dead and has no pending or running allocations.",
 )
 @cli_jobid
 @common_options()
