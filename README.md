@@ -40,23 +40,23 @@ Internally, it uses Nomad event stream to get the events in real time.
 + nomad-watch --help
 Usage: nomad-watch [OPTIONS] COMMAND [ARGS]...
 
-  Run a Nomad job in Nomad and then print logs to stdout and wait for the job to
-  be completely finish. Made for running batch commands and monitoring them
-  until they are done.
+  Run a Nomad job in Nomad. Watch over the job and print all job allocation
+  events and tasks stdouts and tasks stderrs logs. Depending on mode, wait for a
+  specific event to happen to finish watching. The script is intended to help
+  debugging issues with running jobs in Nomad and for synchronizing with
+  execution of batch jobs in Nomad.
 
   If the option --no-preserve-exit is given, then exit with the following status:
       0    if operation was successful - the job was run or was purged on --purge
   Ohterwise, when mode is alloc, run, job, stop or stopped, exit with the following status:
-      ?    when the job has one task, with that task exit status
-      0    if all tasks of the job exited with 0 exit status
-      124  if any of the job tasks have failed
-      125  if all job tasks have failed
-      126  if any tasks are still running
-      127  if job has no started tasks
-  When the mode is start or started, then exit with the following status:
-      0    all tasks of the job have started running
-  In either case, exit with the following status:
-      1    if some error occured, like python exception
+      ?    when the job has one task, with that task exit status,
+      0    if all tasks of the job exited with 0 exit status,
+      124  if any of the job tasks have failed,
+      125  if all job tasks have failed,
+      126  if any tasks are still running,
+      127  if job has no started tasks.
+  In any case, exit with the following status:
+      1    if some error occured, like python exception.
 
   Examples:
       nomad-watch --namespace default run ./some-job.nomad.hcl
@@ -71,43 +71,46 @@ Options:
   -a, --all                       Do not exit after the current job version is
                                   finished. Instead, watch endlessly for any
                                   existing and new allocations of a job.
-  -s, --stream [all|alloc|a|stdout|out|o|1|stderr|err|e|2]
-                                  Print only messages from allocation and stdout
-                                  or stderr of the task. This option is
-                                  cummulative.
-  -v, --verbose                   Be verbose
-  --json                          job input is in json form, passed to nomad
-                                  command with -json
-  --stop                          Only relevant in run mode. Stop the job before
-                                  exiting.
-  --purge-successful              Only relevant in run and stop modes. Purge the
-                                  job only if all job tasks finished
-                                  successfully.
-  --purge                         Only relevant in run and stop modes. Purge the
-                                  job.
+  -o, --out [all|alloc|A|stdout|out|O|1|stderr|err|E|2|none]
+                                  Choose which stream of messages to print -
+                                  allocation, stdout, stderr. This option is
+                                  cummulative.  [default: all]
+  -v, --verbose                   Be more verbose.
+  -q, --quiet                     Be less verbose.
+  --json                          Job input is in json form. Passed to nomad
+                                  command line interface with -json.
+  -d, --detach                    Relevant in run mode only. Do not stop the job
+                                  after it has finished or on interrupt.
+  --purge-successful              Relevant in run and stop modes. When stopping
+                                  the job, purge it when all job summary metrics
+                                  are zero except nonzero complete metric.
+  --purge                         Relevant in run and stop modes. When stopping
+                                  the job, purge it.
   -n, --lines INTEGER             Sets the tail location in best-efforted number
                                   of lines relative to the end of logs. Default
                                   prints all the logs. Set to 0 to try try best-
                                   efforted logs from the current log position.
                                   See also --lines-timeout.  [default: -1]
   --lines-timeout FLOAT           When using --lines the number of lines is
-                                  best-efforted by ignoring lines for specific
-                                  time  [default: 0.5]
-  --shutdown-timeout FLOAT        Rather leave at 2 if you want all the logs.
-                                  [default: 2]
+                                  best-efforted by ignoring lines for this
+                                  specific time  [default: 0.5]
+  --shutdown-timeout FLOAT        The time to wait to make sure task loggers
+                                  received all logs when exiting.  [default: 2]
   -f, --follow                    Shorthand for --all --lines=10 to act similar
                                   to tail -f.
   --no-follow                     Just run once, get the logs in a best-effort
                                   style and exit.
   -t, --task COMPILE              Only watch tasks names matching this regex.
   --polling                       Instead of listening to Nomad event stream,
-                                  periodically poll for events
-  -x, --no-preserve-status        Do not preserve tasks exit statuses
+                                  periodically poll for events.
+  -x, --no-preserve-status        Do not preserve tasks exit statuses.
   -T, --log-timestamp             Additionally add timestamp of the logs from
                                   the task. The timestamp is when the log was
                                   received. Nomad does not store timestamp of
                                   logs sadly.
   --log-timestamp-format TEXT     [default: %Y-%m-%dT%H:%M:%S%z]
+  -H, --log-timestamp-hour        Alias for --log-timestamp --log-timestamp-
+                                  format %H:%M:%S
   --log-format-alloc TEXT         [default:
                                   %(cyan)s%(allocid).6s:%(group)s:%(task)s:A
                                   %(asctime)s %(message)s%(reset)s]
@@ -125,16 +128,15 @@ Options:
   --version
 
 Commands:
-  alloc    Watch over specific allocation
-  job      Watch a Nomad job, show its logs and events.
-  run      Run a Nomad job and then watch over it until it is finished.
+  alloc    Watch over specific allocation.
+  job      Watch a Nomad job.
+  run      Run a Nomad job and then watch over it until the job is dead and...
   start    Start a Nomad Job.
-  started  Watch a Nomad job until the job has all allocations running.
-  stop     Stop a Nomad job and then watch the job until it is stopped -...
+  started  Watch a Nomad job until the jobs main tasks are running or have...
+  stop     Stop a Nomad job.
   stopped  Watch a Nomad job until the job is stopped - has not running...
 
   Written by Kamil Cukrowski 2023. Licensed under GNU GPL version 3 or later.
-  Licenses.
 
 ```
 
@@ -144,7 +146,7 @@ Commands:
 + nomad-watch alloc --help
 Usage: nomad-watch alloc [OPTIONS] ALLOCID
 
-  Watch over specific allocation
+  Watch over specific allocation.
 
 Options:
   -h, --help  Show this message and exit.
@@ -158,7 +160,12 @@ Options:
 + nomad-watch run --help
 Usage: nomad-watch run [OPTIONS] JOBFILE
 
-  Run a Nomad job and then watch over it until it is finished.
+  Run a Nomad job and then watch over it until the job is dead and has no
+  pending or running job allocations. Stop the job on interrupt or when
+  finished, unless --no-stop option is given.
+
+  JOBFILE can be file with a HCL or JSON nomad job or it can be a string
+  containing a HCL or JSON nomad job.
 
 Options:
   -h, --help  Show this message and exit.
@@ -172,7 +179,7 @@ Options:
 + nomad-watch job --help
 Usage: nomad-watch job [OPTIONS] JOBID
 
-  Watch a Nomad job, show its logs and events.
+  Watch a Nomad job. Show the job allocation events and logs.
 
 Options:
   -h, --help  Show this message and exit.
@@ -186,7 +193,8 @@ Options:
 + nomad-watch start --help
 Usage: nomad-watch start [OPTIONS] JOBFILE
 
-  Start a Nomad Job. Then act like started mode.
+  Start a Nomad Job. Then act like mode started.  JOBFILE can be file with a HCL
+  or JSON nomad job or it can be a string containing a HCL or JSON nomad job.
 
 Options:
   -h, --help  Show this message and exit.
@@ -200,8 +208,13 @@ Options:
 + nomad-watch started --help
 Usage: nomad-watch started [OPTIONS] JOBID
 
-  Watch a Nomad job until the job has all allocations running. Exit with 2 exit
-  status when the job has status dead.
+  Watch a Nomad job until the jobs main tasks are running or have been run. Main
+  tasks are all tasks without lifetime or sidecar prestart tasks or poststart
+  tasks.
+
+  Exit with the following status:
+      0    all tasks of the job have started running,
+      2    the job was stopped before any of the tasks could start.
 
 Options:
   -h, --help  Show this message and exit.
@@ -215,8 +228,8 @@ Options:
 + nomad-watch stop --help
 Usage: nomad-watch stop [OPTIONS] JOBID
 
-  Stop a Nomad job and then watch the job until it is stopped - has no running
-  allocations.
+  Stop a Nomad job. Then watch the job until the job is dead and has no pending
+  or running allocations.
 
 Options:
   -h, --help  Show this message and exit.
@@ -369,8 +382,7 @@ Options:
   -h, --help                      Show this message and exit.
   --version
 
-  Written by Kamil Cukrowski 2023. Licensed under GNU GPL version 3 or later.
-  License.
+  Written by Kamil Cukrowski 2023. Licensed under GNU GPL version or later.
 
 ```
 
@@ -472,8 +484,7 @@ Commands:
   run         https://docs.gitlab.com/runner/executors/custom.html#run
   showconfig  Show current configuration
 
-  Written by Kamil Cukrowski 2023. Licensed under GNU GPL version 3 or later.
-  License.
+  Written by Kamil Cukrowski 2023. Licensed under GNU GPL version or later.
 
 ```
 
