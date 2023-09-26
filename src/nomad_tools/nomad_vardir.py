@@ -125,7 +125,7 @@ class NomadVarDirMain:
                 tmpf.flush()
                 #
                 newfile = (
-                    (k if Path(k).exists else "-")
+                    (k if Path(k).exists() else "-")
                     if k in self.newitems
                     else subprocess.DEVNULL
                 )
