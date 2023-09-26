@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import dataclasses
 import datetime
 import enum
@@ -8,6 +9,14 @@ from typing import Callable, Dict, List, Optional, TypeVar
 from .datadict import DataDict
 
 log = logging.getLogger(__name__)
+
+
+class MyStrEnum(str, enum.Enum):
+    """StrEnum for python 3.7 compatibility"""
+
+    @staticmethod
+    def _generate_next_value_(name, start, count, last_values):
+        return name
 
 
 class DockerMounts(DataDict):
@@ -26,6 +35,12 @@ class JobTaskConfig(DataDict):
     volumes: List[str]
     mounts: List[DockerMounts]
     extra_hosts: List[str]
+
+
+class LifecycleHook(MyStrEnum):
+    prestart = "prestart"
+    poststart = "poststart"
+    poststop = "poststop"
 
 
 class JobTaskLifecycle(DataDict):
@@ -50,12 +65,12 @@ class JobTaskGroup(DataDict):
     Tasks: List[JobTask]
 
 
-class JobStatus(enum.Enum):
-    pending = "pending"
+class JobStatus(MyStrEnum):
+    pending = enum.auto()
     """Pending means the job is waiting on scheduling"""
-    running = "running"
+    running = enum.auto()
     """Running means the job has non-terminal allocations"""
-    dead = "dead"
+    dead = enum.auto()
     """Dead means all evaluation's and allocations are terminal"""
 
 
@@ -71,6 +86,9 @@ class Job(DataDict):
     TaskGroups: List[JobTaskGroup]
     Stop: bool
     Meta: Optional[Dict[str, str]]
+
+    def is_dead(self):
+        return self.Status == JobStatus.dead
 
     def description(self):
         return f"{self.ID}@v{self.Version}@{self.Namespace}"
@@ -90,7 +108,7 @@ class Eval(DataDict):
     Status: str
 
 
-class AllocTaskStateEventType:
+class AllocTaskStateEventType(MyStrEnum):
     TaskSetupFailure = "Setup Failure"
     """indicates that the task could not be started due to a a setup failure."""
     TaskDriverFailure = "Driver Failure"
@@ -221,7 +239,7 @@ class EventTopic(enum.Enum):
     Service = enum.auto()
 
 
-class EventType(enum.Enum):
+class EventType(MyStrEnum):
     """Type of an event from Nomad event stream"""
 
     ACLTokenUpserted = enum.auto()
@@ -333,10 +351,12 @@ class VariableNew(DataDict):
     Path: str
     Items: Dict[str, str]
 
+
 class JobSummaryChildren(DataDict):
     Pending: int
     Running: int
     Dead: int
+
 
 class JobSummarySummary(DataDict):
     Queued: int = 0
@@ -351,6 +371,7 @@ class JobSummarySummary(DataDict):
             self[k] = self.get(k, 0) + o.get(k, 0)
         return self
 
+
 class JobSummary(DataDict):
     JobID: str
     Summary: Dict[str, JobSummarySummary]
@@ -364,5 +385,3 @@ class JobSummary(DataDict):
         for s in self.Summary.values():
             ret += s
         return ret
-
-
