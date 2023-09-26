@@ -47,10 +47,10 @@ def test_nomad_watch_start():
             f"stop {jobid}",
             f"stopped {jobid}",
             f"--no-follow job {jobid}",
-            f"--no-follow -s out job {jobid}",
-            f"--no-follow -s err job {jobid}",
-            f"--no-follow -s out -s err job {jobid}",
-            f"--no-follow -s all job {jobid}",
+            f"--no-follow -o out job {jobid}",
+            f"--no-follow -o err job {jobid}",
+            f"--no-follow -o out -o err job {jobid}",
+            f"--no-follow -o all job {jobid}",
         ]
         for cmd in cmds:
             assert mark in run_nomad_watch(cmd, check=exitstatus, stdout=1).stdout

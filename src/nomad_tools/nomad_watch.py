@@ -44,12 +44,12 @@ args = argparse.Namespace()
 
 @dataclasses.dataclass
 class Argsstream:
-    out: bool
-    err: bool
-    alloc: bool
+    stdout: bool = False
+    stderr: bool = False
+    alloc: bool = False
 
 
-args_stream: Argsstream
+args_out: Argsstream = Argsstream()
 
 args_lines_start_ns: int = 0
 
@@ -103,7 +103,7 @@ def ns2s(ns: int):
 
 
 def ns2dt(ns: int):
-    return datetime.datetime.fromtimestamp(ns // 1000000000).astimezone()
+    return datetime.datetime.fromtimestamp(ns2s(ns)).astimezone()
 
 
 ###############################################################################
@@ -207,6 +207,30 @@ def log_format_choose():
         log_format = LogFormat.mk("%(task)s:", args.log_timestamp)
     if args.log_none:
         log_format = LogFormat.mk("", args.log_timestamp)
+    #
+    logging.basicConfig(
+        format=log_format.module,
+        datefmt=args.log_timestamp_format,
+        level=(
+            logging.DEBUG
+            if args.verbose > 0
+            else logging.INFO
+            if args.verbose == 0
+            else logging.WARN
+            if args.verbose == 1
+            else logging.ERROR
+        ),
+    )
+    # https://stackoverflow.com/questions/17558552/how-do-i-add-custom-field-to-python-log-format-string
+    old_factory = logging.getLogRecordFactory()
+
+    def record_factory(*args, **kwargs):
+        record = old_factory(*args, **kwargs)
+        for k, v in COLORS.items():
+            setattr(record, k, v)
+        return record
+
+    logging.setLogRecordFactory(record_factory)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -257,6 +281,7 @@ class Logger(threading.Thread):
         self.ignoredlines: List[str] = []
         self.first_line = True
         # Ignore input lines if printing only trailing lines.
+        global args_lines_start_ns
         self.ignoretime_ns = (
             0 if args.lines < 0 else args_lines_start_ns + int(args.lines_timeout * 1e9)
         )
@@ -343,12 +368,12 @@ class TaskHandler:
 
     @staticmethod
     def _create_loggers(tk: TaskKey):
+        global args_out
         ths: List[Logger] = []
-        if args_stream.out:
+        if args_out.stdout:
             ths.append(Logger(tk, False))
-        if args_stream.err:
+        if args_out.stderr:
             ths.append(Logger(tk, True))
-        assert len(ths)
         for th in ths:
             th.start()
         return ths
@@ -356,10 +381,12 @@ class TaskHandler:
     def notify(self, tk: TaskKey, taskstate: nomadlib.AllocTaskState):
         """Receive notification that a task state has changed"""
         events = taskstate.Events
-        if args_stream.alloc:
+        global args_out
+        if args_out.alloc:
             for e in events:
                 msg = f"{e.Type} {e.DisplayMessage}"
                 msgtime_ns = e.Time
+                global args_lines_start_ns
                 # Ignore message before ignore times.
                 if (
                     msgtime_ns
@@ -937,7 +964,7 @@ class NomadJobWatcherUntilFinished(NomadJobWatcher):
             if args.no_preserve_status
             else self.allocworkers.exitcode()
         )
-        log.info(f"exitcode={exitcode}")
+        log.debug(f"exitcode={exitcode}")
         return exitcode
 
     def stop_job(self, purge: bool):
@@ -1305,11 +1332,11 @@ def cli(ctx, **_):
     #
     if args.verbose > 1:
         http_client.HTTPConnection.debuglevel = 1
-    global args_stream
-    args_stream = Argsstream(
-        err=any(s in "all stderr err e 2".split() for s in args.stream),
-        out=any(s in "all stdout out o 1".split() for s in args.stream),
-        alloc=any(s in "all alloc a".split() for s in args.stream),
+    global args_out
+    args_out = Argsstream(
+        stderr=any(s.lower() in "all stderr err e 2".split() for s in args.out),
+        stdout=any(s.lower() in "all stdout out o 1".split() for s in args.out),
+        alloc=any(s.lower() in "all alloc a".split() for s in args.out),
     )
     if args.follow:
         args.lines = 10
@@ -1321,23 +1348,7 @@ def cli(ctx, **_):
         global args_lines_start_ns
         args_lines_start_ns = time.time_ns()
     # init logging
-    if True:
-        log_format_choose()
-        logging.basicConfig(
-            format=log_format.module,
-            datefmt=args.log_timestamp_format,
-            level=logging.DEBUG if args.verbose else logging.INFO,
-        )
-        # https://stackoverflow.com/questions/17558552/how-do-i-add-custom-field-to-python-log-format-string
-        old_factory = logging.getLogRecordFactory()
-
-        def record_factory(*args, **kwargs):
-            record = old_factory(*args, **kwargs)
-            for k, v in COLORS.items():
-                setattr(record, k, v)
-            return record
-
-        logging.setLogRecordFactory(record_factory)
+    log_format_choose()
 
 
 cli_jobid = click.argument(
