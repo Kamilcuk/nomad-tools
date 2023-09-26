@@ -954,9 +954,9 @@ class NomadJobWatcherUntilFinished(NomadJobWatcher):
         return False
 
     def stop(self):
+        super().stop()
         if self.donemsg:
             log.info(self.donemsg)
-        super().stop()
 
     def _get_exitcode(self) -> int:
         exitcode: int = (
