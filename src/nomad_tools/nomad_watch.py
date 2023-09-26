@@ -682,8 +682,8 @@ class Db:
 
     def join(self):
         # Not joining - neither requests nor stream API allow for timeouts.
-        if False:
-            self.thread.join()
+        # self.thread.join()
+        pass
 
     def events(self) -> Iterable[List[Event]]:
         """Nomad stream returns Events array. Iterate over batches of events returned from Nomad stream"""
@@ -900,14 +900,8 @@ class NomadJobWatcher(ABC):
             self.stop()
         exit(self.get_exitcode())
 
-    def job_is_finished(self):
-        return (
-            self.job is not None
-            and self.job.Status == "dead"
-            and (
-                all(not x.is_pending_or_running() for x in self.db.allocations.values())
-            )
-        )
+    def no_allocations_are_pending_or_running(self):
+        return all(not x.is_pending_or_running() for x in self.db.allocations.values())
 
 
 class NomadJobWatcherUntilFinished(NomadJobWatcher):
@@ -921,6 +915,8 @@ class NomadJobWatcherUntilFinished(NomadJobWatcher):
         """If set, we are waiting until the job is there and it means that JobNotFound is not an error - the job was removed."""
         self.purgedlock: threading.Lock = threading.Lock()
         """A special lock to synchronize callback with changing finish conditions"""
+        self.donemsg = ""
+        """Message printed when done watching. It is not printed right away, because we might decide to wait for purging later."""
 
     def db_init_cb(self) -> List[Event]:
         try:
@@ -943,20 +939,24 @@ class NomadJobWatcherUntilFinished(NomadJobWatcher):
             self.foundjob = True
         elif not self.foundjob:
             return False
-        with self.purgedlock:
-            # Depending on purge argument, we wait for the job to stop existing
-            # or for the job to be dead.
-            if self.purged:
-                if self.db.job is None:
-                    log.info(f"Job {self.job.description()} purged. Exiting.")
-                    return True
-            else:
-                if self.job_is_finished():
-                    log.info(
-                        f"Job {self.job.description()} is dead with no running or pending allocations. Exiting."
-                    )
-                    return True
+        if self.no_allocations_are_pending_or_running():
+            with self.purgedlock:
+                # Depending on purge argument, we wait for the job to stop existing
+                # or for the job to be dead.
+                if self.purged:
+                    if self.db.job is None:
+                        self.donemsg = f"Job {self.job.description()} purged with no running or pending allocations. Exiting."
+                        return True
+                else:
+                    if self.job.is_dead():
+                        self.donemsg = f"Job {self.job.description()} is dead with no running or pending allocations. Exiting."
+                        return True
         return False
+
+    def stop(self):
+        if self.donemsg:
+            log.info(self.donemsg)
+        super().stop()
 
     def _get_exitcode(self) -> int:
         exitcode: int = (
@@ -1080,7 +1080,7 @@ class NomadJobWatcherUntilStarted(NomadJobWatcher):
     def finish_cb(self) -> bool:
         if self.job_is_started():
             return True
-        if self.job_is_finished():
+        if self.job.is_dead() and self.no_allocations_are_pending_or_running():
             log.info(
                 f"Job {self.job.description()} is dead with no running or pending allocations. Bailing out."
             )
@@ -1147,8 +1147,8 @@ class NomadAllocationWatcher:
 
 class JobPath:
     jobname: str
-    group: Optional[Pattern]
-    task: Optional[Pattern]
+    group: Optional[Pattern[str]]
+    task: Optional[Pattern[str]]
 
     def __init__(self, param: str):
         a = param.split("@")
@@ -1163,7 +1163,7 @@ class JobPath:
         ), f"Invalid job/job@task/job@group@task specification: {param}"
 
     @staticmethod
-    def complete(ctx: click.Context, _: str, incomplete: str):
+    def complete(ctx: click.Context, _: str, incomplete: str) -> List[str]:
         _complete_set_namespace(ctx)
         try:
             jobs = mynomad.get("jobs")
