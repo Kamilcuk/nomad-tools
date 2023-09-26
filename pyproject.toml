@@ -46,3 +46,6 @@ log_cli_date_format = "%H:%M:%S"
 testpaths = [
 	"tests/unit",
 ]
+
+[tool.pyright]
+reportUnnecessaryComparison = "error"
