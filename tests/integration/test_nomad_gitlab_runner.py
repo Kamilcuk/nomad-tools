@@ -25,7 +25,7 @@ class GitlabState:
         unique_id = str(hash(current_pytest) % ((sys.maxsize + 1) * 2))
         defaults: Dict[str, str] = dict(
             CUSTOM_ENV_CI_JOB_ID=str(time.time_ns()),
-            CUSTOM_ENV_CI_RUNNER_ID=current_pytest,
+            CUSTOM_ENV_CI_RUNNER_ID=str(abs(hash(current_pytest))),
             CUSTOM_ENV_CI_PROJECT_PATH_SLUG="PATH",
             CUSTOM_ENV_CI_CONCURRENT_ID="ID",
             CUSTOM_ENV_CI_JOB_TIMEOUT="60",
@@ -86,7 +86,9 @@ def cycle(config: dict, script: str, env: Dict[str, str] = {}):
 
 
 raw_exec_config = {"default": {"mode": "raw_exec", "raw_exec": {"user": ""}}}
-docker_config = {"default": {"mode": "docker", "docker": {"image": "docker"}}}
+docker_config = {
+    "default": {"mode": "docker", "docker": {"image": "docker", "privileged": True}}
+}
 
 
 def test_nomad_gitlab_runner_raw_exec():

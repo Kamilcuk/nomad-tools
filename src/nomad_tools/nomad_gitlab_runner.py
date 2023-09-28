@@ -151,15 +151,81 @@ class ConfigCustom(DataDict):
         return main_task_name
 
 
-class ConfigDockerService(DataDict):
-    """Configuration of docker service extract from gitlab job"""
-
-    privileged: bool = True
-    """Are the services running as privileged. As usuall, needed for docker:dind"""
+class ConfigDocker(ConfigCustom):
+    builds_dir: str = "/alloc/builds"
+    cache_dir: str = "/alloc/cache"
+    builds_dir_is_shared: bool = False
+    image: str = "alpine:latest"
+    """The image to run jobs with."""
+    volumes: List[str] = []
+    """https://developer.hashicorp.com/nomad/docs/drivers/docker#volumes The default mounts /certs to ../alloc to have it available for docker dind sevice just like in gitlab-runner."""
+    wait_for_services_timeout: int = 30
+    """How long to wait for Docker services. Set to -1 to disable. Default is 30."""
+    privileged: bool = False
+    """Make the container run in privileged mode. Insecure."""
+    services_privileged: Optional[bool] = None
+    """Allow services to run in privileged mode. If unset (default) privileged value is used instead. Use with the Docker executor. Insecure."""
+    force_pull: bool = True
+    """https://developer.hashicorp.com/nomad/docs/drivers/docker#force_pull"""
     waiter_image: str = "docker:24.0.6-cli"
     """A image with POSIX sh and docker that waits for services to have open ports"""
+    helper_image: str = "gitlab/gitlab-runner:alpine-v16.3.1"
+    """(Advanced) The default helper image used to clone repositories and upload artifacts."""
+    auto_fix_docker_dind: bool = True
+    """
+    If there is a service aliased "docker" and DOCKER_TLS_CERTDIR is set to exactly "/certs"
+    and DOCKER_CERT_PATH, DOCKER_HOST nor DOCKER_TLS_VERIFY are not set, then:
+    automatically mount volume "../alloc:/certs"
+    and add following environment variables:
+        DOCKER_CERT_PATH="/certs/client"
+        DOCKER_HOST=tcp://docker:2376
+        DOCKER_TLS_CERTDIR=/certs
+        DOCKER_TLS_VERIFY=1
+    This automatically properly handles the environment variables with docker like in plain gitlab-runner.
+    See also https://docs.gitlab.com/ee/ci/docker/using_docker_build.html#docker-in-docker-with-tls-enabled-in-kubernetes
+    """
+    task: JobTask = JobTask(
+        {
+            "Driver": "docker",
+            "Config": {
+                "image": "${CUSTOM_ENV_CI_JOB_IMAGE}",
+                "entrypoint": [],
+                "command": "sleep",
+                "args": [
+                    "${CUSTOM_ENV_CI_JOB_TIMEOUT}",
+                ],
+            },
+        }
+    )
+    """The main task specification"""
 
-    def service_waiter(self, services: List[ServiceSpec]) -> JobTask:
+    def get_helper_task(self):
+        """The task specification used to clone git and send artifacts. Has to have git, git-lfs and gitlab-runner."""
+        return JobTask(
+            {
+                "Name": "ci-help",
+                "Driver": "docker",
+                "Config": {
+                    "image": self.helper_image,
+                    "entrypoint": [],
+                    "command": "sleep",
+                    "args": [
+                        "${CUSTOM_ENV_CI_JOB_TIMEOUT}",
+                    ],
+                },
+                "RestartPolicy": {"Attempts": 0},
+                "Lifecycle": {
+                    "Hook": "prestart",
+                    "Sidecar": True,
+                },
+                "Resources": {
+                    "CPU": 100,
+                    "MemoryMB": 200,
+                },
+            }
+        )
+
+    def get_waiter_task(self, services: List[ServiceSpec]) -> JobTask:
         """https://docs.gitlab.com/ee/ci/services/#how-the-health-check-of-services-works"""
         return JobTask(
             {
@@ -172,7 +238,7 @@ class ConfigDockerService(DataDict):
                         "-c",
                         nomadlib.escape(get_package_file("waiter.sh")),
                         "waiter",
-                        "300",
+                        str(self.wait_for_services_timeout),
                         *[s.alias for s in services],
                     ],
                     "mount": [
@@ -190,7 +256,7 @@ class ConfigDockerService(DataDict):
             }
         )
 
-    def service_task(self, s: ServiceSpec):
+    def get_service_task(self, s: ServiceSpec):
         """Task that will run specific service. Generated from specification given to us by Gitlab"""
         return JobTask(
             {
@@ -201,13 +267,14 @@ class ConfigDockerService(DataDict):
                     **({"entrypoint": s.entrypoint} if s.entrypoint else {}),
                     **({"args": s.command} if s.command else {}),
                     "network_aliases": [s.alias],
-                    "privileged": True,
+                    "privileged": self.services_privileged
+                    if self.services_privileged is not None
+                    else self.privileged,
                 },
                 "Env": get_CUSTOM_ENV(),
-                "Resources": {
-                    "CPU": config.CPU,
-                    "MemoryMB": config.MemoryMB,
-                },
+                "RestartPolicy": {"Attempts": 0},
+                **config.resources(),
+                "force_pull": self.force_pull,
                 "Lifecycle": {
                     "Hook": "prestart",
                     "Sidecar": True,
@@ -215,83 +282,77 @@ class ConfigDockerService(DataDict):
             }
         )
 
-
-class ConfigDocker(ConfigCustom):
-    builds_dir: str = "/alloc"
-    cache_dir: str = "/alloc"
-    builds_dir_is_shared: bool = False
-    task: JobTask = JobTask(
-        {
-            "Driver": "docker",
-            "Config": {
-                "image": "${CUSTOM_ENV_CI_JOB_IMAGE}",
-                "command": "sleep",
-                "args": [
-                    "${CUSTOM_ENV_CI_JOB_TIMEOUT}",
-                ],
-            },
-        }
-    )
-    clone_task: JobTask = JobTask(
-        {
-            "Name": "ci-sync",
-            "Driver": "docker",
-            "Config": {
-                "image": "gitlab/gitlab-runner:alpine-v16.3.1",
-                "entrypoint": [],
-                "command": "sleep",
-                "args": [
-                    "${CUSTOM_ENV_CI_JOB_TIMEOUT}",
-                ],
-            },
-            "RestartPolicy": {"Attempts": 0},
-            "Lifecycle": {
-                "Hook": "prestart",
-                "Sidecar": True,
-            },
-            "Resources": {
-                "CPU": 100,
-                "MemoryMB": 200,
-            },
-        }
-    )
-    """The task speficiation used to clone git and send artifacts. Has to have git, git-lfs and gitlab-runner."""
-    image: str = "alpine"
-    """defualt docker image"""
-    service: ConfigDockerService = ConfigDockerService()
-    """docker service configuration"""
-
     def apply(self, nomadjob: Job):
-        # Docker has additional cloning job.
-        nomadjob.TaskGroups[0].Tasks += [self.clone_task]
-        # Handle services.
         services = ServiceSpec.get()
-        if not services:
-            return
-        # Using bridge network!
-        nomadjob.TaskGroups[0]["Networks"] = [{"Mode": "bridge"}]
-        # The list of tasks to run:
-        nomadjob.TaskGroups[0].Tasks += [
-            self.service.service_waiter(services),
-            *[self.service.service_task(s) for s in services],
-        ]
-        # Apply extra_hosts of services to every task.
-        extra_hosts = [f"{s.alias}:127.0.0.1" for s in services]
-        for task in nomadjob.TaskGroups[0].Tasks:
-            task.Config.extra_hosts = extra_hosts
+        # Apply configuration to main task.
+        assert len(nomadjob.TaskGroups) == 1
+        taskgroup = nomadjob.TaskGroups[0]
+        assert len(taskgroup.Tasks) == 1
+        maintask: nomadlib.JobTask = taskgroup.Tasks[0]
+        maintask["force_pull"] = self.force_pull
+        maintask["privileged"] = self.privileged
+        # Docker has additional cloning job.
+        taskgroup.Tasks += [self.get_helper_task()]
+        # Handle services.
+        if services:
+            # Using bridge network!
+            taskgroup["Networks"] = [{"Mode": "bridge"}]
+            # The list of tasks to run:
+            taskgroup.Tasks += [
+                self.get_waiter_task(services),
+                *[self.get_service_task(s) for s in services],
+            ]
+            # Apply extra_hosts of services to every task.
+            extra_hosts = [f"{s.alias}:127.0.0.1" for s in services]
+            for task in taskgroup.Tasks:
+                assert task["Driver"] == "docker"
+                task.Config.extra_hosts = extra_hosts
+        # Apply auto_fix_docker_ding
+        if (
+            self.auto_fix_docker_dind
+            and os.environ.get("CUSTOM_ENV_DOCKER_TLS_CERTDIR") == "/certs"
+            and all(
+                f"CUSTOM_ENV_{i}" not in os.environ
+                for i in "DOCKER_HOST DOCKER_CERT_PATH DOCKER_TLS_VERIFY".split()
+            )
+            and services
+            and any(s.alias == "docker" for s in services)
+        ):
+            for task in taskgroup.Tasks:
+                if "Env" in task and task.Env:
+                    assert task.Env["DOCKER_TLS_CERTDIR"] == "/certs"
+                    assert "DOCKER_CERT_PATH" not in task.Env
+                    assert "DOCKER_HOST" not in task.Env
+                    assert "DOCKER_TLS_VERIFY" not in task.Env
+                    task.Env.update(
+                        {
+                            "DOCKER_CERT_PATH": "/certs/client",
+                            "DOCKER_HOST": "tcp://docker:2376",
+                            "DOCKER_TLS_VERIFY": "1",
+                        }
+                    )
+            # Volumes handled below.
+            self.volumes += ["../alloc:/certs"]
+        for task in taskgroup.Tasks:
+            taskconfig = task["Config"]
+            # Apply cpuset_cpus
+            if config.cpuset_cpus:
+                taskconfig["cpuset_cpus"] = config.cpuset_cpus
+            # Apply volumes.
+            taskconfig.setdefault("volumes", []).extend(self.volumes)
 
     def get_task_for_stage(self, stage: str) -> str:
         return (
             main_task_name
             if stage.startswith("step_") or stage.startswith("build_")
-            else self.clone_task.Name
+            else self.get_helper_task().Name
         )
 
 
 class ConfigExec(ConfigCustom):
-    builds_dir: str = "/local"
-    cache_dir: str = "/local"
-    builds_dir_is_shared: bool = ConfigDocker.builds_dir_is_shared
+    builds_dir: str = "/local/builds"
+    cache_dir: str = "/local/cache"
+    builds_dir_is_shared: bool = False
     user: str = "gitlab-runner"
     task: JobTask = JobTask(
         {
@@ -346,7 +407,7 @@ class Config(DataDict):
 
     NOMAD_ADDR: Optional[str] = os.environ.get("NOMAD_ADDR")
     NOMAD_REGION: Optional[str] = os.environ.get("NOMAD_REGION")
-    NOMAD_NAMESPACE: Optional[str] = os.environ.get("NOMAD_NAMESPACE")
+    NOMAD_NAMESPACE: Optional[str] = os.environ.get("NOMAD_NAMESPACE", "gitlabrunner")
     NOMAD_HTTP_AUTH: Optional[str] = os.environ.get("NOMAD_HTTP_AUTH")
     NOMAD_TOKEN: Optional[str] = os.environ.get("NOMAD_TOKEN")
     NOMAD_CLIENT_CERT: Optional[str] = os.environ.get("NOMAD_CLIENT_CERT")
@@ -362,18 +423,24 @@ class Config(DataDict):
     """Mode to execute with. Has to be set."""
     verbose: int = 0
     """Enable debugging?"""
-    purge: bool = False
+    purge: Optional[bool] = None
     """Should the job be purged after we are done?"""
     purge_successful: bool = True
-    """Should the successful Nomad jobs be purged after we are done?"""
+    """Should the successful Nomad jobs be purged after we are done? Only relevant when purge=none."""
     jobname: str = "gitlabrunner.${CUSTOM_ENV_CI_RUNNER_ID}.${CUSTOM_ENV_CI_PROJECT_PATH_SLUG}.${CUSTOM_ENV_CI_JOB_ID}"
     """The job name"""
     CPU: Optional[int] = None
-    """The defualt job constraints."""
+    """The default job constraints."""
     MemoryMB: Optional[int] = None
-    """The defualt job constraints."""
+    """The default job constraints."""
+    MemoryMaxMB: Optional[int] = None
+    """The default job constraints."""
     script: str = get_package_file("script.sh")
     """See https://docs.gitlab.com/runner/executors/custom.html#config"""
+    oom_score_adjust: int = 10
+    """OOM score adjustment. Positive means kill earlier."""
+    cpuset_cpus: str = ""
+    """Set with taskset -c or with Nomad cpuset_cpus. The control group’s CpusetCpus. A string."""
     override: ConfigOverride = ConfigOverride()
     """Override Nomad job specification contents"""
     docker: ConfigDocker = ConfigDocker()
@@ -418,8 +485,19 @@ class Config(DataDict):
                 "CI_PROJECT_URL": os.environ.get("CUSTOM_ENV_CI_PROJECT_URL", ""),
                 "CI_DRIVER": task.Driver,
                 "CI_RUNUSER": dc.user,
+                "CI_OOM_SCORE_ADJUST": str(self.oom_score_adjust),
+                "CI_CPUSET_CPUS": str(self.cpuset_cpus),
             }
         )
+
+    def resources(self):
+        return {
+            "Resources": {
+                "CPU": self.CPU,
+                "MemoryMB": self.MemoryMB,
+                "MemoryMaxMB": self.MemoryMaxMB,
+            }
+        }
 
     def _gen_main_task(self) -> JobTask:
         """Get the task to run, apply transformations and configuration as needed"""
@@ -430,11 +508,8 @@ class Config(DataDict):
             {
                 "Name": main_task_name,
                 "RestartPolicy": {"Attempts": 0},
-                "Resources": {
-                    "CPU": self.CPU,
-                    "MemoryMB": self.MemoryMB,
-                },
                 "Env": get_CUSTOM_ENV(),
+                **self.resources(),
                 **task.asdict(),
                 # Apply override on task.
                 **self.override.task,
@@ -453,7 +528,7 @@ class Config(DataDict):
                 "Type": "batch",
                 "TaskGroups": [
                     {
-                        "Name": "g",
+                        "Name": "G",
                         "ReschedulePolicy": {"Attempts": 0},
                         "RestartPolicy": {"Attempts": 0},
                         "Tasks": [self._gen_main_task()],
@@ -466,6 +541,9 @@ class Config(DataDict):
         self._add_meta(nomadjob)
         # Apply driver specific configuration. I.e. docker.
         self.get_driverconfig().apply(nomadjob)
+        # Force apply 0 restart policy to every task.
+        for t in nomadjob.TaskGroups[0].Tasks:
+            t.setdefault("RestartPolicy", {"Attempts": 0})
         return nomadjob
 
 
@@ -528,6 +606,14 @@ class OnlyBracedCustomEnvTemplate(string.Template):
             (?P<invalid>\x01)     # match nothing
             """
 
+    @staticmethod
+    def run(template: str) -> str:
+        try:
+            return OnlyBracedCustomEnvTemplate(template).substitute(os.environ)
+        except ValueError:
+            log.exception(f"{template}")
+            raise
+
 
 class Jobenv:
     """
@@ -550,11 +636,7 @@ class Jobenv:
         nomadjob: Job = config.get_nomad_job()
         # Template the job - expand all ${CUSTOM_ENV_*} references.
         jobjson = json.dumps(nomadjob.asdict())
-        try:
-            jobjson = OnlyBracedCustomEnvTemplate(jobjson).substitute(os.environ)
-        except ValueError:
-            log.exception(f"{jobjson}")
-            raise
+        jobjson = OnlyBracedCustomEnvTemplate.run(jobjson)
         nomadjob = Job(json.loads(jobjson))
         cls.assert_job(nomadjob)
         return nomadjob
@@ -585,69 +667,87 @@ class BuildFailure(Exception):
 
 @click.group(
     help="""
-This is a script implemeting custom gitlab-runner executor to run jobs in Nomad job from custom gitlab executor.
+This is a script implementing custom gitlab-runner executor to run
+gitlab-ci jobs in Nomad.  The script generates a Nomad job that executes
+and implements all required funcionality.  You can run in 'raw_exec',
+'exec' and 'docker' mode which you can specify in configuration file.
+
+In docker mode, the runner does not run the entry image entrypoint.
+Services are suported using Nomad docker network "bridge" mode. But
+because in this mode Nomad makes all containers within a job share
+the same network interface, ports are shared between services and the
+host. In short, only one service can listen on port.
 
 \b
-The /etc/gitlab-runner/config.yaml configuration file should look like:
-  [[runners]]
-  id = 27898742
-  executor = "custom"
-  [runners.custom]
-    config_exec = "nomad-gitlab-runner"
-    config_args = ["config"]
-    prepare_exec = "nomad-gitlab-runner"
-    prepare_args = ["prepare"]
-    run_exec = "nomad-gitlab-runner"
-    run_args = ["run"]
-    cleanup_exec = "nomad-gitlab-runner"
-    cleanup_args = ["cleanup"]
+The /etc/gitlab-runner/config.toml configuration file should look like:
+    [[runners]]
+    id = 27898742
+    executor = "custom"
+      [runners.custom]
+      config_exec = "nomad-gitlab-runner"
+      config_args = ["config"]
+      prepare_exec = "nomad-gitlab-runner"
+      prepare_args = ["prepare"]
+      run_exec = "nomad-gitlab-runner"
+      run_args = ["run"]
+      cleanup_exec = "nomad-gitlab-runner"
+      cleanup_args = ["cleanup"]
 
 \b
-Example /etc/gitlab-runner/nomad-gitlab-runner.yaml configuration file:
+Example /etc/gitlab-runner/nomad.yaml configuration file:
     ---
     default:
         # You can use NOMAD_* variables here
         NOMAD_TOKEN: "1234567"
         NOMAD_ADDR: "http://127.0.0.1:4646"
-    # Id of the runner from config.yaml file allows overriding the values for specific runner.
+        # The default namesapce is set to "gitlabrunner"
+        NOMAD_NAMESPACE: "gitlabrunner"
+        # raw_exec and exec call taskset to set it.
+        cpuset_cpus: "1-3"
+    # Id of the runner from config.yaml file allows overriding the values for a specific runner.
     27898742:
-        # Mode to use - "raw_exec", "exec", "docker" or "custom"
-        mode: "docker"
-        purge: false
-        verbose: 0
-        CPU: 2048
-        MemoryMB: 2048
-        docker:
-            image: "alpine"
-            privileged: false
-            services:
-                privileged: true
-        # If it possible to override some things.
-        override:
-            task_config:
-                cpuset_cpus: "1-3"
+      # Mode to use - "raw_exec", "exec", "docker" or "custom"
+      mode: "docker"
+      CPU: 2048
+      MemoryMB: 2048
+      MemoryMaxMB: 2048
+      docker:
+        image: "alpine:latest"
+        # Set to true to be able to run dind service.
+        services_privileged: true
+      # If it possible to override custom things.
+      override:
+        task_config:
+          cpuset_cpus: "2-8"
+    # See nomad-gitlab-runner showconfig for all configuration options.
 
 \b
 Example .gitlab-ci.yml with dockerd service:
     ---
-    docker_dind_tls:
-        image: docker:24.0.5
-        services:
-            - docker:24.0.5-dind
-        variables:
-            DOCKER_HOST: tcp://docker:2376
-            DOCKER_TLS_CERTDIR: "/alloc"
-            DOCKER_TLS_VERIFY: 1
-        script;
-            - docker info
-    docker_dind_notls:
-        image: docker:24.0.5
-        services:
-            - docker:24.0.5-dind
-        variables:
-            DOCKER_HOST: tcp://docker:2375
-        script;
-            - docker info
+    default:
+      image: docker:24.0.5
+      services:
+        - docker:24.0.5-dind
+
+    docker_dind_alloc:
+      variables:
+        # If not using default volumes, you can use /alloc directory to store docker certificates.
+        # This is similar to kubernetes executor - docker entrypoint is not run.
+        DOCKER_CERT_PATH: "/alloc/client"
+        DOCKER_HOST: tcp://docker:2376
+        DOCKER_TLS_CERTDIR: "/alloc"
+        DOCKER_TLS_VERIFY: 1
+      script;
+        - docker info
+        - docker run -ti --rm alpine echo hello world
+
+    docker_dind_auto:
+      variables:
+        # When the configuration option auto_fix_docker_dind is set to true, then:
+        DOCKER_TLS_CERTDIR: "/certs"
+      script;
+        - docker info
+        - docker run -ti --rm alpine echo hello world
 
         """,
     epilog="Written by Kamil Cukrowski 2023. Licensed under GNU GPL version or later.",
@@ -658,33 +758,30 @@ Example .gitlab-ci.yml with dockerd service:
     "--config",
     "configpath",
     type=click.Path(dir_okay=False, exists=True, path_type=Path),
-    default=Path("/etc/gitlab-runner/nomad-gitlab-runner.yaml"),
+    default=Path("/etc/gitlab-runner/nomad.yaml"),
     help="""Path to configuration file.""",
     show_default=True,
 )
 @click.option(
-    "-s",
-    "--section",
+    "-r",
+    "--runner-id",
     help="""
 An additional section read from configuration file to merge with defaults.
 The value defaults to CUSTOM_ENV_CI_RUNNER_ID which is set to the unique ID of the runner being used.
 """,
+    type=int,
     envvar="CUSTOM_ENV_CI_RUNNER_ID",
     show_default=True,
 )
 @common_options()
-def cli(verbose: int, configpath: Path, section: str):
+def cli(verbose: int, configpath: Path, runner_id: int):
     # Read configuration
     configcontent = configpath.read_text()
     data = yaml.safe_load(configcontent)
-    for key, val in data.items():
-        assert isinstance(
-            val, dict
-        ), f"All items in config have to be in a section. {key} is not"
     configs = {key: val for key, val in data.items()}
     global config
     config = Config(
-        {**configs.get("default", {}), **configs.get(section, {})}
+        {**configs.get("default", {}), **configs.get(runner_id, {})}
     ).remove_none()
     if verbose:
         config.verbose = 1
@@ -718,6 +815,7 @@ def mode_config():
         "job_env": Jobenv.create_job_env(),
     }
     driver_config_json = json.dumps(driver_config)
+    driver_config_json = OnlyBracedCustomEnvTemplate.run(driver_config_json)
     log.debug(f"driver_config={driver_config_json}")
     click.echo(driver_config_json)
 
@@ -761,30 +859,40 @@ def mode_cleanup():
     je = Jobenv()
     run_nomad_watch(
         f" {'--purge' if config.purge else ''}"
-        f" {'--purge-successful' if config.purge_successful else ''}"
+        f" {'--purge-successful' if config.purge_successful and config.purge is None else ''}"
         f" -xn0 stop {quote(je.jobname)}"
     )
 
 
-@cli.command("showconfig", help="Show current configuration")
+@cli.command(
+    "showconfig",
+    help="Can be run manually. Check and show current configuration.",
+)
 def mode_showconfig():
-    print(json.dumps(config.asdict(), indent=2))
-    print()
     arr = [
-        "CI_PROJECT_PATH_SLUG",
         "CI_CONCURRENT_ID",
-        "CI_JOB_TIMEOUT",
-        "CI_RUNNER_ID",
         "CI_JOB_ID",
+        "CI_JOB_TIMEOUT",
+        "CI_PROJECT_PATH_SLUG",
+        "CI_RUNNER_ID",
     ]
-    os.environ.update({f"CUSTOM_ENV_{i}": f"CUSTOM_ENV_{i}_VAL" for i in arr})
+    for i in arr:
+        os.environ.setdefault(f"CUSTOM_ENV_{i}", f"CUSTOM_ENV_{i}_VAL")
+    os.environ.setdefault("CUSTOM_ENV_CI_JOB_SERVICES", json.dumps(["docker:dind"]))
+    os.environ.setdefault("CUSTOM_ENV_DOCKER_TLS_CERTDIR", "/certs")
+    #
+    print("--- generated example job configuration ---")
     print(json.dumps(Jobenv.create_job().asdict(), indent=2))
+    print()
+    print("--- program configuration: ---")
+    print(yaml.dump(config.asdict()))
 
 
 ###############################################################################
 
 
 def main(*args, **kvargs) -> int:
+    """Custom executor should always exit with specific exit codes"""
     try:
         cli.main(*args, **kvargs)
     except BuildFailure:

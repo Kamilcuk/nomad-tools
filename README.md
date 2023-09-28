@@ -402,79 +402,88 @@ Custom gitlab executor driver on Nomad.
 + nomad-gitlab-runner --help
 Usage: nomad-gitlab-runner [OPTIONS] COMMAND [ARGS]...
 
-  This is a script implemeting custom gitlab-runner executor to run jobs in
-  Nomad job from custom gitlab executor.
+  This is a script implementing custom gitlab-runner executor to run gitlab-ci
+  jobs in Nomad.  The script generates a Nomad job that executes and implements
+  all required funcionality.  You can run in 'raw_exec', 'exec' and 'docker'
+  mode which you can specify in configuration file.
 
-  The /etc/gitlab-runner/config.yaml configuration file should look like:
-    [[runners]]
-    id = 27898742
-    executor = "custom"
-    [runners.custom]
-      config_exec = "nomad-gitlab-runner"
-      config_args = ["config"]
-      prepare_exec = "nomad-gitlab-runner"
-      prepare_args = ["prepare"]
-      run_exec = "nomad-gitlab-runner"
-      run_args = ["run"]
-      cleanup_exec = "nomad-gitlab-runner"
-      cleanup_args = ["cleanup"]
+  In docker mode, the runner does not run the entry image entrypoint. Services
+  are suported using Nomad docker network "bridge" mode. But because in this
+  mode Nomad makes all containers within a job share the same network interface,
+  ports are shared between services and the host. In short, only one service can
+  listen on port.
 
-  Example /etc/gitlab-runner/nomad-gitlab-runner.yaml configuration file:
+  The /etc/gitlab-runner/config.toml configuration file should look like:
+      [[runners]]
+      id = 27898742
+      executor = "custom"
+        [runners.custom]
+        config_exec = "nomad-gitlab-runner"
+        config_args = ["config"]
+        prepare_exec = "nomad-gitlab-runner"
+        prepare_args = ["prepare"]
+        run_exec = "nomad-gitlab-runner"
+        run_args = ["run"]
+        cleanup_exec = "nomad-gitlab-runner"
+        cleanup_args = ["cleanup"]
+
+  Example /etc/gitlab-runner/nomad.yaml configuration file:
       ---
       default:
           # You can use NOMAD_* variables here
           NOMAD_TOKEN: "1234567"
           NOMAD_ADDR: "http://127.0.0.1:4646"
-      # Id of the runner from config.yaml file allows overriding the values for specific runner.
+          # The default namesapce is set to "gitlabrunner"
+          NOMAD_NAMESPACE: "gitlabrunner"
+          # raw_exec and exec call taskset to set it.
+          cpuset_cpus: "1-3"
+      # Id of the runner from config.yaml file allows overriding the values for a specific runner.
       27898742:
-          # Mode to use - "raw_exec", "exec", "docker" or "custom"
-          mode: "docker"
-          purge: false
-          verbose: 0
-          CPU: 2048
-          MemoryMB: 2048
-          docker:
-              image: "alpine"
-              privileged: false
-              services:
-                  privileged: true
-          # If it possible to override some things.
-          override:
-              task_config:
-                  cpuset_cpus: "1-3"
+        # Mode to use - "raw_exec", "exec", "docker" or "custom"
+        mode: "docker"
+        CPU: 2048
+        MemoryMB: 2048
+        MemoryMaxMB: 2048
+        docker:
+          image: "alpine:latest"
+          # Set to true to be able to run dind service.
+          services_privileged: true
+        # If it possible to override custom things.
+        override:
+          task_config:
+            cpuset_cpus: "2-8"
+      # See nomad-gitlab-runner showconfig for all configuration options.
 
   Example .gitlab-ci.yml with dockerd service:
       ---
-      docker_dind_tls:
-          image: docker:24.0.5
-          services:
-              - docker:24.0.5-dind
-          variables:
-              DOCKER_HOST: tcp://docker:2376
-              DOCKER_TLS_CERTDIR: "/alloc"
-              DOCKER_TLS_VERIFY: 1
-          script;
-              - docker info
-      docker_dind_notls:
-          image: docker:24.0.5
-          services:
-              - docker:24.0.5-dind
-          variables:
-              DOCKER_HOST: tcp://docker:2375
-          script;
-              - docker info
+      default:
+        image: docker:24.0.5
+        services:
+          - docker:24.0.5-dind
+
+      docker_dind_alloc:       variables:         # If not using default
+      volumes, you can use /alloc directory to store docker certificates.
+      # This is similar to kubernetes executor - docker entrypoint is not run.
+      DOCKER_CERT_PATH: "/alloc/client"         DOCKER_HOST: tcp://docker:2376
+      DOCKER_TLS_CERTDIR: "/alloc"         DOCKER_TLS_VERIFY: 1       script;
+      - docker info         - docker run -ti --rm alpine echo hello world
+
+      docker_dind_auto:       variables:         # When the configuration option
+      auto_fix_docker_dind is set to true, then:         DOCKER_TLS_CERTDIR:
+      "/certs"       script;         - docker info         - docker run -ti --rm
+      alpine echo hello world
 
 
 
 Options:
   -v, --verbose
-  -c, --config FILE   Path to configuration file.  [default: /etc/gitlab-
-                      runner/nomad-gitlab-runner.yaml]
-  -s, --section TEXT  An additional section read from configuration file to
-                      merge with defaults. The value defaults to
-                      CUSTOM_ENV_CI_RUNNER_ID which is set to the unique ID of
-                      the runner being used.
-  -h, --help          Show this message and exit.
+  -c, --config FILE        Path to configuration file.  [default: /etc/gitlab-
+                           runner/nomad.yaml]
+  -r, --runner-id INTEGER  An additional section read from configuration file to
+                           merge with defaults. The value defaults to
+                           CUSTOM_ENV_CI_RUNNER_ID which is set to the unique ID
+                           of the runner being used.
+  -h, --help               Show this message and exit.
   --version
 
 Commands:
@@ -482,7 +491,7 @@ Commands:
   config      https://docs.gitlab.com/runner/executors/custom.html#config
   prepare     https://docs.gitlab.com/runner/executors/custom.html#prepare
   run         https://docs.gitlab.com/runner/executors/custom.html#run
-  showconfig  Show current configuration
+  showconfig  Can be run manually.
 
   Written by Kamil Cukrowski 2023. Licensed under GNU GPL version or later.
 
@@ -546,7 +555,7 @@ Options:
 + nomad-gitlab-runner showconfig --help
 Usage: nomad-gitlab-runner showconfig [OPTIONS]
 
-  Show current configuration
+  Can be run manually. Check and show current configuration.
 
 Options:
   --help  Show this message and exit.

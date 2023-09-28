@@ -15,9 +15,12 @@ waitfor() {
 	shift
 	while ! "$@"; do
 		log "Waiting for $desc"
-		now=$(date +%s)
-		if [ "$now" -gt "$stoptime" ]; then
-			fatal "timeout of $timeout_s has expired"
+		if [ "$timeout_s" -ge 0 ]; then
+			# timeout_s lower than 0 means infinite timeout.
+			now=$(date +%s)
+			if [ "$now" -gt "$stoptime" ]; then
+				fatal "timeout of $timeout_s has expired"
+			fi
 		fi
 		# Polling interval.
 		sleep 1
