@@ -31,7 +31,7 @@ case "$NOMAD_META_CI_DRIVER" in
 raw_exec | exec)
 	# Set taskset if available.
 	if [ -n "$NOMAD_META_CI_CPUSET_CPUS" ]; then
-		taskset -pc "$NOMAD_META_CI_CPUSET_CPUS" "$$" || true
+		taskset -pc "$NOMAD_META_CI_CPUSET_CPUS" "$$" >/dev/null || true
 	fi
 	if [ -n "$NOMAD_META_CI_RUNUSER" ]; then
 		set -- runuser -u "$NOMAD_META_CI_RUNUSER" -- "$@"
