@@ -1272,23 +1272,23 @@ class JobPath:
     help="Job input is in json form. Passed to nomad command line interface with -json.",
 )
 @click.option(
-    "-d",
-    "--detach",
+    "-A",
+    "--attach",
     is_flag=True,
-    help="Relevant in run mode only. Do not stop the job after it has finished or on interrupt.",
+    help="Stop the job on interrupt and after it has finished. Relevant in run mode only.",
 )
 @click.option(
     "--purge-successful",
     is_flag=True,
     help="""
-        Relevant in run and stop modes.
         When stopping the job, purge it when all job summary metrics are zero except nonzero complete metric.
+        Relevant in run and stop modes. Implies --attach.
         """,
 )
 @click.option(
     "--purge",
     is_flag=True,
-    help="Relevant in run and stop modes. When stopping the job, purge it.",
+    help="When stopping the job, purge it. Relevant in run and stop modes. Implies --attach.",
 )
 @click.option(
     "-n",
@@ -1422,7 +1422,7 @@ def mode_run(jobfile):
     finally:
         # On normal execution, the job is stopped.
         # On KeyboardException, job is still running.
-        if not args.detach:
+        if args.attach or args.purge or args.purge_successful:
             purge: bool = args.purge or (
                 args.purge_successful and do.job_finished_successfully()
             )
