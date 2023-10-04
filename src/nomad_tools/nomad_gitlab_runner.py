@@ -29,7 +29,8 @@ from .nomadlib.types import Job, JobTask, JobTaskConfig
 
 ###############################################################################
 
-log = logging.getLogger("nomad-gitlab-runner")
+NAME = "nomad-gitlab-runner"
+log = logging.getLogger(NAME)
 
 
 def quotearr(cmd: List[str]):
@@ -528,7 +529,7 @@ class Config(DataDict):
                 "Type": "batch",
                 "TaskGroups": [
                     {
-                        "Name": "G",
+                        "Name": "R",
                         "ReschedulePolicy": {"Attempts": 0},
                         "RestartPolicy": {"Attempts": 0},
                         "Tasks": [self._gen_main_task()],
@@ -807,7 +808,7 @@ def cli(verbose: int, configpath: Path, runner_id: int):
         config.verbose = 1
     #
     logging.basicConfig(
-        format="%(asctime)s:%(module)s:%(lineno)s: %(levelname)s %(message)s",
+        format=f"%(asctime)s:{NAME}:%(lineno)s: %(levelname)s %(message)s",
         datefmt="%Y-%m-%dT%H:%M:%S%z",
         level=logging.DEBUG if config.verbose else logging.INFO,
     )
