@@ -79,8 +79,8 @@ Options:
   -q, --quiet                     Be less verbose.
   --json                          Job input is in json form. Passed to nomad
                                   command line interface with -json.
-  -d, --detach                    Relevant in run mode only. Do not stop the job
-                                  after it has finished or on interrupt.
+  -A, --attach                    Relevant in run mode only. Stop the job on
+                                  interrupt and after it has finished.
   --purge-successful              Relevant in run and stop modes. When stopping
                                   the job, purge it when all job summary metrics
                                   are zero except nonzero complete metric.
