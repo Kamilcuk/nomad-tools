@@ -799,7 +799,7 @@ def cli(verbose: int, configpath: Path, runner_id: int):
     # Read configuration
     configcontent = configpath.read_text()
     data = yaml.safe_load(configcontent)
-    configs = {key: val for key, val in data.items()}
+    configs = {key: val for key, val in (data or {}).items()}
     global config
     config = Config(
         {**configs.get("default", {}), **configs.get(runner_id, {})}
