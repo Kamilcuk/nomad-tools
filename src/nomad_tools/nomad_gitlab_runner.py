@@ -722,7 +722,7 @@ Below is an example /etc/gitlab-runner/nomad.yaml configuration file:
         # You can use NOMAD_* variables here
         NOMAD_TOKEN: "1234567"
         NOMAD_ADDR: "http://127.0.0.1:4646"
-        # The default namesapce is set to "gitlabrunner"
+        # The default namespace is set to "gitlabrunner"
         NOMAD_NAMESPACE: "gitlabrunner"
     # Id of the runner from config.yaml file allows overriding the values for a specific runner.
     27898742:
@@ -769,6 +769,15 @@ Below is an example of .gitlab-ci.yml with docker-in-docker service:
       script;
         - docker info
         - docker run -ti --rm alpine echo hello world
+
+\b
+Example Nomad ACL policy:
+    namespace "gitlabrunner" {
+        # For creating jobs.
+        policy = "write"
+        # To alloc 'raw_exec' to execute anything.
+        capabilities = ["alloc-node-exec"]
+    }
 
         """,
     epilog="Written by Kamil Cukrowski 2023. Licensed under GNU GPL version or later.",

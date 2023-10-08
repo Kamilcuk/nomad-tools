@@ -79,13 +79,14 @@ Options:
   -q, --quiet                     Be less verbose.
   --json                          Job input is in json form. Passed to nomad
                                   command line interface with -json.
-  -A, --attach                    Relevant in run mode only. Stop the job on
-                                  interrupt and after it has finished.
-  --purge-successful              Relevant in run and stop modes. When stopping
-                                  the job, purge it when all job summary metrics
-                                  are zero except nonzero complete metric.
-  --purge                         Relevant in run and stop modes. When stopping
-                                  the job, purge it.
+  -A, --attach                    Stop the job on interrupt and after it has
+                                  finished. Relevant in run mode only.
+  --purge-successful              When stopping the job, purge it when all job
+                                  summary metrics are zero except nonzero
+                                  complete metric. Relevant in run and stop
+                                  modes. Implies --attach.
+  --purge                         When stopping the job, purge it. Relevant in
+                                  run and stop modes. Implies --attach.
   -n, --lines INTEGER             Sets the tail location in best-efforted number
                                   of lines relative to the end of logs. Default
                                   prints all the logs. Set to 0 to try try best-
@@ -453,7 +454,7 @@ Usage: nomad-gitlab-runner [OPTIONS] COMMAND [ARGS]...
           # You can use NOMAD_* variables here
           NOMAD_TOKEN: "1234567"
           NOMAD_ADDR: "http://127.0.0.1:4646"
-          # The default namesapce is set to "gitlabrunner"
+          # The default namespace is set to "gitlabrunner"
           NOMAD_NAMESPACE: "gitlabrunner"
       # Id of the runner from config.yaml file allows overriding the values for a specific runner.
       27898742:
@@ -490,6 +491,14 @@ Usage: nomad-gitlab-runner [OPTIONS] COMMAND [ARGS]...
       "/alloc/client"         DOCKER_HOST: tcp://docker:2376
       DOCKER_TLS_CERTDIR: "/alloc"         DOCKER_TLS_VERIFY: 1       script;
       - docker info         - docker run -ti --rm alpine echo hello world
+
+  Example Nomad ACL policy:
+      namespace "gitlabrunner" {
+          # For creating jobs.
+          policy = "write"
+          # To alloc 'raw_exec' to execute anything.
+          capabilities = ["alloc-node-exec"]
+      }
 
 
 
