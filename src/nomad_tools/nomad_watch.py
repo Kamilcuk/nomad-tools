@@ -34,6 +34,7 @@ from .common import (
     nomad_find_namespace,
 )
 from .nomad_smart_start_job import nomad_smart_start_job
+from .nomadlib import ns2dt
 
 log = logging.getLogger(__name__)
 
@@ -94,17 +95,6 @@ def _init_colors() -> Dict[str, str]:
 
 
 COLORS = _init_colors()
-
-###############################################################################
-
-
-def ns2s(ns: int):
-    return ns / 1000000000
-
-
-def ns2dt(ns: int):
-    return datetime.datetime.fromtimestamp(ns2s(ns)).astimezone()
-
 
 ###############################################################################
 

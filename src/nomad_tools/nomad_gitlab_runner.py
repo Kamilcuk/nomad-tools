@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import datetime
 import enum
 import functools
 import json
@@ -26,6 +25,7 @@ from . import nomad_watch, nomadlib
 from .common import common_options, get_version, mynomad
 from .nomadlib.datadict import DataDict
 from .nomadlib.types import Job, JobTask, JobTaskConfig
+from .nomadlib import ns2dt
 
 ###############################################################################
 
@@ -48,10 +48,6 @@ def run(cmdstr: str, *args, check=True, quiet=False, **kvargs):
         return subprocess.run(cmd, *args, check=check, text=True, **kvargs)
     except subprocess.CalledProcessError as e:
         exit(e.returncode)
-
-
-def ns2dt(ns: int):
-    return datetime.datetime.fromtimestamp(ns // 1000000000)
 
 
 @functools.lru_cache(maxsize=0)
