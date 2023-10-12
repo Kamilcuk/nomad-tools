@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+from __future__ import annotations
+
 import argparse
 import base64
 import dataclasses
@@ -41,16 +43,6 @@ log = logging.getLogger(__name__)
 ###############################################################################
 
 args = argparse.Namespace()
-
-
-@dataclasses.dataclass
-class Argsstream:
-    stdout: bool = False
-    stderr: bool = False
-    alloc: bool = False
-
-
-args_out: Argsstream = Argsstream()
 
 args_lines_start_ns: int = 0
 
@@ -101,38 +93,63 @@ COLORS = _init_colors()
 
 @dataclasses.dataclass(frozen=True)
 class LogFormat:
+    eval: str
     alloc: str
     stderr: str
     stdout: str
     module: str
 
-    @classmethod
+    @staticmethod
     def mk(
-        cls,
         prefix: str = "%(allocid).6s:%(group)s:%(task)s:",
         log_timestamp: bool = False,
     ):
         now = "%(asctime)s:" if log_timestamp else ""
         alloc_now = "" if log_timestamp else " %(asctime)s"
-        lf = cls(
+        return LogFormat(
+            f"{now}%(evalid).6s:eval %(message)s",
             f"{now}{prefix}A{alloc_now} %(message)s",
             f"{now}{prefix}E %(message)s",
             f"{now}{prefix}O %(message)s",
             f"{now}%(module)s:%(lineno)03d: %(levelname)s %(message)s",
+        ).add_color()
+
+    def add_color(self) -> LogFormat:
+        return LogFormat(
+            f"%(cyan)s{self.eval}%(reset)s",
+            f"%(cyan)s{self.alloc}%(reset)s",
+            f"%(orange)s{self.stderr}%(reset)s",
+            self.stdout,
+            f"%(blue)s{self.module}%(reset)s",
         )
-        lf = cls(
-            f"%(cyan)s{lf.alloc}%(reset)s",
-            f"%(orange)s{lf.stderr}%(reset)s",
-            lf.stdout,
-            f"%(blue)s{lf.module}%(reset)s",
-        )
-        return lf
 
     def astuple(self):
         return dataclasses.astuple(self)
 
+    def __params(self, params: Dict[str, Any] = {}) -> Dict[str, Any]:
+        return {
+            **params,
+            **COLORS,
+            "asctime": params["now"].strftime(args.log_timestamp_format),
+        }
 
-log_format = LogFormat.mk()
+    def __log(self, fmt, **kwargs: Any):
+        print(fmt % self.__params(kwargs), flush=True)
+
+    def log_eval(self, evalid: str, now: datetime.datetime, message: str):
+        return self.__log(self.eval, evalid=evalid, now=now, message=message)
+
+    def log_alloc(self, **kwargs: Any):
+        return self.__log(self.alloc, **kwargs)
+
+    def log_std(self, stderr: bool, **kwargs: Any):
+        return self.__log(
+            self.stderr if stderr else self.stdout,
+            **kwargs,
+        )
+
+
+logformat = LogFormat.mk()
 
 
 def click_log_options():
@@ -142,7 +159,7 @@ def click_log_options():
             "-T",
             "--log-timestamp",
             is_flag=True,
-            help="Additionally add timestamp of the logs from the task. The timestamp is when the log was received. Nomad does not store timestamp of logs sadly.",
+            help="Additionally add timestamp to the logs. The timestamp of stdout and stderr streams is when the log was received, as Nomad does not store timestamp of task logs.",
         ),
         click.option(
             "--log-timestamp-format",
@@ -155,12 +172,13 @@ def click_log_options():
             is_flag=True,
             help="Alias for --log-timestamp --log-timestamp-format %H:%M:%S",
         ),
-        click.option("--log-format-alloc", default=log_format.alloc, show_default=True),
+        click.option("--log-format-eval", default=logformat.eval, show_default=True),
+        click.option("--log-format-alloc", default=logformat.alloc, show_default=True),
         click.option(
-            "--log-format-stderr", default=log_format.stderr, show_default=True
+            "--log-format-stderr", default=logformat.stderr, show_default=True
         ),
         click.option(
-            "--log-format-stdout", default=log_format.stdout, show_default=True
+            "--log-format-stdout", default=logformat.stdout, show_default=True
         ),
         click.option(
             "--log-long-alloc", is_flag=True, help="Log full length allocation id"
@@ -192,30 +210,43 @@ def click_log_options():
 
 
 def log_format_choose():
-    global log_format
-    log_format = LogFormat(
+    global logformat
+    logformat = LogFormat(
+        args.log_format_eval,
         args.log_format_alloc,
         args.log_format_stderr,
         args.log_format_stdout,
-        log_format.module,
+        logformat.module,
     )
     alloc = "%(allocid)s" if args.log_long_alloc else "%(allocid).6s"
     group = "" if args.log_no_group else "%(group)s:"
     task = "" if args.log_no_task else "%(task)s:"
-    log_format = LogFormat.mk(f"{alloc}:{group}{task}", args.log_timestamp)
+    logformat = LogFormat.mk(f"{alloc}:{group}{task}", args.log_timestamp)
     args.log_timestamp = args.log_timestamp_hour or args.log_timestamp
     args.log_timestamp_format = (
         "%H:%M:%S" if args.log_timestamp_hour else args.log_timestamp_format
     )
     if args.log_only_task:
-        log_format = LogFormat.mk("%(task)s:", args.log_timestamp)
+        logformat = LogFormat.mk("%(task)s:", args.log_timestamp)
     elif args.log_none:
-        log_format = LogFormat.mk("", args.log_timestamp)
+        logformat = LogFormat.mk("", args.log_timestamp)
     else:
-        log_format = LogFormat.mk(log_timestamp=args.log_timestamp)
+        logformat = LogFormat.mk(log_timestamp=args.log_timestamp)
+    #
+    allow_eval = any(s in "all evaluation eval e".split() for s in args.out)
+    allow_alloc = any(s in "all alloc a".split() for s in args.out)
+    allow_stderr = any(s in "all stderr err e 2".split() for s in args.out)
+    allow_stdout = any(s in "all stdout out o 1".split() for s in args.out)
+    logformat = LogFormat(
+        eval=logformat.eval if allow_eval else "",
+        alloc=logformat.alloc if allow_alloc else "",
+        stderr=logformat.stderr if allow_stderr else "",
+        stdout=logformat.stdout if allow_stdout else "",
+        module=logformat.module,
+    )
     #
     logging.basicConfig(
-        format=log_format.module,
+        format=logformat.module,
         datefmt=args.log_timestamp_format,
         level=(
             logging.DEBUG
@@ -251,25 +282,18 @@ class TaskKey:
     def __str__(self):
         return f"{self.allocid:.6}:{self.group}:{self.task}"
 
-    def _params(self, params: Dict[str, Any] = {}) -> Dict[str, Any]:
-        return {
-            **params,
-            **dataclasses.asdict(self),
-            **COLORS,
-            "asctime": params["now"].strftime(args.log_timestamp_format),
-        }
-
-    def _log(self, fmt, **kvargs: Any):
-        print(fmt % self._params(kvargs), flush=True)
+    def asdict(self):
+        return dataclasses.asdict(self)
 
     def log_alloc(self, now: datetime.datetime, message: str):
-        self._log(log_format.alloc, now=now, message=message)
+        logformat.log_alloc(now=now, message=message, **self.asdict())
 
     def log_task(self, stderr: bool, message: str):
-        self._log(
-            log_format.stderr if stderr else log_format.stdout,
+        logformat.log_std(
+            stderr=stderr,
             message=message,
             now=datetime.datetime.now().astimezone(),
+            **self.asdict(),
         )
 
 
@@ -362,23 +386,24 @@ class Logger(threading.Thread):
         self.exitevent.set()
 
 
+@dataclasses.dataclass
 class TaskHandler:
     """A handler for one task. Creates loggers, writes out task events, handle exit conditions"""
 
-    def __init__(self):
-        # Array of loggers that log allocation logs.
-        self.loggers: List[Logger] = []
-        # A set of message timestamp to know what has been printed.
-        self.messages: Set[int] = set()
-        self.exitcode: Optional[int] = None
+    loggers: Optional[List[Logger]] = None
+    """Array of loggers that log allocation logs."""
+    messages: Set[int] = dataclasses.field(default_factory=set)
+    """A set of message timestamp to know what has been printed."""
+    exitcode: Optional[int] = None
+    stoptimer: Optional[threading.Timer] = None
 
     @staticmethod
     def _create_loggers(tk: TaskKey):
-        global args_out
+        global logformat
         ths: List[Logger] = []
-        if args_out.stdout:
+        if logformat.stdout:
             ths.append(Logger(tk, False))
-        if args_out.stderr:
+        if logformat.stderr:
             ths.append(Logger(tk, True))
         for th in ths:
             th.start()
@@ -386,9 +411,9 @@ class TaskHandler:
 
     def notify(self, tk: TaskKey, taskstate: nomadlib.AllocTaskState):
         """Receive notification that a task state has changed"""
+        global logformat
         events = taskstate.Events
-        global args_out
-        if args_out.alloc:
+        if logformat.alloc:
             for e in events:
                 msg = f"{e.Type} {e.DisplayMessage}"
                 msgtime_ns = e.Time
@@ -407,22 +432,25 @@ class TaskHandler:
                     self.messages.add(msgtime_ns)
                     tk.log_alloc(ns2dt(msgtime_ns), msg)
         if (
-            not self.loggers
+            self.loggers is None
             and taskstate.State in ["running", "dead"]
             and taskstate.was_started()
         ):
-            self.loggers += self._create_loggers(tk)
-            if taskstate.State == "dead":
-                # If the task is already finished, give myself max 3 seconds to query all the logs.
-                # This is to reduce the number of connections.
-                threading.Timer(3, self.stop)
+            self.loggers = self._create_loggers(tk)
+        if self.stoptimer is None and self.loggers and taskstate.State == "dead":
+            # If the task is already finished, give myself max 3 seconds to query all the logs.
+            # This is to reduce the number of connections.
+            self.stoptimer = threading.Timer(3, self.stop)
+            self.stoptimer.start()
         if self.exitcode is None and taskstate.State == "dead":
-            # Assigns None if Terminated event not found
-            self.exitcode = (taskstate.find_event("Terminated") or {}).get("ExitCode")
-            self.stop()
+            terminatedevent = taskstate.find_event("Terminated")
+            if terminatedevent:
+                self.exitcode = terminatedevent["ExitCode"]
 
     def stop(self):
-        for l in self.loggers:
+        if self.stoptimer:
+            self.stoptimer.cancel()
+        for l in self.loggers or []:
             l.stop()
 
 
@@ -452,11 +480,31 @@ class ExitCode:
     no_allocations = 127
 
 
+@dataclasses.dataclass
 class AllocWorkers(Dict[str, AllocWorker]):
     """An containers for storing a map of allocation workers"""
 
+    db: "Db"
+    """Link to database"""
+    evalmessages: Set[int] = dataclasses.field(default_factory=set)
+    """A set of evaluation ModifyIndex to know what has been printed."""
+
     def notify(self, alloc: nomadlib.Alloc):
         self.setdefault(alloc.ID, AllocWorker()).notify(alloc)
+        if logformat.eval and alloc.FollowupEvalID:
+            followupeval = self.db.evaluations.get(alloc.FollowupEvalID)
+            if followupeval and followupeval.ModifyIndex not in self.evalmessages:
+                waituntil = followupeval.getWaitUntil()
+                if waituntil:
+                    utcnow = datetime.datetime.now(datetime.timezone.utc)
+                    delay = waituntil - utcnow
+                    if delay > datetime.timedelta(0):
+                        logformat.log_eval(
+                            evalid=followupeval.ID,
+                            now=ns2dt(followupeval.ModifyTime),
+                            message=f"Nomad will attempt to reschedule in {delay} seconds",
+                        )
+                        self.evalmessages.add(followupeval.ModifyIndex)
 
     def stop(self):
         for w in self.values():
@@ -469,7 +517,7 @@ class AllocWorkers(Dict[str, AllocWorker]):
             (f"{tk.task}[{i}]", logger)
             for w in self.values()
             for tk, th in w.taskhandlers.items()
-            for i, logger in enumerate(th.loggers)
+            for i, logger in enumerate(th.loggers or [])
         ]
         thcnt = sum(len(w.taskhandlers) for w in self.values())
         log.debug(
@@ -775,7 +823,6 @@ class NomadJobWatcher(ABC):
     def __init__(self, job: nomadlib.Job, untilstr: str):
         self.job = job
         self.untilstr = untilstr
-        self.allocworkers = AllocWorkers()
         self.db = Db(
             topics=[
                 f"Job:{self.job.ID}",
@@ -785,6 +832,7 @@ class NomadJobWatcher(ABC):
             select_event_cb=self.db_select_event_job,
             init_cb=self.db_init_cb,
         )
+        self.allocworkers = AllocWorkers(self.db)
         self.done = threading.Event()
         """I am using threading.Event because you can't handle KeyboardInterrupt while Thread.join()."""
         self.thread = threading.Thread(
@@ -1115,7 +1163,6 @@ class NomadAllocationWatcher:
 
     def __init__(self, alloc: nomadlib.Alloc):
         self.alloc = alloc
-        self.allocworkers = AllocWorkers()
         self.db = Db(
             topics=[f"Allocation:{alloc.JobID}"],
             select_event_cb=lambda e: e.topic == EventTopic.Allocation
@@ -1128,6 +1175,7 @@ class NomadAllocationWatcher:
                 )
             ],
         )
+        self.allocworkers = AllocWorkers(self.db)
         self.finished = False
         #
         log.info(f"Watching allocation {alloc.ID}")
@@ -1259,11 +1307,13 @@ class JobPath:
 @click.option(
     "-o",
     "--out",
-    type=click.Choice("all alloc A stdout out O 1 stderr err E 2 none".split()),
+    type=click.Choice(
+        "all alloc A stdout out O 1 stderr err E 2 evaluation eval e none".split()
+    ),
     default=["all"],
     multiple=True,
     show_default=True,
-    help="Choose which stream of messages to print - allocation, stdout, stderr. This option is cummulative.",
+    help="Choose which stream of messages to print - evaluation, allocation, stdout, stderr. This option is cummulative.",
 )
 @click.option("-v", "--verbose", count=True, help="Be more verbose.")
 @click.option("-q", "--quiet", count=True, help="Be less verbose.")
@@ -1355,12 +1405,6 @@ def cli(**kwargs):
     #
     if args.verbose > 1:
         http_client.HTTPConnection.debuglevel = 1
-    global args_out
-    args_out = Argsstream(
-        stderr=any(s.lower() in "all stderr err e 2".split() for s in args.out),
-        stdout=any(s.lower() in "all stdout out o 1".split() for s in args.out),
-        alloc=any(s.lower() in "all alloc a".split() for s in args.out),
-    )
     if args.follow:
         args.lines = 10
         args.all = True
