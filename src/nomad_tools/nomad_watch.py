@@ -906,8 +906,16 @@ class NomadJobWatcher(ABC):
             self.stop()
         exit(self.get_exitcode())
 
-    def no_allocations_are_pending_or_running(self):
-        return all(not x.is_pending_or_running() for x in self.db.allocations.values())
+    def no_pending_or_running_allocations_and_evaluations(self):
+        for allocation in self.db.allocations.values():
+            if allocation.is_pending_or_running():
+                return False
+            evaluationid = allocation.get("FollowupEvalID")
+            if evaluationid:
+                evaluation = self.db.evaluations.get(evaluationid)
+                if evaluation and evaluation.is_pending():
+                    return False
+        return True
 
 
 class NomadJobWatcherUntilFinished(NomadJobWatcher):
@@ -945,7 +953,7 @@ class NomadJobWatcherUntilFinished(NomadJobWatcher):
             self.foundjob = True
         elif not self.foundjob:
             return False
-        if self.no_allocations_are_pending_or_running():
+        if self.no_pending_or_running_allocations_and_evaluations():
             with self.purgedlock:
                 # Depending on purge argument, we wait for the job to stop existing
                 # or for the job to be dead.
@@ -955,7 +963,7 @@ class NomadJobWatcherUntilFinished(NomadJobWatcher):
                         return True
                 else:
                     if self.job.is_dead():
-                        self.donemsg = f"Job {self.job.description()} is dead with no running or pending allocations. Exiting."
+                        self.donemsg = f"Job {self.job.description()} is dead with no running or pending allocations and evaluations. Exiting."
                         return True
         return False
 
@@ -1086,9 +1094,12 @@ class NomadJobWatcherUntilStarted(NomadJobWatcher):
     def finish_cb(self) -> bool:
         if self.job_is_started():
             return True
-        if self.job.is_dead() and self.no_allocations_are_pending_or_running():
+        if (
+            self.job.is_dead()
+            and self.no_pending_or_running_allocations_and_evaluations()
+        ):
             log.info(
-                f"Job {self.job.description()} is dead with no running or pending allocations. Bailing out."
+                f"Job {self.job.description()} is dead with no running or pending allocations and evaluations. Bailing out."
             )
             return True
         return False

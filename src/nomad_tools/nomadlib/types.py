@@ -100,12 +100,30 @@ class JobsJob(DataDict):
     ID: str
 
 
+class EvalStatus(MyStrEnum):
+    blocked = enum.auto()
+    pending = enum.auto()
+    complete = enum.auto()
+    failed = enum.auto()
+    canceled = enum.auto()
+
 class Eval(DataDict):
     ID: str
     JobID: str
     JobModifyIndex: int
     ModifyIndex: int
+    ModifyTime: int
     Status: str
+    WaitUntil: str
+
+
+    def is_pending(self):
+        return self.Status == "pending"
+
+    def getWaitUntil(self) -> Optional[datetime.datetime]:
+        if not self.WaitUntil:
+            return None
+        return datetime.datetime.fromisoformat(self.WaitUntil).replace(tzinfo=datetime.timezone.utc).astimezone()
 
 
 class AllocTaskStateEventType(MyStrEnum):
@@ -205,6 +223,7 @@ class Alloc(DataDict):
     TaskStates: Optional[Dict[str, AllocTaskState]] = None
     # May be missing!
     JobVersion: int
+    FollowupEvalID: Optional[str] = None
 
     def get_taskstates(self) -> Dict[str, AllocTaskState]:
         """The same as TaskStates but returns an empty dict in case the field is None"""
