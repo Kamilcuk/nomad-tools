@@ -171,6 +171,7 @@ class EvalStatus(MyStrEnum):
 
 class Eval(DataDict):
     ID: str
+    Namespace: str
     JobID: str
     JobModifyIndex: int
     ModifyIndex: int
