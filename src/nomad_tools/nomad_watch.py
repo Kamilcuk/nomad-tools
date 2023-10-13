@@ -1603,13 +1603,7 @@ def mode_started(jobid):
     NomadJobWatcherUntilStarted(jobinit).run_and_exit()
 
 
-@cli.command(
-    "stop",
-    help="Stop a Nomad job. Then watch the job until the job is dead and has no pending or running allocations.",
-)
-@cli_jobid
-@common_options()
-def mode_stop(jobid: str):
+def mode_stop_in(jobid: str):
     jobinit = nomad_find_job(jobid)
     do = NomadJobWatcherUntilFinished(jobinit)
     purge: bool = args.purge or (
@@ -1620,6 +1614,16 @@ def mode_stop(jobid: str):
 
 
 @cli.command(
+    "stop",
+    help="Stop a Nomad job. Then watch the job until the job is dead and has no pending or running allocations.",
+)
+@cli_jobid
+@common_options()
+def mode_stop(jobid: str):
+    mode_stop_in(jobid)
+
+
+@cli.command(
     "purge",
     help="Same as stop with --purge.",
 )
@@ -1627,7 +1631,7 @@ def mode_stop(jobid: str):
 @common_options()
 def mode_purge(jobid: str):
     args.purge = True
-    mode_stop(jobid)
+    mode_stop_in(jobid)
 
 
 @cli.command(

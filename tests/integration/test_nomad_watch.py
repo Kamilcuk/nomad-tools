@@ -32,7 +32,7 @@ def test_nomad_watch_run():
         stdout=1,
     ).stdout
     assert mark in output
-    run_nomad_watch(f"--purge stop {jobid}", check=exitstatus)
+    run_nomad_watch(f"purge {jobid}", check=exitstatus)
 
 
 def test_nomad_watch_start():
