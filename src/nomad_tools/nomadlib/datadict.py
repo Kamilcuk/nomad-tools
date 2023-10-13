@@ -37,9 +37,6 @@ def _init_value(classname: str, dstname: str, dsttype: Any, srcval: Any):
         elif dstorigin == Union:
             if type(srcval) in dsttype.__args__:
                 return srcval
-            assert len(dsttype.__args__) == 2 and dsttype.__args__[1] == type(
-                None
-            ), f"Only Optional handled"
             return _init_value(classname, dstname, dsttype.__args__[0], srcval)
         elif issubclass(dsttype, DataDict):
             return dsttype(srcval)

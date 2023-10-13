@@ -100,12 +100,74 @@ class JobsJob(DataDict):
     ID: str
 
 
+class NodeScoreMeta(DataDict):
+    NodeID: str
+    Scores: Dict[str, float]
+    NormScore: float
+
+
+class AllocationMetric(DataDict):
+    NodesEvaluated: int
+    NodesFiltered: int
+    NodesAvailable: Dict[str, int]
+    ClassFiltered: Optional[Dict[str, int]] = None
+    ConstraintFiltered: Optional[Dict[str, int]] = None
+    NodesExhausted: int
+    QuotaExhausted: Optional[Dict[str, int]] = None
+    ScoreMetaData: Optional[List[NodeScoreMeta]] = None
+    ClassExhausted: Optional[Dict[str, int]] = None
+    Scores: Optional[Dict[str, float]] = None
+    DimensionExhausted: Optional[Dict[str, int]] = None
+
+    def format(self, scores: bool = False, prefix: str = "") -> str:
+        """https://github.com/hashicorp/nomad/blob/484f91b893c6f054e9339f8db6bd157429c2ef20/command/monitor.go#L345"""
+        out = []
+        if self.NodesEvaluated == 0:
+            out += [f"No nodes were eligible for evaluation"]
+        for dc, available in self.NodesAvailable.items():
+            if available == 0:
+                out += [f"No nodes are available in datacenter {dc}"]
+        for cls, num in (self.ClassFiltered or {}).items():
+            out += [f"Class {cls}: {num} nodes excluded by filter"]
+        for cs, num in (self.ConstraintFiltered or {}).items():
+            out += [f"Constraint {cs}: {num} nodes excluded by filter"]
+        ne = self.NodesExhausted
+        if ne > 0:
+            out += [f"Resources exhaused on {ne} nodes"]
+        for cls, num in (self.ClassExhausted or {}).items():
+            out += [f"Class {cls} exhaused on {num} nodes"]
+        for dim, num in (self.DimensionExhausted or {}).items():
+            out += [f"Dimension {dim} exhaused on {num} nodes"]
+        for _, dim in (self.QuotaExhausted or {}).items():
+            out += [f"Quota limit hit {dim}"]
+        if scores:
+            if self.ScoreMetaData:
+                allScores: List[str] = sorted(
+                    list(set(k for s in self.ScoreMetaData for k in s.Scores.keys()))
+                )
+                out += [f"Node|{'|'.join(allScores)}|final score"]
+                for scoreMeta in self.ScoreMetaData:
+                    out += [
+                        f"{scoreMeta.NodeID}|"
+                        + "|".join(
+                            f"{scoreMeta.Scores[scorerName]:.3g}"
+                            for scorerName in allScores
+                        )
+                        + f"|{scoreMeta.NormScore:.3g}"
+                    ]
+            else:
+                for name, score in (self.Scores or {}).items():
+                    out += [f"Score {name} = {score}"]
+        return "\n".join(f"{prefix}{x}" for x in out)
+
+
 class EvalStatus(MyStrEnum):
     blocked = enum.auto()
     pending = enum.auto()
     complete = enum.auto()
     failed = enum.auto()
     canceled = enum.auto()
+
 
 class Eval(DataDict):
     ID: str
@@ -115,7 +177,7 @@ class Eval(DataDict):
     ModifyTime: int
     Status: str
     WaitUntil: str
-
+    FailedTGAllocs: Dict[str, AllocationMetric]
 
     def is_pending(self):
         return self.Status == "pending"
@@ -123,7 +185,11 @@ class Eval(DataDict):
     def getWaitUntil(self) -> Optional[datetime.datetime]:
         if not self.WaitUntil:
             return None
-        return datetime.datetime.fromisoformat(self.WaitUntil).replace(tzinfo=datetime.timezone.utc).astimezone()
+        return (
+            datetime.datetime.fromisoformat(self.WaitUntil)
+            .replace(tzinfo=datetime.timezone.utc)
+            .astimezone()
+        )
 
 
 class AllocTaskStateEventType(MyStrEnum):
@@ -216,8 +282,10 @@ class Alloc(DataDict):
     JobID: str
     EvalID: str
     ClientStatus: str
+    CreateTime: int
     Namespace: str
     ModifyIndex: int
+    ModifyTime: int
     TaskGroup: str
     # Also may be missing!
     TaskStates: Optional[Dict[str, AllocTaskState]] = None
@@ -240,6 +308,44 @@ class Alloc(DataDict):
 
     def is_finished(self):
         return not self.is_pending_or_running()
+
+
+class DeploymentStatus(MyStrEnum):
+    running = enum.auto()
+    paused = enum.auto()
+    failed = enum.auto()
+    successful = enum.auto()
+    cancelled = enum.auto()
+    initializing = enum.auto()
+    pending = enum.auto()
+    blocked = enum.auto()
+    unblocking = enum.auto()
+
+
+class DeploymentStatusDescription(MyStrEnum):
+    Running = "Deployment is running"
+    RunningNeedsPromotion = "Deployment is running but requires manual promotion"
+    RunningAutoPromotion = "Deployment is running pending automatic promotion"
+    Paused = "Deployment is paused"
+    Successful = "Deployment completed successfully"
+    StoppedJob = "Cancelled because job is stopped"
+    NewerJob = "Cancelled due to newer version of job"
+    FailedAllocations = "Failed due to unhealthy allocations"
+    ProgressDeadline = "Failed due to progress deadline"
+    FailedByUser = "Deployment marked as failed"
+    FailedByPeer = "Failed because of an error in peer region"
+    Blocked = "Deployment is complete but waiting for peer region"
+    Unblocking = "Deployment is unblocking remaining regions"
+    PendingForPeer = "Deployment is pending, waiting for peer region"
+
+
+class Deploy(DataDict):
+    ID: str
+    ModifyIndex: int
+    JobCreateIndex: int
+    JobID: str
+    Status: str
+    StatusDescription: str
 
 
 class EventTopic(enum.Enum):
@@ -326,6 +432,9 @@ class Event:
     def is_alloc(self):
         return self.topic == EventTopic.Allocation
 
+    def is_deployment(self):
+        return self.topic == EventTopic.Deployment
+
     def get_job(self) -> Optional[Job]:
         return Job(self.data) if self.is_job() else None
 
@@ -335,11 +444,15 @@ class Event:
     def get_alloc(self) -> Optional[Alloc]:
         return Alloc(self.data) if self.is_alloc() else None
 
+    def get_deployment(self) -> Optional[Deploy]:
+        return Deploy(self.data) if self.is_deployment() else None
+
     def apply(
         self,
         job: Optional[Callable[[Job], R]] = None,
         eval: Optional[Callable[[Eval], R]] = None,
         alloc: Optional[Callable[[Alloc], R]] = None,
+        deploy: Optional[Callable[[Deploy], R]] = None,
     ) -> R:
         callbacks = {}
         if job:
@@ -348,6 +461,8 @@ class Event:
             callbacks[EventTopic.Evaluation] = lambda data: eval(Eval(data))
         if alloc:
             callbacks[EventTopic.Allocation] = lambda data: alloc(Alloc(data))
+        if deploy:
+            callbacks[EventTopic.Deployment] = lambda data: deploy(Deploy(data))
         assert len(callbacks), f"At least one callback has to be specified"
         return callbacks[self.topic](self.data)
 

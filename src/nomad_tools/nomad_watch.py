@@ -7,6 +7,7 @@ import argparse
 import base64
 import dataclasses
 import datetime
+import inspect
 import itertools
 import json
 import logging
@@ -19,7 +20,18 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from http import client as http_client
-from typing import Any, Callable, Dict, Iterable, List, Optional, Pattern, Set, Tuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Pattern,
+    Set,
+    Tuple,
+    TypeVar,
+)
 
 import click
 import requests
@@ -44,7 +56,7 @@ log = logging.getLogger(__name__)
 
 args = argparse.Namespace()
 
-args_lines_start_ns: int = 0
+START_NS: int = 0
 
 
 def _init_colors() -> Dict[str, str]:
@@ -88,6 +100,18 @@ def _init_colors() -> Dict[str, str]:
 
 COLORS = _init_colors()
 
+
+T = TypeVar("T")
+
+
+def set_not_in_add(s: Set[T], value: T) -> bool:
+    """If value is in the set, return False. Otherwise add the value to the set and return True"""
+    if value in s:
+        return False
+    s.add(value)
+    return True
+
+
 ###############################################################################
 
 
@@ -116,7 +140,7 @@ class LogFormat:
 
     def add_color(self) -> LogFormat:
         return LogFormat(
-            f"%(cyan)s{self.eval}%(reset)s",
+            f"%(magenta)s{self.eval}%(reset)s",
             f"%(cyan)s{self.alloc}%(reset)s",
             f"%(orange)s{self.stderr}%(reset)s",
             self.stdout,
@@ -133,8 +157,9 @@ class LogFormat:
             "asctime": params["now"].strftime(args.log_timestamp_format),
         }
 
-    def __log(self, fmt, **kwargs: Any):
-        print(fmt % self.__params(kwargs), flush=True)
+    def __log(self, fmt: str, **kwargs: Any):
+        if fmt:
+            print(fmt % self.__params(kwargs), flush=True)
 
     def log_eval(self, evalid: str, now: datetime.datetime, message: str):
         return self.__log(self.eval, evalid=evalid, now=now, message=message)
@@ -311,12 +336,9 @@ class Logger(threading.Thread):
         self.ignoredlines: List[str] = []
         self.first_line = True
         # Ignore input lines if printing only trailing lines.
-        global args_lines_start_ns
-        self.ignoretime_ns = (
-            0 if args.lines < 0 else args_lines_start_ns + int(args.lines_timeout * 1e9)
-        )
+        self.ignoretime_ns = START_NS + int(args.lines_timeout * 1e9)
         # If ignore time is in the past, it is no longer relevant anyway.
-        if self.ignoretime_ns and self.ignoretime_ns < time.time_ns():
+        if args.lines < 0 or self.ignoretime_ns < time.time_ns():
             self.ignoretime_ns = 0
 
     @staticmethod
@@ -415,22 +437,18 @@ class TaskHandler:
         events = taskstate.Events
         if logformat.alloc:
             for e in events:
-                msg = f"{e.Type} {e.DisplayMessage}"
                 msgtime_ns = e.Time
-                global args_lines_start_ns
                 # Ignore message before ignore times.
                 if (
                     msgtime_ns
-                    and msg
-                    and msgtime_ns not in self.messages
                     and (
-                        not args_lines_start_ns
-                        or msgtime_ns >= args_lines_start_ns
+                        args.lines < 0
+                        or msgtime_ns >= START_NS
                         or len(self.messages) < args.lines
                     )
+                    and set_not_in_add(self.messages, msgtime_ns)
                 ):
-                    self.messages.add(msgtime_ns)
-                    tk.log_alloc(ns2dt(msgtime_ns), msg)
+                    tk.log_alloc(ns2dt(msgtime_ns), f"{e.Type} {e.DisplayMessage}")
         if (
             self.loggers is None
             and taskstate.State in ["running", "dead"]
@@ -481,21 +499,42 @@ class ExitCode:
 
 
 @dataclasses.dataclass
-class AllocWorkers(Dict[str, AllocWorker]):
+class AllocWorkers:
     """An containers for storing a map of allocation workers"""
 
     db: "Db"
     """Link to database"""
-    evalmessages: Set[int] = dataclasses.field(default_factory=set)
+    workers: Dict[str, AllocWorker] = dataclasses.field(default_factory=dict)
+    evalmessages: Set[Tuple[int, str]] = dataclasses.field(default_factory=set)
     """A set of evaluation ModifyIndex to know what has been printed."""
 
-    def notify(self, alloc: nomadlib.Alloc):
-        self.setdefault(alloc.ID, AllocWorker()).notify(alloc)
+    def lineno_key_not_printed(self, key: str) -> bool:
+        lineno = inspect.currentframe().f_back.f_lineno  # type: ignore
+        return set_not_in_add(self.evalmessages, (lineno, key))
+
+    def notify_alloc(self, alloc: nomadlib.Alloc):
+        if logformat.eval and self.lineno_key_not_printed(alloc.EvalID):
+            createtime = ns2dt(alloc.CreateTime)
+            logformat.log_eval(
+                alloc.EvalID, createtime, f"Allocation {alloc.ID} started"
+            )
+        #
+        self.workers.setdefault(alloc.ID, AllocWorker()).notify(alloc)
+        #
+        if (
+            logformat.eval
+            and alloc.is_finished()
+            and self.lineno_key_not_printed(alloc.EvalID)
+        ):
+            logformat.log_eval(
+                alloc.EvalID, ns2dt(alloc.ModifyTime), f"Allocation {alloc.ID} finished"
+            )
+        #
         if logformat.eval and alloc.FollowupEvalID:
             followupeval = self.db.evaluations.get(alloc.FollowupEvalID)
-            if followupeval and followupeval.ModifyIndex not in self.evalmessages:
+            if followupeval:
                 waituntil = followupeval.getWaitUntil()
-                if waituntil:
+                if waituntil and self.lineno_key_not_printed(followupeval.ID):
                     utcnow = datetime.datetime.now(datetime.timezone.utc)
                     delay = waituntil - utcnow
                     if delay > datetime.timedelta(0):
@@ -504,10 +543,26 @@ class AllocWorkers(Dict[str, AllocWorker]):
                             now=ns2dt(followupeval.ModifyTime),
                             message=f"Nomad will attempt to reschedule in {delay} seconds",
                         )
-                        self.evalmessages.add(followupeval.ModifyIndex)
+
+    def notify_eval(self, evaluation: nomadlib.Eval):
+        if (
+            logformat.eval
+            and evaluation.Status == nomadlib.EvalStatus.blocked
+            and "FailedTGAllocs" in evaluation
+            and self.lineno_key_not_printed(evaluation.ID)
+        ):
+            modifytime = ns2dt(evaluation.ModifyTime)
+            logformat.log_eval(
+                evaluation.ID,
+                modifytime,
+                f"{evaluation.JobID}: Placement Failures: {len(evaluation.FailedTGAllocs)} unplaced",
+            )
+            for task, metric in evaluation.FailedTGAllocs.items():
+                for msg in metric.format(True, f"{task}: ").splitlines():
+                    logformat.log_eval(evaluation.ID, modifytime, msg)
 
     def stop(self):
-        for w in self.values():
+        for w in self.workers.values():
             for th in w.taskhandlers.values():
                 th.stop()
 
@@ -515,13 +570,13 @@ class AllocWorkers(Dict[str, AllocWorker]):
         # Logs stream outputs empty {} which allows to handle timeouts.
         threads: List[Tuple[str, threading.Thread]] = [
             (f"{tk.task}[{i}]", logger)
-            for w in self.values()
+            for w in self.workers.values()
             for tk, th in w.taskhandlers.items()
             for i, logger in enumerate(th.loggers or [])
         ]
-        thcnt = sum(len(w.taskhandlers) for w in self.values())
+        thcnt = sum(len(w.taskhandlers) for w in self.workers.values())
         log.debug(
-            f"Joining {len(self)} allocations with {thcnt} taskhandlers and {len(threads)} loggers"
+            f"Joining {len(self.workers)} allocations with {thcnt} taskhandlers and {len(threads)} loggers"
         )
         timeend = time.time() + args.shutdown_timeout
         for desc, thread in threads:
@@ -537,7 +592,7 @@ class AllocWorkers(Dict[str, AllocWorker]):
         exitcodes: List[int] = [
             # If thread did not return, exit with -1.
             -1 if th.exitcode is None else th.exitcode
-            for w in self.values()
+            for w in self.workers.values()
             for th in w.taskhandlers.values()
         ]
         if len(exitcodes) == 0:
@@ -590,6 +645,8 @@ class Db:
         """Database of evaluations"""
         self.allocations: Dict[str, nomadlib.Alloc] = {}
         """Database of allocations"""
+        self.deployments: Dict[str, nomadlib.Deploy] = {}
+        """Database of deployments"""
         self.initialized = threading.Event()
         """Was init_cb called to initiliaze the database"""
         self.stopevent = threading.Event()
@@ -668,6 +725,8 @@ class Db:
             return e.data["ID"] in self.evaluations
         elif e.topic == EventTopic.Allocation:
             return e.data["ID"] in self.allocations
+        elif e.topic == EventTopic.Deployment:
+            return e.data["ID"] in self.deployments
         return False
 
     def _add_event_to_db(self, e: Event):
@@ -683,6 +742,8 @@ class Db:
             self.evaluations[e.data["ID"]] = nomadlib.Eval(e.data)
         elif e.topic == EventTopic.Allocation:
             self.allocations[e.data["ID"]] = nomadlib.Alloc(e.data)
+        elif e.topic == EventTopic.Deployment:
+            self.deployments[e.data["ID"]] = nomadlib.Deploy(e.data)
 
     def handle_event(self, e: Event) -> bool:
         if self._select_new_event(e):
@@ -708,9 +769,10 @@ class Db:
         job_select: Callable[[nomadlib.Job], bool],
         eval_select: Callable[[nomadlib.Eval], bool],
         alloc_select: Callable[[nomadlib.Alloc], bool],
+        deploy_select: Callable[[nomadlib.Deploy], bool],
     ) -> bool:
         """Apply specific selectors depending on event type"""
-        return e.apply(job_select, eval_select, alloc_select)
+        return e.apply(job_select, eval_select, alloc_select, deploy_select)
 
     def _select_new_event(self, e: Event):
         """Select events which are newer than those in the database"""
@@ -725,8 +787,12 @@ class Db:
             lambda alloc: alloc.ID not in self.allocations
             or alloc.ModifyIndex > self.allocations[alloc.ID].ModifyIndex
         )
+        deploy_select: Callable[[nomadlib.Deploy], bool] = (
+            lambda deploy: deploy.ID not in self.deployments
+            or deploy.ModifyIndex > self.deployments[deploy.ID].ModifyIndex
+        )
         return e.data["Namespace"] == mynomad.namespace and self.apply_selects(
-            e, job_select, eval_select, alloc_select
+            e, job_select, eval_select, alloc_select, deploy_select
         )
 
     def stop(self):
@@ -828,6 +894,7 @@ class NomadJobWatcher(ABC):
                 f"Job:{self.job.ID}",
                 f"Evaluation:{self.job.ID}",
                 f"Allocation:{self.job.ID}",
+                f"Deployment:{self.job.ID}",
             ],
             select_event_cb=self.db_select_event_job,
             init_cb=self.db_init_cb,
@@ -849,9 +916,14 @@ class NomadJobWatcher(ABC):
         job: dict = mynomad.get(f"job/{self.job.ID}")
         evaluations: List[dict] = mynomad.get(f"job/{self.job.ID}/evaluations")
         allocations: List[dict] = mynomad.get(f"job/{self.job.ID}/allocations")
+        deployments: List[dict] = mynomad.get(f"job/{self.job.ID}/deployments")
         if not allocations:
             log.debug(f"Job {self.job.description()} has no allocations")
         return [
+            *[
+                Event(EventTopic.Deployment, EventType.DeploymentStatusUpdate, d)
+                for d in deployments
+            ],
             *[
                 Event(EventTopic.Evaluation, EventType.EvaluationUpdated, e)
                 for e in evaluations
@@ -868,20 +940,22 @@ class NomadJobWatcher(ABC):
             e,
             lambda job: job.ID == self.job.ID,
             lambda eval: eval.JobID == self.job.ID,
-            lambda alloc: alloc["JobID"] == self.job.ID,
+            lambda alloc: alloc.JobID == self.job.ID,
+            lambda deploy: deploy.JobID == self.job.ID,
         )
 
-    def db_select_event_job(self, e: Event):
+    def db_select_event_job(self, e: Event) -> bool:
+        if args.all:
+            return True
         job_filter: Callable[[nomadlib.Job], bool] = lambda _: True
         eval_filter: Callable[[nomadlib.Eval], bool] = lambda eval: (
             # Either all, or the JobModifyIndex has to be greater.
-            args.all
-            or eval.get("JobModifyIndex", -1) >= self.job.JobModifyIndex
+            eval.get("JobModifyIndex", -1)
+            >= self.job.JobModifyIndex
         )
         alloc_filter: Callable[[nomadlib.Alloc], bool] = lambda alloc: (
-            args.all
             # If allocation has JobVersion, then it has to match the version in the job.
-            or alloc.get("JobVersion", -1) >= self.job.Version
+            alloc.get("JobVersion", -1) >= self.job.Version
             # If the allocation has no JobVersion, find the maching evaluation.
             # The JobModifyIndex from the evalution has to match.
             or (
@@ -889,8 +963,11 @@ class NomadJobWatcher(ABC):
                 >= self.job.JobModifyIndex
             )
         )
+        deploy_filter: Callable[[nomadlib.Deploy], bool] = lambda deploy: (
+            deploy.get("JobModifyIndex", -1) >= self.job.JobModifyIndex
+        )
         return self.db_select_event_jobid(e) and Db.apply_selects(
-            e, job_filter, eval_filter, alloc_filter
+            e, job_filter, eval_filter, alloc_filter, deploy_filter
         )
 
     @abstractmethod
@@ -913,8 +990,10 @@ class NomadJobWatcher(ABC):
             for event in events:
                 if event.topic == EventTopic.Allocation:
                     alloc = nomadlib.Alloc(event.data)
-                    # for alloc in self.db.allocations.values():
-                    self.allocworkers.notify(alloc)
+                    self.allocworkers.notify_alloc(alloc)
+                elif event.topic == EventTopic.Evaluation:
+                    evaluation = nomadlib.Eval(event.data)
+                    self.allocworkers.notify_eval(evaluation)
                 elif event.topic == EventTopic.Job:
                     # self.job follows newest job definition.
                     if self.db.job and self.job.ModifyIndex < self.db.job.ModifyIndex:
@@ -954,16 +1033,26 @@ class NomadJobWatcher(ABC):
             self.stop()
         exit(self.get_exitcode())
 
-    def no_pending_or_running_allocations_and_evaluations(self):
+    def no_active_allocations_and_evaluations_and_deployments(self):
         for allocation in self.db.allocations.values():
             if allocation.is_pending_or_running():
                 return False
-            evaluationid = allocation.get("FollowupEvalID")
-            if evaluationid:
-                evaluation = self.db.evaluations.get(evaluationid)
-                if evaluation and evaluation.is_pending():
-                    return False
+        for evaluation in self.db.evaluations.values():
+            if evaluation.is_pending():
+                return False
+        for deployments in self.db.deployments.values():
+            if deployments.Status in [
+                nomadlib.DeploymentStatus.initializing,
+                nomadlib.DeploymentStatus.running,
+                nomadlib.DeploymentStatus.pending,
+                nomadlib.DeploymentStatus.blocked,
+                nomadlib.DeploymentStatus.paused,
+            ]:
+                return False
         return True
+
+    def _job_is_dead_message(self):
+        return f"Job {self.job.description()} is dead with no active allocations, evaluations nor deployments."
 
 
 class NomadJobWatcherUntilFinished(NomadJobWatcher):
@@ -1001,7 +1090,7 @@ class NomadJobWatcherUntilFinished(NomadJobWatcher):
             self.foundjob = True
         elif not self.foundjob:
             return False
-        if self.no_pending_or_running_allocations_and_evaluations():
+        if self.no_active_allocations_and_evaluations_and_deployments():
             with self.purgedlock:
                 # Depending on purge argument, we wait for the job to stop existing
                 # or for the job to be dead.
@@ -1011,7 +1100,7 @@ class NomadJobWatcherUntilFinished(NomadJobWatcher):
                         return True
                 else:
                     if self.job.is_dead():
-                        self.donemsg = f"Job {self.job.description()} is dead with no running or pending allocations and evaluations. Exiting."
+                        self.donemsg = f"{self._job_is_dead_message()} Exiting."
                         return True
         return False
 
@@ -1144,11 +1233,9 @@ class NomadJobWatcherUntilStarted(NomadJobWatcher):
             return True
         if (
             self.job.is_dead()
-            and self.no_pending_or_running_allocations_and_evaluations()
+            and self.no_active_allocations_and_evaluations_and_deployments()
         ):
-            log.info(
-                f"Job {self.job.description()} is dead with no running or pending allocations and evaluations. Bailing out."
-            )
+            log.info(f"{self._job_is_dead_message()} Bailing out.")
             return True
         return False
 
@@ -1190,7 +1277,7 @@ class NomadAllocationWatcher:
                         assert (
                             self.alloc.ID == alloc.ID
                         ), f"Internal error in Db filter: {alloc} {self.alloc}"
-                        self.allocworkers.notify(alloc)
+                        self.allocworkers.notify_alloc(alloc)
                         if alloc.is_finished():
                             log.info(
                                 f"Allocation {alloc.ID} has status {alloc.ClientStatus}. Exiting."
@@ -1411,9 +1498,8 @@ def cli(**kwargs):
     if args.namespace:
         os.environ["NOMAD_NAMESPACE"] = nomad_find_namespace(args.namespace)
     #
-    if args.lines >= 0:
-        global args_lines_start_ns
-        args_lines_start_ns = time.time_ns()
+    global START_NS
+    START_NS = time.time_ns()
     # init logging
     log_format_choose()
 
@@ -1531,6 +1617,17 @@ def mode_stop(jobid: str):
     )
     do.stop_job(purge)
     do.run_and_exit()
+
+
+@cli.command(
+    "purge",
+    help="Same as stop with --purge.",
+)
+@cli_jobid
+@common_options()
+def mode_purge(jobid: str):
+    args.purge = True
+    mode_stop(jobid)
 
 
 @cli.command(
