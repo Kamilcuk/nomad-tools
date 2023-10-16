@@ -16,7 +16,8 @@ log = logging.getLogger(__name__)
 def gen_alloc(alloc: nomadlib.Alloc) -> List[str]:
     out = []
     log.debug(f"Parsing {alloc.ID}")
-    for i in alloc.get("AllocatedResources", {}).get("Shared", {}).get("Ports", []):
+    ports = ((alloc.get("AllocatedResources") or {}).get("Shared") or {}).get("Ports")
+    for i in ports or []:
         params = dict(
             **{
                 k: v
