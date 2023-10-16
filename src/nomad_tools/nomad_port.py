@@ -8,7 +8,7 @@ from typing import Any, List, Optional, Union
 import click.shell_completion
 
 from . import nomadlib
-from .common import ALIASED, alias_option, common_options, mynomad
+from .common import ALIASED, alias_option, common_options, mynomad, nomad_find_job
 
 log = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ class IdArgument(click.ParamType):
             assert len(allocs) > 0, f"Allocation with id {id} not found"
             assert len(allocs) < 2, f"Multiple allocations found starting with id {id}"
             return nomadlib.Alloc(allocs[0])
-        return mynomad.find_job(id)
+        return nomad_find_job(id)
 
     def shell_complete(
         self, ctx: click.Context, param: click.Parameter, incomplete: str
@@ -116,7 +116,7 @@ def cli(id: Union[nomadlib.Alloc, str], **kwargs):
         out = gen_alloc(alloc)
     else:
         assert isinstance(id, str)
-        jobid = mynomad.find_job(id)
+        jobid = id
         out = []
         for alloc in mynomad.get(f"job/{jobid}/allocations"):
             if args.all or nomadlib.Alloc(alloc).is_pending_or_running():

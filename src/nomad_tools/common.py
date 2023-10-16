@@ -9,6 +9,20 @@ from . import nomadlib
 mynomad = nomadlib.NomadConn()
 
 
+def nomad_find_job(jobprefix: str) -> str:
+    """Find job named jobprefix"""
+    jobs = mynomad.get("jobs", params={"prefix": jobprefix})
+    assert len(jobs) > 0, f"No jobs found with prefix {jobprefix}"
+    jobsnames = " ".join(f"{x['ID']}@{x['Namespace']}" for x in jobs)
+    assert len(jobs) < 2, f"Multiple jobs found with name {jobprefix}: {jobsnames}"
+    job = jobs[0]
+    assert (
+        jobprefix == job["ID"]
+    ), f"Could not find job named {jobprefix}, closest is {job['ID']}"
+    mynomad.namespace = job["Namespace"]
+    return job['ID']
+
+
 def nomad_find_namespace(prefix: str):
     """Finds a nomad namespace by prefix"""
     if prefix == "*":
@@ -30,10 +44,7 @@ def nomad_find_namespace(prefix: str):
 def _complete_set_namespace(ctx: click.Context):
     namespace = ctx.params.get("namespace")
     if namespace:
-        try:
-            os.environ["NOMAD_NAMESPACE"] = nomad_find_namespace(namespace)
-        except Exception:
-            pass
+        os.environ["NOMAD_NAMESPACE"] = namespace
 
 
 def completor(cb: Callable[[], Iterable[str]]):

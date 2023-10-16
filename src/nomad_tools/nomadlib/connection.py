@@ -180,15 +180,6 @@ class NomadConn(Requestor):
         assert resp["EvalID"], f"Stopping {jobid} did not trigger evaluation: {resp}"
         return resp
 
-    def find_job(self, jobprefix: str) -> str:
-        jobs = self.get("jobs", params={"prefix": jobprefix})
-        assert len(jobs) > 0, f"No jobs found with prefix {jobprefix}"
-        jobsnames = " ".join(f"{x['ID']}@{x['Namespace']}" for x in jobs)
-        assert len(jobs) < 2, f"Multiple jobs found with name {jobprefix}: {jobsnames}"
-        job = jobs[0]
-        self.namespace = job["Namespace"]
-        return job["ID"]
-
     def find_last_not_stopped_job(self, jobid: str) -> dict:
         assert self.namespace
         jobinit = self.get(f"job/{jobid}")
