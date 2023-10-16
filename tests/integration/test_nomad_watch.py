@@ -15,11 +15,15 @@ from tests.testlib import (
 
 
 def test_nomad_watch_run_0():
+    """Watch a simple jow that outputs hello world"""
     job = gen_job(script=f"echo hello world")
-    run_nomad_watch("--purge run -json -", input=json.dumps(job))
+    run_nomad_watch(
+        "--purge run -json -", input=json.dumps(job), output=["hello world"]
+    )
 
 
 def test_nomad_watch_run():
+    """Run a simple job, then purge it. Check if we have our uuid on output"""
     mark = "5581c3a0-cd72-4b84-8b95-799d1aebe1cd"
     exitstatus = 123
     job = gen_job(script=f"echo {mark}; exit {exitstatus}")
@@ -81,9 +85,12 @@ def test_nomad_watch_run_short():
         }}
         """
     print(spec)
-    output = run_nomad_watch("run -", input=spec, stdout=1).stdout
-    assert output.count("sleep 0.123") == 5
-    assert output.count("MARK ") == 10
+    try:
+        output = run_nomad_watch("-n -1 run -", input=spec, stdout=1).stdout
+        assert output.count("sleep 0.123") == 5
+        assert output.count("MARK ") == 10
+    finally:
+        run_nomad_watch(f"-x purge {name}")
 
 
 def test_nomad_watch_run_multiple():
@@ -140,9 +147,7 @@ def test_nomad_watch_run_multiple():
 def test_nomad_watch_purge_successful_0():
     job = gen_job("exit 0")
     jobid = job["Job"]["ID"]
-    run_nomad_watch(
-        "--purge-successful run -json -", input=json.dumps(job), check=[0]
-    )
+    run_nomad_watch("--purge-successful run -json -", input=json.dumps(job), check=[0])
     assert not job_exists(jobid)
 
 

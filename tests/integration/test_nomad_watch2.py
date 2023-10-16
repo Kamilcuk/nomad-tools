@@ -1,3 +1,5 @@
+import re
+
 from nomad_tools.common import mynomad
 from tests.testlib import get_testjobs, run, run_nomad_watch
 
@@ -5,21 +7,35 @@ testjobs = get_testjobs()
 
 
 def test_nomad_watch2_canary():
+    """
+    Run a service that listens on a port.
+    Check if nomad-port works.
+    Then try to upgrade that service so that it fails. Deployment should fail.
+    Then try to upgrade that service but with success. Deployment should succeed.
+    """
     job = "test-listen"
-    output = ["+ hostname", "+ exec httpd"]
+    output = ["+ hostname", "+ exec httpd", "Deployment completed successfully"]
     try:
         # Run nice deployment.
         run_nomad_watch(f"start -var ok=true  {testjobs[job]}", output=output)
-        out = run(f"nomad-port {job}", stdout=True).stdout
-        assert len(out.splitlines()) == 1, f"{out}"
+        run(f"nomad-port {job}", output=[re.compile(r"[0-9\.]+:[0-9]+")])
+        run(
+            f"nomad-port -l {job}",
+            output=[re.compile(r"[0-9\.]+:[0-9]+ http [^ ]* [^ ]*")],
+        )
         # This should fail and revert deployment.
         run_nomad_watch(
             f"start -var ok=false {testjobs[job]}",
             output=[
                 "Failed due to unhealthy allocations - rolling back to job",
-                *output,
             ],
             check=False,
+        )
+        run_nomad_watch(f"start -var ok=true  {testjobs[job]}", output=output)
+        run(f"nomad-port {job}", output=[re.compile(r"[0-9\.]+:[0-9]+")])
+        run(
+            f"nomad-port -l {job}",
+            output=[re.compile(r"[0-9\.]+:[0-9]+ http [^ ]* [^ ]*")],
         )
         run_nomad_watch(f"-x stop {job}", output=output)
     finally:
@@ -27,6 +43,10 @@ def test_nomad_watch2_canary():
 
 
 def test_nomad_watch2_blocked():
+    """
+    Run a job that blocks because not enough memory.
+    Then unblock it and run
+    """
     job = "test-blocked"
     for i in "start run".split():
         try:
@@ -46,6 +66,10 @@ def test_nomad_watch2_blocked():
 
 
 def test_nomad_watch2_maintask():
+    """
+    Run a job that has all combinations of lifetime property.
+    Check if proper tasks are started.
+    """
     job = "test-maintask"
     try:
         out = run_nomad_watch(

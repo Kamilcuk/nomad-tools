@@ -135,6 +135,7 @@ def run(
     print(" ", file=sys.stderr, flush=True)
     print(f"+ {quotearr(cmda)}", file=sys.stderr, flush=True)
     stdout = stdout or bool(output)
+    # Run subprocess.Popen, input stdin and output stdout.
     pp = subprocess.Popen(
         cmda,
         text=text,
@@ -183,7 +184,7 @@ def run(
             if isinstance(pat, str):
                 assert pat in rr.stdout, f"String {pat} not found"
             elif isinstance(pat, re.Pattern):
-                assert pat.findall(rr.stdout), f"Pattern {pat} not found"
+                assert pat.findall(rr.stdout.strip()), f"Pattern {pat} not found"
             else:
                 assert 0
     #
