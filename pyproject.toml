@@ -29,6 +29,7 @@ nomad-cp = "nomad_tools:nomad_cp.cli"
 nomad-vardir = "nomad_tools:nomad_vardir.cli"
 nomad-gitlab-runner = "nomad_tools:nomad_gitlab_runner.main"
 nomad-port = "nomad_tools:nomad_port.cli"
+#nomadt = "nomad_tools:nomadt.cli"
 
 [project.optional-dependencies]
 test = [
