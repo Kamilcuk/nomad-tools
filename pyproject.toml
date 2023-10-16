@@ -48,6 +48,9 @@ log_cli_date_format = "%H:%M:%S"
 testpaths = [
 	"tests/unit",
 ]
+filterwarnings = [
+	"ignore::DeprecationWarning",
+]
 
 [tool.pyright]
 reportUnnecessaryComparison = "error"

@@ -105,6 +105,14 @@ def gen_job(
     return {"Job": job}
 
 
+def get_testjobs() -> Dict[str, Path]:
+    files = list(Path(f"./jobs/").glob("*.nomad.hcl"))
+    assert len(files) > 3
+    ret = {f.name[: -len(".nomad.hcl")]: f for f in files}
+    print(ret)
+    return ret
+
+
 def quotearr(cmd: List[str]):
     return " ".join(shlex.quote(x) for x in cmd)
 

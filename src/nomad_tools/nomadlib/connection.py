@@ -159,6 +159,8 @@ class NomadConn(Requestor):
                 raise JobNotFound(str(e)) from e
             elif resp == (404, "variable not found"):
                 raise VariableNotFound(str(e)) from e
+            elif ret.status_code == 500:
+                log.exception(resp)
             raise
         return ret
 

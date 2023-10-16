@@ -4,7 +4,8 @@ import dataclasses
 import datetime
 import enum
 import logging
-from typing import Callable, Dict, List, Optional, TypeVar
+from abc import ABC, abstractmethod
+from typing import Any, Callable, Dict, Generic, List, Optional, TypeVar
 
 from .datadict import DataDict
 
@@ -56,13 +57,16 @@ class JobTask(DataDict):
     Driver: str
     User: str
     Config: JobTaskConfig
-    Lifecycle: Optional[JobTaskLifecycle]
+    Lifecycle: Optional[JobTaskLifecycle] = None
     Env: Optional[Dict[str, str]]
+    Services: Optional[List[Any]]
 
 
 class JobTaskGroup(DataDict):
     Name: str
+    Count: int
     Tasks: List[JobTask]
+    Services: Optional[List[Any]]
 
 
 class JobStatus(MyStrEnum):
@@ -86,12 +90,24 @@ class Job(DataDict):
     TaskGroups: List[JobTaskGroup]
     Stop: bool
     Meta: Optional[Dict[str, str]]
+    SubmitTime: int
 
     def is_dead(self):
         return self.Status == JobStatus.dead
 
     def description(self):
-        return f"{self.ID}@v{self.Version}@{self.Namespace}"
+        return f"{self.ID}#{self.Version}@{self.Namespace}"
+
+    def allservices(self):
+        """Return all services from groups and tasks of a job"""
+        out = []
+        for tg in self.TaskGroups:
+            if tg.Services:
+                out += tg.Services
+            for task in tg.Tasks:
+                if task.Services:
+                    out += task.Services
+        return out
 
 
 class JobsJob(DataDict):
@@ -340,13 +356,30 @@ class DeploymentStatusDescription(MyStrEnum):
     PendingForPeer = "Deployment is pending, waiting for peer region"
 
 
+class DeploymentTaskGroup(DataDict):
+    AutoPromote: bool
+    AutoRevert: bool
+    DesiredCanaries: int
+    DesiredTotal: int
+    HealthyAllocs: int
+    PlacedAllocs: int
+    PlacedCanaries: Optional[List[str]] = None
+    ProgressDeadline: int
+    Promoted: bool
+    RequireProgressBy: Optional[str]
+    UnhealthyAllocs: int
+
+
 class Deploy(DataDict):
     ID: str
     ModifyIndex: int
     JobCreateIndex: int
+    JobModifyIndex: int
+    JobVersion: int
     JobID: str
     Status: str
     StatusDescription: str
+    TaskGroups: Dict[str, DeploymentTaskGroup]
 
 
 class EventTopic(enum.Enum):
@@ -466,6 +499,36 @@ class Event:
             callbacks[EventTopic.Deployment] = lambda data: deploy(Deploy(data))
         assert len(callbacks), f"At least one callback has to be specified"
         return callbacks[self.topic](self.data)
+
+
+class EventApplier(ABC, Generic[R]):
+    @abstractmethod
+    def apply_job(self, job: Job) -> R:
+        raise NotImplementedError()
+
+    @abstractmethod
+    def apply_eval(self, eval: Eval) -> R:
+        raise NotImplementedError()
+
+    @abstractmethod
+    def apply_alloc(self, alloc: Alloc) -> R:
+        raise NotImplementedError()
+
+    @abstractmethod
+    def apply_deploy(self, deploy: Deploy) -> R:
+        raise NotImplementedError()
+
+    def apply(self, e: Event) -> R:
+        if e.is_job():
+            return self.apply_job(Job(e.data))
+        elif e.is_alloc():
+            return self.apply_alloc(Alloc(e.data))
+        elif e.is_eval():
+            return self.apply_eval(Eval(e.data))
+        elif e.is_deployment():
+            return self.apply_deploy(Deploy(e.data))
+        else:
+            raise KeyError(f"{e.topic} not handled")
 
 
 class VariableNoItems(DataDict):

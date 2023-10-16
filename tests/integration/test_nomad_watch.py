@@ -16,7 +16,7 @@ from tests.testlib import (
 
 def test_nomad_watch_run_0():
     job = gen_job(script=f"echo hello world")
-    run_nomad_watch("--purge --json -", input=json.dumps(job))
+    run_nomad_watch("--purge run -json -", input=json.dumps(job))
 
 
 def test_nomad_watch_run():
@@ -40,7 +40,7 @@ def test_nomad_watch_start():
     job = gen_job(script=f"sleep 1; echo {mark} ; exit {exitstatus}")
     jobid = job["Job"]["ID"]
     try:
-        run_nomad_watch("--json start -", input=json.dumps(job))
+        run_nomad_watch("start -json -", input=json.dumps(job))
         assert mark in run_nomad_watch(f"started {jobid}", stdout=1).stdout
         cmds = [
             f"stop {jobid}",
@@ -141,7 +141,7 @@ def test_nomad_watch_purge_successful_0():
     job = gen_job("exit 0")
     jobid = job["Job"]["ID"]
     run_nomad_watch(
-        "--purge-successful --json run -", input=json.dumps(job), check=[0]
+        "--purge-successful run -json -", input=json.dumps(job), check=[0]
     )
     assert not job_exists(jobid)
 
@@ -151,7 +151,7 @@ def test_nomad_watch_purge_successful_123():
     jobid = job["Job"]["ID"]
     try:
         run_nomad_watch(
-            "--purge-successful --json run -", input=json.dumps(job), check=[123]
+            "--purge-successful run -json -", input=json.dumps(job), check=[123]
         )
         assert job_exists(jobid)
     finally:
@@ -211,7 +211,7 @@ def test_nomad_watch_starting_with_preinit_tasks():
         }
     }
     try:
-        run_nomad_watch("--json start -", input=json.dumps(job))
+        run_nomad_watch("start -json -", input=json.dumps(job))
         assert job_exists(jobid)
         allocs = [
             nomadlib.Alloc(x)

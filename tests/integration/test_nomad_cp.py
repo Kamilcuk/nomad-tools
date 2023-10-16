@@ -28,7 +28,7 @@ def run_temp_job():
     job = jobjson["Job"]
     jobname = job["ID"]
     try:
-        run_nomad_watch("--json start -", input=json.dumps(jobjson))
+        run_nomad_watch("start -json -", input=json.dumps(jobjson))
         with NomadTempdir(jobname) as nomaddir:
             with tempfile.TemporaryDirectory() as hostdir:
                 yield jobname, nomaddir, hostdir

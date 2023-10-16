@@ -12,6 +12,7 @@ import socket
 import string
 import subprocess
 import sys
+import tempfile
 from collections import defaultdict
 from pathlib import Path
 from shlex import quote, split
@@ -25,7 +26,6 @@ from . import nomad_watch, nomadlib
 from .common import common_options, get_version, mynomad
 from .nomadlib.datadict import DataDict
 from .nomadlib.types import Job, JobTask, JobTaskConfig
-from .nomadlib import ns2dt
 
 ###############################################################################
 
@@ -80,9 +80,10 @@ class ServiceSpec(DataDict):
     """
 
     name: str
-    alias: str = ""
     entrypoint: Optional[List[str]] = None
     command: Optional[List[str]] = None
+    alias: str = ""
+    variables: Dict[str, str] = {}
 
     def __post_init__(self):
         if not self.alias:
@@ -548,7 +549,7 @@ class Config(DataDict):
 
 
 def run_nomad_watch(cmd: str):
-    cmdarr = ["-TG", *split(cmd)]
+    cmdarr = ["-T", *split(cmd)]
     cmd = quotearr(cmdarr)
     log.debug(f"+ nomad-watch {cmd}")
     try:
@@ -854,7 +855,10 @@ def mode_prepare():
     je = Jobenv()
     purge_previous_nomad_job(je.jobname)
     jobjson = json.dumps({"Job": je.job.asdict()})
-    run_nomad_watch(f"start {quote(jobjson)}")
+    with tempfile.NamedTemporaryFile("w+") as f:
+        f.write(jobjson)
+        f.flush()
+        run_nomad_watch(f"start -json {f.name}")
 
 
 @cli.command("run", help="https://docs.gitlab.com/runner/executors/custom.html#run")
