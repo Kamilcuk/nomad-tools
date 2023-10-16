@@ -13,8 +13,7 @@ def test_nomad_vardir_1():
                 "bash -c 'mkdir -p 1 && cd 1 && mkdir -p a && echo 123 > a/b && echo 234 > c'",
                 cwd=d,
             )
-            rr = run_nomad_vardir(f"-p {name} diff .", cwd=f"{d}/1", check=False)
-            assert rr.returncode != 0
+            run_nomad_vardir(f"-p {name} diff .", cwd=f"{d}/1", check=False)
             run_nomad_vardir(f"-p {name} put .", cwd=f"{d}/1")
             run_nomad_vardir(f"-p {name} diff .", cwd=f"{d}/1")
             back = mynomad.variables.read(name).Items

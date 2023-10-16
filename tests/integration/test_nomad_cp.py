@@ -33,7 +33,7 @@ def run_temp_job():
             with tempfile.TemporaryDirectory() as hostdir:
                 yield jobname, nomaddir, hostdir
     finally:
-        run(f"nomad job stop --purge {jobname}", check=False)
+        run(f"nomad job stop --purge {jobname}", check=None)
 
 
 def test_nomad_cp_dir():
