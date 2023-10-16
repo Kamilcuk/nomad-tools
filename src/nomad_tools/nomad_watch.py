@@ -160,26 +160,31 @@ class LOGENABLED:
 class LOGFORMAT:
     """Logging output format specification templates using f-string. Very poor mans templating langauge."""
 
-    pre = "{color}{now.strftime(args.log_time_format) + '>' if args.log_time else ''}{mark}>"
-    post = " {message}{reset}"
+    pre = "{color}{now.strftime(args.log_time_format) + '>' if args.log_time else ''}"
+    mark = "{mark}>"
+    post = "{message}{reset}"
     task = "{task + '>' if task else ''}"
     DEFAULT = (
         pre
+        + mark
         + "{id:.{args.log_id_len}}{'>' if args.log_id_len else ''}"
         + "{'#' + str(jobversion) + '>' if jobversion is not None else ''}"
         + "{group + '>' if group else ''}"
         + task
+        + " "
         + post
     )
     """Default log format. The log is templated with f-string using eval() below."""
-    ONE = pre + task + post
+    ONE = pre + mark + task + " " + post
     """Log format with -1 option"""
     ZERO = pre + post
     """Log format with -0 option"""
     LOGGING = (
         COLORS.blue
         + "{'%(asctime)s>' if args.log_time else ''}"
-        + "nomad-watch>%(lineno)03d> %(levelname)s %(message)s"
+        + "{'nomad-watch' if args.verbose <= 0 else '%(module)s'}>"
+        + "%(lineno)03d>"
+        + " %(levelname)s %(message)s"
         + COLORS.reset
     )
     """Logging format, first templated with f-string, then by logging"""
