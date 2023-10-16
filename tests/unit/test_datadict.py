@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from nomad_tools.nomadlib.datadict import DataDict
 
@@ -104,3 +104,20 @@ def test_datadict_todict():
     }
     f = ToDict(init)
     assert f.asdict() == init
+
+
+def test_datadict_any():
+    class A(DataDict):
+        a: List[Any]
+        b: Optional[List[List[Any]]]
+
+    init = {
+        "a": ["a", 1, None],
+        "b": None,
+    }
+    assert A(init).asdict() == init
+    init2 = {
+        "a": ["a", 1, None],
+        "b": [["b", 2], ["c", 3]],
+    }
+    assert A(init2).asdict() == init2

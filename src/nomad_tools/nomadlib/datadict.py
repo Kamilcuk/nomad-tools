@@ -27,11 +27,15 @@ def _init_value(classname: str, dstname: str, dsttype: Any, srcval: Any):
     try:
         if dstorigin == list:
             assert type(srcval) == dstorigin, msg()
-            return [dsttype.__args__[0](x) for x in srcval]
+            return [
+                _init_value(classname, dstname, dsttype.__args__[0], x) for x in srcval
+            ]
         elif dstorigin == dict:
             assert type(srcval) == dstorigin, msg()
             return {
-                dsttype.__args__[0](k): dsttype.__args__[1](v)
+                _init_value(classname, dstname, dsttype.__args__[0], k): _init_value(
+                    classname, dstname, dsttype.__args__[1], v
+                )
                 for k, v in srcval.items()
             }
         elif dstorigin == Union:
@@ -42,7 +46,6 @@ def _init_value(classname: str, dstname: str, dsttype: Any, srcval: Any):
             return dsttype(srcval)
         elif issubclass(dsttype, enum.Enum):
             return dsttype(srcval)
-        assert type(srcval) == dsttype, msg()
         return srcval
     except AssertionError:
         raise
