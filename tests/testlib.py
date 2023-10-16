@@ -10,7 +10,6 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from types import NoneType
 from typing import IO, Dict, List, Optional, Union
 
 from nomad_tools import nomadlib
@@ -119,7 +118,7 @@ def quotearr(cmd: List[str]):
 
 def run(
     cmd: str,
-    check: Union[bool, int, List[int], NoneType] = True,
+    check: Optional[Union[bool, int, List[int]]] = True,
     text=True,
     stdout: Union[bool, int] = False,
     output: Union[List[str], List[Union[str, re.Pattern]], List[re.Pattern]] = [],
@@ -198,7 +197,7 @@ def run_nomad_cp(cmd: str, **kwargs):
 def run_nomad_watch(
     cmd: str,
     pre: str = "",
-    check: Union[bool, int, List[int]] = True,
+    check: Optional[Union[bool, int, List[int]]] = True,
     text=True,
     stdout: Union[bool, int] = False,
     output: Union[List[str], List[Union[str, re.Pattern]], List[re.Pattern]] = [],
