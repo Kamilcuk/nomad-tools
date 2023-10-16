@@ -8,7 +8,7 @@ from typing import Any, List
 import click
 from click.testing import CliRunner
 
-from nomad_tools import nomad_cp, nomad_gitlab_runner, nomad_vardir, nomad_watch
+from nomad_tools import nomad_cp, nomad_gitlab_runner, nomad_vardir, nomad_watch, nomad_port
 
 runner = CliRunner()
 
@@ -59,6 +59,7 @@ if __name__ == "__main__":
         nomad_gitlab_runner,
         nomad_cp,
         nomad_vardir,
+        nomad_port,
     ]:
         p = Command(i)
         template_parameters[p.key()] = p.run()

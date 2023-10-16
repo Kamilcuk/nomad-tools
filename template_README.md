@@ -36,6 +36,13 @@ Internally, it uses Nomad event stream to get the events in real time.
 
 ${nomad_watch}
 
+## nomad-port
+
+Smaller wrapper around Nomad API to mimic `docker port` command with some
+better templating.
+
+${nomad_port}
+
 ## nomad-vardir
 
 I was severely many times frustrated from the `template` in Nomad jobs. Posting a new job with new `template` content _restarts_ the job. Always, there is nothing you can do about it.

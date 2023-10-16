@@ -40,26 +40,19 @@ Internally, it uses Nomad event stream to get the events in real time.
 + nomad-watch --help
 Usage: nomad-watch [OPTIONS] COMMAND [ARGS]...
 
-  Run a Nomad job in Nomad. Watch over the job and print all job allocation
-  events and tasks stdouts and tasks stderrs logs. Depending on mode, wait for a
-  specific event to happen to finish watching. The script is intended to help
-  debugging issues with running jobs in Nomad and for synchronizing with
-  execution of batch jobs in Nomad.
+  Depending on the command, run or stop a Nomad job. Watch over the job and
+  print all job allocation events and tasks stdouts and tasks stderrs logs.
+  Depending on command, wait for a specific event to happen to finish watching.
+  This program is intended to help debugging issues with running jobs in Nomad
+  and for synchronizing with execution of batch jobs in Nomad.
 
-  If the option --no-preserve-exit is given, then exit with the following status:
-      0    if operation was successful - the job was run or was purged on --purge
-  Ohterwise, when mode is alloc, run, job, stop or stopped, exit with the following status:
-      ?    when the job has one task, with that task exit status,
-      0    if all tasks of the job exited with 0 exit status,
-      124  if any of the job tasks have failed,
-      125  if all job tasks have failed,
-      126  if any tasks are still running,
-      127  if job has no started tasks.
-  In any case, exit with the following status:
-      1    if some error occured, like python exception.
+  Logs are printed in the format: 'mark>id>#version>group>task> message'. The
+  mark in the log lines is equal to: 'deploy' for messages printed as a result
+  of deployment, 'eval' for messages printed from evaluations, 'A' from
+  allocation, 'E' for stderr logs of a task and 'O' from stdout logs of a task.
 
   Examples:
-      nomad-watch --namespace default run ./some-job.nomad.hcl
+      nomad-watch run ./some-job.nomad.hcl
       nomad-watch job some-job
       nomad-watch alloc af94b2
       nomad-watch -N services --task redis -1f job redis
@@ -68,17 +61,14 @@ Options:
   -N, --namespace TEXT            Finds Nomad namespace matching given prefix
                                   and sets NOMAD_NAMESPACE environment variable.
                                   [default: default]
-  -a, --all                       Do not exit after the current job version is
-                                  finished. Instead, watch endlessly for any
-                                  existing and new allocations of a job.
-  -o, --out [all|alloc|A|stdout|out|O|1|stderr|err|E|2|none]
+  -a, --all                       Print logs from all allocations, including
+                                  previous versions of the job.
+  -o, --out [all|alloc|A|stdout|out|O|1|stderr|err|E|2|evaluation|eval|e|deployment|deploy|d|none]
                                   Choose which stream of messages to print -
-                                  allocation, stdout, stderr. This option is
-                                  cummulative.  [default: all]
+                                  evaluation, allocation, stdout, stderr. This
+                                  option is cumulative.  [default: all]
   -v, --verbose                   Be more verbose.
   -q, --quiet                     Be less verbose.
-  --json                          Job input is in json form. Passed to nomad
-                                  command line interface with -json.
   -A, --attach                    Stop the job on interrupt and after it has
                                   finished. Relevant in run mode only.
   --purge-successful              When stopping the job, purge it when all job
@@ -88,54 +78,62 @@ Options:
   --purge                         When stopping the job, purge it. Relevant in
                                   run and stop modes. Implies --attach.
   -n, --lines INTEGER             Sets the tail location in best-efforted number
-                                  of lines relative to the end of logs. Default
-                                  prints all the logs. Set to 0 to try try best-
-                                  efforted logs from the current log position.
-                                  See also --lines-timeout.  [default: -1]
+                                  of lines relative to the end of logs. Negative
+                                  value prints all available log lines.
+                                  [default: 10]
   --lines-timeout FLOAT           When using --lines the number of lines is
                                   best-efforted by ignoring lines for this
                                   specific time  [default: 0.5]
   --shutdown-timeout FLOAT        The time to wait to make sure task loggers
                                   received all logs when exiting.  [default: 2]
-  -f, --follow                    Shorthand for --all --lines=10 to act similar
-                                  to tail -f.
+  -f, --follow                    Never exit
   --no-follow                     Just run once, get the logs in a best-effort
                                   style and exit.
   -t, --task COMPILE              Only watch tasks names matching this regex.
   --polling                       Instead of listening to Nomad event stream,
                                   periodically poll for events.
   -x, --no-preserve-status        Do not preserve tasks exit statuses.
-  -T, --log-timestamp             Additionally add timestamp of the logs from
-                                  the task. The timestamp is when the log was
-                                  received. Nomad does not store timestamp of
-                                  logs sadly.
-  --log-timestamp-format TEXT     [default: %Y-%m-%dT%H:%M:%S%z]
-  -H, --log-timestamp-hour        Alias for --log-timestamp --log-timestamp-
-                                  format %H:%M:%S
-  --log-format-alloc TEXT         [default:
-                                  %(cyan)s%(allocid).6s:%(group)s:%(task)s:A
-                                  %(asctime)s %(message)s%(reset)s]
-  --log-format-stderr TEXT        [default:
-                                  %(orange)s%(allocid).6s:%(group)s:%(task)s:E
-                                  %(message)s%(reset)s]
-  --log-format-stdout TEXT        [default: %(allocid).6s:%(group)s:%(task)s:O
-                                  %(message)s]
-  --log-long-alloc                Log full length allocation id
-  -G, --log-no-group              Do not log group
-  --log-no-task                   Do not log task
-  -1, --log-only-task             Prefix the lines only with task name.
-  -0, --log-none                  Log only stream prefix
+  -T, --log-time                  Additionally add timestamp to the logs. The
+                                  timestamp of stdout and stderr streams is when
+                                  the log was received, as Nomad does not store
+                                  timestamp of task logs.
+  --log-time-format TEXT          Format time with specific format. Passed to
+                                  python datetime.strftime.  [default:
+                                  %Y-%m-%dT%H:%M:%S%z]
+  -H, --log-time-hour             Alias to --log-time-format='%H:%M:%S' --log-
+                                  time
+  --log-format TEXT               The format to use when printing job logs
+                                  [default:
+                                  {color}{now.strftime(args.log_time_format) +
+                                  '>' if args.log_time else
+                                  ''}{mark}>{id:.{args.log_id_len}}{'>' if
+                                  args.log_id_len else ''}{'#' + str(jobversion)
+                                  + '>' if jobversion is not None else ''}{group
+                                  + '>' if group else ''}{task + '>' if task
+                                  else ''} {message}{reset}]
+  --log-id-len INTEGER            The length of id to log. UUIDv4 has 36
+                                  characters.
+  -l, --log-id-long               Alias to --log-id-len=36
+  -1, --log-only-task             Alias to --log-format="{color}{now.strftime(ar
+                                  gs.log_time_format) + '>' if args.log_time
+                                  else ''}{mark}>{task + '>' if task else ''}
+                                  {message}{reset}"
+  -0, --log-none                  Alias to --log-format="{color}{now.strftime(ar
+                                  gs.log_time_format) + '>' if args.log_time
+                                  else ''}{mark}> {message}{reset}"
   -h, --help                      Show this message and exit.
-  --version
+  --version                       Print program version then exit.
 
 Commands:
   alloc    Watch over specific allocation.
-  job      Watch a Nomad job.
-  run      Run a Nomad job and then watch over it until the job is dead and...
-  start    Start a Nomad Job.
-  started  Watch a Nomad job until the jobs main tasks are running or have...
-  stop     Stop a Nomad job.
-  stopped  Watch a Nomad job until the job is stopped - has not running...
+  eval     Watch like job mode the job that results from a specific...
+  job      Alias to stopped command.
+  purge    Alias to --purge stop.
+  run      Run a Nomad job and then act like started mode.
+  start    Start a Nomad Job and then act like started command.
+  started  Watch a Nomad job until the job is started.
+  stop     Stop a Nomad job and then act like stopped command.
+  stopped  Watch a Nomad job until the job is stopped.
 
   Written by Kamil Cukrowski 2023. Licensed under GNU GPL version 3 or later.
 
@@ -147,11 +145,26 @@ Commands:
 + nomad-watch alloc --help
 Usage: nomad-watch alloc [OPTIONS] ALLOCID
 
-  Watch over specific allocation.
+  Watch over specific allocation. Like job mode, but only one allocation is
+  filtered.
 
 Options:
   -h, --help  Show this message and exit.
-  --version
+  --version   Print program version then exit.
+
+```
+
+
+
+```
++ nomad-watch eval --help
+Usage: nomad-watch eval [OPTIONS] EVALID
+
+  Watch like job mode the job that results from a specific evaluation.
+
+Options:
+  -h, --help  Show this message and exit.
+  --version   Print program version then exit.
 
 ```
 
@@ -159,18 +172,14 @@ Options:
 
 ```
 + nomad-watch run --help
-Usage: nomad-watch run [OPTIONS] JOBFILE
+Usage: nomad-watch run [OPTIONS] [CMD]...
 
-  Run a Nomad job and then watch over it until the job is dead and has no
-  pending or running job allocations. Stop the job on interrupt or when
-  finished, unless --no-stop option is given.
-
-  JOBFILE can be file with a HCL or JSON nomad job or it can be a string
-  containing a HCL or JSON nomad job.
+  Run a Nomad job and then act like started mode.            All following
+  command arguments are passed to nomad job run command. Note that nomad job run
+  has arguments with a single dash.
 
 Options:
-  -h, --help  Show this message and exit.
-  --version
+  --help  Show this message and exit.
 
 ```
 
@@ -180,11 +189,11 @@ Options:
 + nomad-watch job --help
 Usage: nomad-watch job [OPTIONS] JOBID
 
-  Watch a Nomad job. Show the job allocation events and logs.
+  Alias to stopped command.
 
 Options:
   -h, --help  Show this message and exit.
-  --version
+  --version   Print program version then exit.
 
 ```
 
@@ -192,14 +201,14 @@ Options:
 
 ```
 + nomad-watch start --help
-Usage: nomad-watch start [OPTIONS] JOBFILE
+Usage: nomad-watch start [OPTIONS] [CMD]...
 
-  Start a Nomad Job. Then act like mode started.  JOBFILE can be file with a HCL
-  or JSON nomad job or it can be a string containing a HCL or JSON nomad job.
+  Start a Nomad Job and then act like started command.            All following
+  command arguments are passed to nomad job run command. Note that nomad job run
+  has arguments with a single dash.
 
 Options:
-  -h, --help  Show this message and exit.
-  --version
+  --help  Show this message and exit.
 
 ```
 
@@ -209,17 +218,23 @@ Options:
 + nomad-watch started --help
 Usage: nomad-watch started [OPTIONS] JOBID
 
-  Watch a Nomad job until the jobs main tasks are running or have been run. Main
-  tasks are all tasks without lifetime or sidecar prestart tasks or poststart
+  Watch a Nomad job until the job is started. Job is started when it has no
+  active deployments and no active evaluations and the number of allocations is
+  equal to the number of groups multiplied by group count and all main tasks in
+  each allocation are running. An active deployment is a deployment that has
+  status equal to initializing, running, pending, blocked or paused. Main tasks
+  are all tasks without lifetime property or sidecar prestart tasks or poststart
   tasks.
 
   Exit with the following status:
-      0    all tasks of the job have started running,
-      2    the job was stopped before any of the tasks could start.
+    0  when all tasks of the job have started running,
+    1  when python exception was thrown,
+    2  when process was interrupted,
+    3  when job was stopped or job deployment was reverted.
 
 Options:
   -h, --help  Show this message and exit.
-  --version
+  --version   Print program version then exit.
 
 ```
 
@@ -229,12 +244,25 @@ Options:
 + nomad-watch stop --help
 Usage: nomad-watch stop [OPTIONS] JOBID
 
-  Stop a Nomad job. Then watch the job until the job is dead and has no pending
-  or running allocations.
+  Stop a Nomad job and then act like stopped command.
 
 Options:
   -h, --help  Show this message and exit.
-  --version
+  --version   Print program version then exit.
+
+```
+
+
+
+```
++ nomad-watch purge --help
+Usage: nomad-watch purge [OPTIONS] JOBID
+
+  Alias to --purge stop.
+
+Options:
+  -h, --help  Show this message and exit.
+  --version   Print program version then exit.
 
 ```
 
@@ -244,11 +272,58 @@ Options:
 + nomad-watch stopped --help
 Usage: nomad-watch stopped [OPTIONS] JOBID
 
-  Watch a Nomad job until the job is stopped - has not running allocation.
+  Watch a Nomad job until the job is stopped. Job is stopped when the job is
+  dead or, if the job was purged, does not exists anymore, and the job has no
+  running or pending allocations, no active deployments and no active
+  evaluations.
+
+  If the option --no-preserve-status is given, then exit with the following status:
+    0    when the job was stopped
+  Otherwise, exit with the following status:
+    ?    when the job has one task, with that task exit status,
+    0    when all tasks of the job exited with 0 exit status,
+    124  when any of the job tasks have failed,
+    125  when all job tasks have failed,
+    126  when any tasks are still running,
+    127  when job has no started tasks.
+  In any case, exit with the following exit status:
+    1    when python exception was thrown,
+    2    when the process was interrupted.
 
 Options:
   -h, --help  Show this message and exit.
-  --version
+  --version   Print program version then exit.
+
+```
+
+
+
+## nomad-port
+
+Smaller wrapper around Nomad API to mimic `docker port` command with some
+better templating.
+
+
+
+```
++ nomad-port --help
+Usage: nomad-port [OPTIONS] ID [LABEL]
+
+  Print dynamic ports allocated by Nomad for a specific job or allocation. If no
+  ports are found, exit with 2 exit status. If label argument is given, outputs
+  only redirects that match given label.
+
+Options:
+  -f, --format TEXT     The python .format() to print the output with. [default:
+                        '{host}:{port}']
+  -l, --long            Alias to --format='{host}:{port} {label} {Name} {ID}'
+  -s, --separator TEXT  [default:  ]
+  -v, --verbose         Be more verbose.
+  --alloc               The argument is an allocation, not job id
+  --all                 Show all job allocation ports, not only running or
+                        pending allocations.
+  -h, --help            Show this message and exit.
+  --version             Print program version then exit.
 
 ```
 
@@ -279,7 +354,7 @@ Options:
   -s, --service FILE    Get namespace and job name from this nomad service file
   --disable-size-check  Disable checking if the file is smaller than 10mb
   -h, --help            Show this message and exit.
-  --version
+  --version             Print program version then exit.
 
 Commands:
   diff  Show only diff
@@ -307,7 +382,7 @@ Options:
   -D TEXT                Additional var=value to store in nomad variables
   --clear                Remove keys that are not found in files
   -h, --help             Show this message and exit.
-  --version
+  --version              Print program version then exit.
 
 ```
 
@@ -323,7 +398,7 @@ Options:
   --relative DIRECTORY  Files have paths relative to this directory instead of
                         current working directory
   -h, --help            Show this message and exit.
-  --version
+  --version             Print program version then exit.
 
 ```
 
@@ -337,7 +412,7 @@ Usage: nomad-vardir get [OPTIONS] DEST
 
 Options:
   -h, --help  Show this message and exit.
-  --version
+  --version   Print program version then exit.
 
 ```
 
@@ -381,7 +456,7 @@ Options:
                                   job ID.
   --test                          Run tests
   -h, --help                      Show this message and exit.
-  --version
+  --version                       Print program version then exit.
 
   Written by Kamil Cukrowski 2023. Licensed under GNU GPL version or later.
 
@@ -511,7 +586,7 @@ Options:
                            CUSTOM_ENV_CI_RUNNER_ID which is set to the unique ID
                            of the runner being used.
   -h, --help               Show this message and exit.
-  --version
+  --version                Print program version then exit.
 
 Commands:
   cleanup     https://docs.gitlab.com/runner/executors/custom.html#cleanup
