@@ -215,7 +215,7 @@ def test_nomad_watch_starting_with_preinit_tasks():
         assert job_exists(jobid)
         allocs = [
             nomadlib.Alloc(x)
-            for x in nomadlib.Nomadlib().get(f"job/{jobid}/allocations")
+            for x in nomadlib.NomadConn().get(f"job/{jobid}/allocations")
         ]
         allocs = [x for x in allocs if x.ClientStatus == "running"]
         assert allocs
@@ -236,7 +236,7 @@ def test_nomad_watch_starting_with_preinit_tasks():
         run_nomad_watch(f"-x stop {jobid}")
     assert job_exists(jobid)
     allocs = [
-        nomadlib.Alloc(x) for x in nomadlib.Nomadlib().get(f"job/{jobid}/allocations")
+        nomadlib.Alloc(x) for x in nomadlib.NomadConn().get(f"job/{jobid}/allocations")
     ]
     assert allocs
     allocs.sort(key=lambda x: x.ModifyIndex, reverse=True)

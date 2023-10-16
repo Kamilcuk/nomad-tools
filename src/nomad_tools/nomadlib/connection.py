@@ -16,7 +16,9 @@ def _default_session():
     s = requests.Session()
     # Increase the number of connections.
     a = requests.adapters.HTTPAdapter(
-        pool_connections=1000, pool_maxsize=1000, max_retries=3
+        pool_connections=1000,
+        pool_maxsize=1000,
+        max_retries=requests.adapters.Retry(3),
     )
     s.mount("http://", a)
     s.mount("https://", a)
@@ -101,7 +103,7 @@ class VariableConn(_Conn):
         return self.r.delete(var_path)
 
 
-class Nomadlib(Requestor):
+class NomadConn(Requestor):
     """Represents connection to Nomad"""
 
     def __init__(self, namespace: str = "", session: Optional[requests.Session] = None):

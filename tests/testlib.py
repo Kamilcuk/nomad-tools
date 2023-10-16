@@ -24,7 +24,7 @@ def caller(up=0):
 
 def job_exists(jobname):
     try:
-        nomadlib.Nomadlib().get(f"job/{jobname}")
+        nomadlib.NomadConn().get(f"job/{jobname}")
         return True
     except nomadlib.JobNotFound:
         return False

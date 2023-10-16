@@ -4,9 +4,9 @@ from typing import Callable, Iterable
 import click
 import pkg_resources
 
-from .nomadlib import Nomadlib
+from . import nomadlib
 
-mynomad = Nomadlib()
+mynomad = nomadlib.NomadConn()
 
 
 def nomad_find_namespace(prefix: str):
@@ -99,5 +99,6 @@ def common_options():
             callback=_print_version,
             expose_value=False,
             is_eager=True,
+            help="Print program version then exit.",
         ),
     )
