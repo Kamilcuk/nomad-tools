@@ -37,7 +37,6 @@ import requests
 
 from . import exit_on_thread_exception, nomadlib
 from .common import (
-    ALIASED,
     _complete_set_namespace,
     alias_option,
     common_options,
@@ -1456,7 +1455,7 @@ Examples:
 def cli(**kwargs):
     exit_on_thread_exception.install()
     global args
-    args = argparse.Namespace(**{**kwargs, **ALIASED})
+    args = argparse.Namespace(**kwargs)
     assert (
         (not args.follow and not args.no_follow)
         or (args.follow and not args.no_follow)

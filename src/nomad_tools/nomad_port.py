@@ -8,7 +8,7 @@ from typing import Any, List, Optional, Union
 import click.shell_completion
 
 from . import nomadlib
-from .common import ALIASED, alias_option, common_options, mynomad, nomad_find_job
+from .common import alias_option, common_options, mynomad, nomad_find_job
 
 log = logging.getLogger(__name__)
 
@@ -105,7 +105,7 @@ If label argument is given, outputs only redirects that match given label.
 @click.argument("label", required=False)
 def cli(id: Union[nomadlib.Alloc, str], **kwargs):
     global args
-    args = argparse.Namespace(**{**kwargs, **ALIASED})
+    args = argparse.Namespace(**kwargs)
     logging.basicConfig(
         level=(
             logging.DEBUG

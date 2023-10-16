@@ -119,8 +119,17 @@ def common_options():
 
 ###############################################################################
 
-ALIASED = {}
-"""Aliases there were set with alias_option function"""
+def __alias_option_callback(
+    aliased: Dict[str, Any],
+    ctx: click.Context,
+    param: click.Parameter,
+    value: Any,
+):
+    """Callback called from alias_option option."""
+    if value:
+        for paramname, val in aliased.items():
+            param = next(p for p in ctx.command.params if p.name == paramname)
+            param.default = val
 
 
 def alias_option(
@@ -138,7 +147,7 @@ def alias_option(
     return click.option(
         *param_decls,
         is_flag=True,
-        callback=lambda ctx, param, value: ALIASED.update(aliased) if value else None,
         help=f"Alias to {aliasedhelp}",
+        callback=lambda *args: __alias_option_callback(aliased, *args),
         **attrs,
     )
