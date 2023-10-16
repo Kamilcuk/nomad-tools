@@ -42,6 +42,8 @@ def _init_value(classname: str, dstname: str, dsttype: Any, srcval: Any):
             if type(srcval) in dsttype.__args__:
                 return srcval
             return _init_value(classname, dstname, dsttype.__args__[0], srcval)
+        elif dsttype == Any:
+            return srcval
         elif issubclass(dsttype, DataDict):
             return dsttype(srcval)
         elif issubclass(dsttype, enum.Enum):
