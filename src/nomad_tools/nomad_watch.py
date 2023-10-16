@@ -478,14 +478,6 @@ class TaskLogger(threading.Thread):
                     datetime.datetime.now(),
                     f"{self.__typestr()} logs were garbage collected from Nomad",
                 )
-            elif resp.status_code == 500 and re.findall(
-                "failed to list entries: open .*: no such file or directory",
-                resp.text,
-            ):
-                self.tk.log_alloc(
-                    datetime.datetime.now(),
-                    f"{self.__typestr()} {resp.text}",
-                )
             else:
                 raise
 
@@ -1175,6 +1167,7 @@ class NomadJobWatcherUntilFinished(NomadJobWatcher):
         return exitcode
 
     def job_finished_successfully(self):
+        self.db.initialized.wait()
         assert self.job
         if self.job.Status != "dead":
             return False
@@ -1192,6 +1185,7 @@ class NomadJobWatcherUntilFinished(NomadJobWatcher):
         )
 
     def job_running_successfully(self):
+        self.db.initialized.wait()
         assert self.job
         if self.job.Status == "dead":
             return self.job_finished_successfully()
