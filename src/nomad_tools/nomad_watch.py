@@ -21,7 +21,6 @@ import time
 from abc import ABC, abstractmethod
 from http import client as http_client
 from typing import (
-    Any,
     Callable,
     Dict,
     Iterable,
@@ -38,7 +37,9 @@ import requests
 
 from . import exit_on_thread_exception, nomadlib
 from .common import (
+    ALIASED,
     _complete_set_namespace,
+    alias_option,
     common_options,
     complete_job,
     completor,
@@ -135,16 +136,6 @@ def andjoin(arr: Iterable[str]) -> str:
     return ", ".join(arr[:-1]) + " and " + arr[-1]
 
 
-PARAMS = {}
-
-
-def set_param(
-    opt: str, val: Any, ctx: click.Context, param: Optional[click.Parameter], value: Any
-):
-    if value:
-        PARAMS[opt] = val
-
-
 ###############################################################################
 
 
@@ -188,7 +179,7 @@ class LOGFORMAT:
     LOGGING = (
         COLORS.blue
         + "{'%(asctime)s>' if args.log_time else ''}"
-        + "%(module)s>%(lineno)03d> %(levelname)s %(message)s"
+        + "nomad-watch>%(lineno)03d> %(levelname)s %(message)s"
         + COLORS.reset
     )
     """Logging format, first templated with f-string, then by logging"""
@@ -230,14 +221,12 @@ def click_log_options():
             show_default=True,
             help="Format time with specific format. Passed to python datetime.strftime.",
         ),
-        click.option(
+        alias_option(
             "-H",
             "--log-time-hour",
-            is_flag=True,
-            help="Alias for --log-time --log-time-format=%H:%M:%S",
-            callback=lambda *args: (
-                set_param("log_time_format", "%H:%M:%S", *args),
-                set_param("log_time", True, *args),
+            aliased=dict(
+                log_time_format="%H:%M:%S",
+                log_time=True,
             ),
         ),
         click.option(
@@ -251,26 +240,20 @@ def click_log_options():
             default=6,
             help="The length of id to log. UUIDv4 has 36 characters.",
         ),
-        click.option(
+        alias_option(
             "-l",
             "--log-id-long",
-            is_flag=True,
-            help="Alias to --log-id-len=36",
-            callback=lambda *args: set_param("log_id_len", 36, *args),
+            aliased=dict(log_id_len=36),
         ),
-        click.option(
+        alias_option(
             "-1",
             "--log-only-task",
-            is_flag=True,
-            help=f"Equal to --log-format={LOGFORMAT.ONE}",
-            callback=lambda *args: set_param("log_format", LOGFORMAT.ONE, *args),
+            aliased=dict(log_format=LOGFORMAT.ONE),
         ),
-        click.option(
+        alias_option(
             "-0",
             "--log-none",
-            is_flag=True,
-            help=f"Equal to --log-format={LOGFORMAT.ZERO}",
-            callback=lambda *args: set_param("log_format", LOGFORMAT.ZERO, *args),
+            aliased=dict(log_format=LOGFORMAT.ZERO),
         ),
     )
 
@@ -1457,11 +1440,10 @@ Examples:
 )
 @click_log_options()
 @common_options()
-@click.pass_context
-def cli(ctx, **kwargs):
+def cli(**kwargs):
     exit_on_thread_exception.install()
     global args
-    args = argparse.Namespace(**{**kwargs, **PARAMS})
+    args = argparse.Namespace(**{**kwargs, **ALIASED})
     assert (
         (not args.follow and not args.no_follow)
         or (args.follow and not args.no_follow)

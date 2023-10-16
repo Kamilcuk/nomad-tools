@@ -8,7 +8,7 @@ from typing import Any, List, Optional, Union
 import click.shell_completion
 
 from . import nomadlib
-from .common import common_options, mynomad
+from .common import ALIASED, alias_option, common_options, mynomad
 
 log = logging.getLogger(__name__)
 
@@ -65,18 +65,26 @@ class IdArgument(click.ParamType):
         return [click.shell_completion.CompletionItem(id) for id in ids]
 
 
+default_format = "{host}:{port}"
+long_format = "{host}:{port} {label} {Name} {ID}"
+
+
 @click.command(
-    help="Print dynamic ports allocated by Nomad for a specific job or allocation."
+    help="""
+Print dynamic ports allocated by Nomad for a specific job or allocation.
+If no ports are found, exit with 2 exit status.
+"""
 )
 @click.option(
     "-f",
     "--format",
-    default="{host}:{port} {label} {Name} {ID}",
-    show_default=True,
-    help="""
-        The python .format() to print the output with.
-        By default print host:port followed by Label, allocation Name and allocation ID
-        """,
+    default=default_format,
+    help=f"The python .format() to print the output with. [default: {default_format!r}]",
+)
+@alias_option(
+    "-l",
+    "--long",
+    aliased=dict(format=long_format),
 )
 @click.option("-s", "--separator", default="\n", show_default=True)
 @click.option("-v", "--verbose", count=True, help="Be more verbose.")
@@ -90,7 +98,7 @@ class IdArgument(click.ParamType):
 @click.argument("id", type=IdArgument())
 def cli(id: Union[nomadlib.Alloc, str], **kwargs):
     global args
-    args = argparse.Namespace(**kwargs)
+    args = argparse.Namespace(**{**kwargs, **ALIASED})
     logging.basicConfig(
         level=(
             logging.DEBUG

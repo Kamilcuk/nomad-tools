@@ -1,5 +1,5 @@
 import os
-from typing import Callable, Iterable
+from typing import Any, Callable, Dict, Iterable
 
 import click
 import pkg_resources
@@ -69,6 +69,8 @@ def complete_job():
 
 
 def composed(*decs):
+    """Merge decorators into one decorator"""
+
     def deco(f):
         for dec in reversed(decs):
             f = dec(f)
@@ -81,7 +83,7 @@ def get_version():
     return pkg_resources.get_distribution(__package__).version
 
 
-def _print_version(ctx, param, value):
+def __print_version(ctx, param, value):
     if not value or ctx.resilient_parsing:
         return
     # Copied from version_option()
@@ -96,9 +98,36 @@ def common_options():
         click.option(
             "--version",
             is_flag=True,
-            callback=_print_version,
+            callback=__print_version,
             expose_value=False,
             is_eager=True,
             help="Print program version then exit.",
         ),
+    )
+
+
+###############################################################################
+
+ALIASED = {}
+"""Aliases there were set with alias_option function"""
+
+
+def alias_option(
+    *param_decls: str,
+    aliased: Dict[str, Any],
+    **attrs: Any,
+):
+    """Add this to click options to have an alias for other options"""
+    aliasedhelp = " ".join(
+        "--"
+        + k.replace("_", "-")
+        + ("" if v is True else f"={v}" if isinstance(v, int) else f"={v!r}")
+        for k, v in aliased.items()
+    )
+    return click.option(
+        *param_decls,
+        is_flag=True,
+        callback=lambda ctx, param, value: ALIASED.update(aliased) if value else None,
+        help=f"Alias to {aliasedhelp}",
+        **attrs,
     )
