@@ -36,7 +36,7 @@ from typing import (
 import click
 import requests
 
-from . import nomadlib
+from . import exit_on_thread_exception, nomadlib
 from .common import (
     _complete_set_namespace,
     common_options,
@@ -1459,6 +1459,7 @@ Examples:
 @common_options()
 @click.pass_context
 def cli(ctx, **kwargs):
+    exit_on_thread_exception.install()
     global args
     args = argparse.Namespace(**{**kwargs, **PARAMS})
     assert (
