@@ -28,7 +28,12 @@ def gen_alloc(alloc: nomadlib.Alloc) -> List[str]:
             host=i["HostIP"],
             port=i["Value"],
         )
-        log.debug(f"Found")
+        # If label if given, filter.
+        if args.label:
+            if params["label"] != args.label:
+                log.debug(f"Filtered {i}")
+                continue
+        log.debug(f"Found {i}")
         try:
             txt = args.format.format(**params)
         except KeyError:
@@ -73,6 +78,7 @@ long_format = "{host}:{port} {label} {Name} {ID}"
     help="""
 Print dynamic ports allocated by Nomad for a specific job or allocation.
 If no ports are found, exit with 2 exit status.
+If label argument is given, outputs only redirects that match given label.
 """
 )
 @click.option(
@@ -96,6 +102,7 @@ If no ports are found, exit with 2 exit status.
 )
 @common_options()
 @click.argument("id", type=IdArgument())
+@click.argument("label", required=False)
 def cli(id: Union[nomadlib.Alloc, str], **kwargs):
     global args
     args = argparse.Namespace(**{**kwargs, **ALIASED})
@@ -123,8 +130,9 @@ def cli(id: Union[nomadlib.Alloc, str], **kwargs):
                 # job/*/allocations does not have AllocatedResources information.
                 alloc = nomadlib.Alloc(mynomad.get(f"allocation/{alloc['ID']}"))
                 out += gen_alloc(alloc)
-    if out:
-        print(*out, sep=args.separator)
+    if not out:
+        exit(2)
+    print(*out, sep=args.separator)
 
 
 if __name__ == "__main__":
