@@ -38,6 +38,10 @@ test = [
 	"pytest-xdist",
 ]
 
+
+[tool.setuptools.package-data]
+"*" = ["*/*.sh"]
+
 [tool.pytest.ini_options]
 minversion = "6.0"
 addopts = "--tb=short"
