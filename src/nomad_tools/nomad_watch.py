@@ -35,7 +35,7 @@ from typing import (
 import click
 import requests
 
-from . import exit_on_thread_exception, nomadlib
+from . import exit_on_thread_exception, nomadlib, colors
 from .common import (
     _complete_set_namespace,
     alias_option,
@@ -60,61 +60,7 @@ args = argparse.Namespace()
 START_NS: int = 0
 """This program start time, assigned from cli()"""
 
-
-@dataclasses.dataclass
-class Colors:
-    bold: str = "bold"
-    black: str = "setaf 0"
-    red: str = "setaf 1"
-    green: str = "setaf 2"
-    orange: str = "setaf 3"
-    blue: str = "setaf 4"
-    magenta: str = "setaf 5"
-    cyan: str = "setaf 6"
-    white: str = "setaf 7"
-    brightblack: str = "setaf 8"
-    brightred: str = "setaf 9"
-    brightgreen: str = "setaf 10"
-    brightorange: str = "setaf 11"
-    brightblue: str = "setaf 12"
-    brightmagenta: str = "setaf 13"
-    brightcyan: str = "setaf 14"
-    brightwhite: str = "setaf 15"
-    reset: str = "sgr0"
-
-    @staticmethod
-    def init() -> Colors:
-        tputdict = dataclasses.asdict(Colors())
-        empty = Colors(**{k: "" for k in tputdict.keys()})
-        if not sys.stdout.isatty() or not sys.stderr.isatty():
-            return empty
-        tputscript = "\n".join(tputdict.values()).replace(
-            "\n", "\nlongname\nlongname\n"
-        )
-        try:
-            longname = subprocess.run(
-                f"tput longname".split(),
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-            ).stdout
-            ret = subprocess.run(
-                "tput -S".split(),
-                input=tputscript,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-            ).stdout
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            return empty
-        retarr = ret.split(f"{longname}{longname}")
-        if len(tputdict.keys()) != len(retarr):
-            return empty
-        return Colors(**{k: v for k, v in zip(tputdict.keys(), retarr)})
-
-
-COLORS = Colors.init()
-
+COLORS = colors.init()
 
 T = TypeVar("T")
 
