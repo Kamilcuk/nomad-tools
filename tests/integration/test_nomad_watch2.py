@@ -1,4 +1,5 @@
 import re
+from typing import List, Union
 
 from nomad_tools.common import mynomad
 from tests.testlib import get_testjobs, run, run_nomad_watch
@@ -85,3 +86,27 @@ def test_nomad_watch2_maintask():
         assert len(mynomad.get(f"job/{job}/allocations")) == 1
     except:
         run_nomad_watch(f"-x purge {job}")
+
+
+def test_nomad_watch2_multiple():
+    job = "test-multiple"
+    uuid = "876f767f-7dbb-4e1f-8625-4dcd39f1adaa"
+    output: List[Union[str, re.Pattern]] = []
+    for i in range(1, 2):
+        for j in range(1, 2):
+            pre = f"{uuid} group{i} task{j}"
+            output += [
+                f"{pre} START",
+                f"{pre} STOP",
+                re.compile(rf"{pre} START[\S\n ]*{pre} STOP"),
+            ]
+    run_nomad_watch(f"--purge run {testjobs[job]}", output=output)
+
+
+def test_nomad_watch2_invalidconfig():
+    job = "test-invalidconfig"
+    run_nomad_watch(
+        f"--purge run {testjobs[job]}",
+        check=126,
+        output=["Failed Validation 3 errors occurred"],
+    )
