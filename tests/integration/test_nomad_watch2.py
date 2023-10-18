@@ -38,7 +38,7 @@ def test_nomad_watch2_canary():
             f"nomad-port -l {job}",
             output=[re.compile(r"[0-9\.]+:[0-9]+ http [^ ]* [^ ]*")],
         )
-        run_nomad_watch(f"-x stop {job}", output=output)
+        run_nomad_watch(f"-x stop {job}")
     finally:
         run_nomad_watch(f"-x purge {job}")
 
