@@ -688,13 +688,19 @@ with `nomad alloc exec` with the custom entrypoint wrapper. In this case
 the wrapper does not use taskset nor runuser, as these parameters are
 set with docker configuration.
 
-When specyfing services in `docker` mode, each service is
-a separate task in Nomad job. The Nomad job then runs the
+Specifying services: in .gitlab-ci.yml in `docker` mode is supported.
+Each service is a separate task in Nomad job. The Nomad job runs the
 task group in bridge mode docker networking, so that all tasks
-share the same network stack. One additional task is created that
+share the same network stack. One additional waiter task is created that
 runs prestart to wait for the services to respond. This works similar to
 https://docs.gitlab.com/runner/executors/docker.html#how-gitlab-runner-performs-the-services-health-check
 in gitlab-runner docker executor.
+
+In order for services: to work, it is hard coded that the
+waiter helper image starts with /var/run/docker.sock mounted
+inside to connect to docker. Additionally, Nomad has to support
+'bridge' docker network driver for Nomad to start the job. See
+https://developer.hashicorp.com/nomad/docs/networking#bridge-networking .
 
 \b
 Below is an example /etc/gitlab-runner/config.toml configuration file:
@@ -775,6 +781,8 @@ Example Nomad ACL policy:
         # To alloc 'raw_exec' to execute anything.
         capabilities = ["alloc-node-exec"]
     }
+
+
 
         """,
     epilog="Written by Kamil Cukrowski 2023. Licensed under GNU GPL version or later.",

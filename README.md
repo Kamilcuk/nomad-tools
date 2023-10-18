@@ -105,12 +105,9 @@ Options:
   --log-format TEXT               The format to use when printing job logs
                                   [default:
                                   {color}{now.strftime(args.log_time_format) +
-                                  '>' if args.log_time else
-                                  ''}{mark}>{id:.{args.log_id_len}}{'>' if
-                                  args.log_id_len else ''}{'#' + str(jobversion)
-                                  + '>' if jobversion is not None else ''}{group
-                                  + '>' if group else ''}{task + '>' if task
-                                  else ''} {message}{reset}]
+                                  '>' if args.log_time else ''}{mark}>{id:.{args
+                                  .log_id_len}}>#{str(jobversion)}>{task + '>'
+                                  if task else ''} {message}{reset}]
   --log-id-len INTEGER            The length of id to log. UUIDv4 has 36
                                   characters.
   -l, --log-id-long               Alias to --log-id-len=36
@@ -120,7 +117,7 @@ Options:
                                   {message}{reset}"
   -0, --log-none                  Alias to --log-format="{color}{now.strftime(ar
                                   gs.log_time_format) + '>' if args.log_time
-                                  else ''}{mark}> {message}{reset}"
+                                  else ''}{message}{reset}"
   -h, --help                      Show this message and exit.
   --version                       Print program version then exit.
 
@@ -500,13 +497,19 @@ Usage: nomad-gitlab-runner [OPTIONS] COMMAND [ARGS]...
   wrapper does not use taskset nor runuser, as these parameters are set with
   docker configuration.
 
-  When specyfing services in `docker` mode, each service is a separate task in
-  Nomad job. The Nomad job then runs the task group in bridge mode docker
-  networking, so that all tasks share the same network stack. One additional
-  task is created that runs prestart to wait for the services to respond. This
-  works similar to https://docs.gitlab.com/runner/executors/docker.html#how-
-  gitlab-runner-performs-the-services-health-check in gitlab-runner docker
-  executor.
+  Specifying services: in .gitlab-ci.yml in `docker` mode is supported. Each
+  service is a separate task in Nomad job. The Nomad job runs the task group in
+  bridge mode docker networking, so that all tasks share the same network stack.
+  One additional waiter task is created that runs prestart to wait for the
+  services to respond. This works similar to
+  https://docs.gitlab.com/runner/executors/docker.html#how-gitlab-runner-
+  performs-the-services-health-check in gitlab-runner docker executor.
+
+  In order for services: to work, it is hard coded that the waiter helper image
+  starts with /var/run/docker.sock mounted inside to connect to docker.
+  Additionally, Nomad has to support 'bridge' docker network driver for Nomad to
+  start the job. See
+  https://developer.hashicorp.com/nomad/docs/networking#bridge-networking .
 
   Below is an example /etc/gitlab-runner/config.toml configuration file:
       [[runners]]
