@@ -304,7 +304,7 @@ class ConfigDocker(ConfigCustom):
             extra_hosts = [f"{s.alias}:127.0.0.1" for s in services]
             for task in taskgroup.Tasks:
                 assert task["Driver"] == "docker"
-                task.Config.extra_hosts = extra_hosts
+                task.Config["extra_hosts"] = extra_hosts
         # Apply auto_fix_docker_ding
         if (
             self.auto_fix_docker_dind
@@ -515,7 +515,7 @@ class Config(DataDict):
         )
         # Apply override on config
         task.Config = JobTaskConfig(
-            {**task.Config.asdict(), **self.override.task_config}
+            {**task.Config, **self.override.task_config}
         )
         return task
 

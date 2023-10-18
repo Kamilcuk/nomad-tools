@@ -5,7 +5,7 @@ import datetime
 import enum
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, Generic, List, Optional, TypeVar
+from typing import Any, Callable, Dict, Generic, List, Optional, TypeVar, Union
 
 from .datadict import DataDict
 
@@ -56,7 +56,7 @@ class JobTask(DataDict):
     Name: str
     Driver: str
     User: str
-    Config: JobTaskConfig
+    Config: Union[dict, JobTaskConfig]
     Lifecycle: Optional[JobTaskLifecycle] = None
     Env: Optional[Dict[str, str]]
     Services: Optional[List[Any]]
