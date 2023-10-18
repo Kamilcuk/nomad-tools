@@ -94,12 +94,13 @@ def test_nomad_watch2_multiple():
     output: List[Union[str, re.Pattern]] = []
     for i in range(1, 2):
         for j in range(1, 2):
-            pre = f"{uuid} group{i} task{j}"
-            output += [
-                f"{pre} START",
-                f"{pre} STOP",
-                re.compile(rf"{pre} START[\S\n ]*{pre} STOP"),
-            ]
+            for k in range(3):
+                pre = f"{uuid} alloc{k} group{i} task{j}"
+                output += [
+                    f"{pre} START",
+                    f"{pre} STOP",
+                    re.compile(rf"{pre} START[\S\n ]*{pre} STOP"),
+                ]
     run_nomad_watch(f"--purge run {testjobs[job]}", output=output)
 
 

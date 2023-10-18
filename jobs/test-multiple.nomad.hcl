@@ -4,12 +4,13 @@ locals {
   args = [
     "-xeuc",
     <<EOF
-    echo 876f767f-7dbb-4e1f-8625-4dcd39f1adaa ${NOMAD_GROUP_NAME} ${NOMAD_TASK_NAME} START
-    sleep 0.1;
-    echo 876f767f-7dbb-4e1f-8625-4dcd39f1adaa ${NOMAD_GROUP_NAME} ${NOMAD_TASK_NAME} STOP
+    echo 876f767f-7dbb-4e1f-8625-4dcd39f1adaa alloc${NOMAD_ALLOC_INDEX} ${NOMAD_GROUP_NAME} ${NOMAD_TASK_NAME} START
+    sleep 0.1
+    echo 876f767f-7dbb-4e1f-8625-4dcd39f1adaa alloc${NOMAD_ALLOC_INDEX} ${NOMAD_GROUP_NAME} ${NOMAD_TASK_NAME} STOP
     EOF
   ]
-  init = true
+  init  = true
+  count = 3
 }
 job "test-multiple" {
   type = "batch"
@@ -18,44 +19,38 @@ job "test-multiple" {
   }
   reschedule { attempts = 0 }
   group "group1" {
+    count = local.count
     restart { attempts = 0 }
     task "task1" {
-      driver = "docker"
+      driver = "raw_exec"
       config {
-        image   = local.image
         command = local.command
         args    = local.args
-        init    = local.init
       }
     }
     task "task2" {
-      driver = "docker"
+      driver = "raw_exec"
       config {
-        image   = local.image
         command = local.command
         args    = local.args
-        init    = local.init
       }
     }
   }
   group "group2" {
+    count = local.count
     restart { attempts = 0 }
     task "task3" {
-      driver = "docker"
+      driver = "raw_exec"
       config {
-        image   = local.image
         command = local.command
         args    = local.args
-        init    = local.init
       }
     }
     task "task4" {
-      driver = "docker"
+      driver = "raw_exec"
       config {
-        image   = local.image
         command = local.command
         args    = local.args
-        init    = local.init
       }
     }
   }
