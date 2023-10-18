@@ -474,7 +474,9 @@ class TaskHandler:
                     )
                     and set_not_in_add(self.messages, msgtime_ns)
                 ):
-                    tk.log_alloc(ns2dt(msgtime_ns), f"{e.Type} {e.DisplayMessage}")
+                    for line in e.DisplayMessage.splitlines():
+                        if line:
+                            tk.log_alloc(ns2dt(msgtime_ns), f"{e.Type} {line}")
         if (
             self.loggers is None
             and taskstate.State in ["running", "dead"]
