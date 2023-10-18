@@ -15,7 +15,6 @@ import logging
 import re
 import shlex
 import subprocess
-import sys
 import threading
 import time
 from abc import ABC, abstractmethod
@@ -35,7 +34,7 @@ from typing import (
 import click
 import requests
 
-from . import exit_on_thread_exception, nomadlib, colors
+from . import colors, exit_on_thread_exception, nomadlib
 from .common import (
     _complete_set_namespace,
     alias_option,
@@ -422,9 +421,8 @@ class TaskLogger(threading.Thread):
         """Listen to Nomad log stream and print the logs"""
         try:
             self.__run_in()
-        except requests.exceptions.HTTPError as e:
-            resp = e.response
-            if resp.status_code == 404:
+        except requests.HTTPError as e:
+            if e.response and e.response.status_code == 404:
                 self.tk.log_alloc(
                     datetime.datetime.now(),
                     f"{self.__typestr()} logs were garbage collected from Nomad",

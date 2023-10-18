@@ -95,9 +95,9 @@ class VariableConn(_Conn):
                 params={cas: cas} if cas else None,
             )
         except requests.HTTPError as e:
-            if e.response.status_code == 409:
+            if e.response and e.response.status_code == 409:
                 raise VariableConflict(types.Variable(e.response.json()))
-            raise e
+            raise
 
     def delete(self, var_path: str):
         return self.r.delete(var_path)
