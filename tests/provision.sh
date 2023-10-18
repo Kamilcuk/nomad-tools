@@ -37,7 +37,7 @@ nomad_start() {
 	NOMADPID=$!
 	# Wait for nomad
 	now=$(date +%s)
-	endtime=$((now + 10))
+	endtime=$((now + 30))
 	while ! nomad status >/dev/null; do
 		sleep 0.5
 		now=$(date +%s)
