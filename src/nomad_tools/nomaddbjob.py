@@ -231,7 +231,7 @@ class NomadDbJob:
         self, alloc: nomadlib.Alloc, default: T = None
     ) -> Union[T, int]:
         """Given an allocation return the job version associated with that allocation"""
-        if "JobVersion" in alloc:
+        if "JobVersion" in alloc and alloc.JobVersion is not None:
             return alloc.JobVersion
         evaluation = self.evaluations.get(alloc.EvalID)
         if not evaluation:

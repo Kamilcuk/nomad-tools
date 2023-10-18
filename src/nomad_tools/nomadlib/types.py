@@ -307,7 +307,7 @@ class Alloc(DataDict):
     # Also may be missing!
     TaskStates: Optional[Dict[str, AllocTaskState]] = None
     # May be missing!
-    JobVersion: int
+    JobVersion: Optional[int]
     FollowupEvalID: Optional[str] = None
 
     def get_taskstates(self) -> Dict[str, AllocTaskState]:
