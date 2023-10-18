@@ -1,3 +1,5 @@
+import json
+import logging
 import os
 from typing import Any, Callable, Dict, Iterable
 
@@ -6,6 +8,7 @@ import pkg_resources
 
 from . import nomadlib
 
+log = logging.getLogger(__name__)
 mynomad = nomadlib.NomadConn()
 
 
@@ -20,7 +23,7 @@ def nomad_find_job(jobprefix: str) -> str:
         jobprefix == job["ID"]
     ), f"Could not find job named {jobprefix}, closest is {job['ID']}"
     mynomad.namespace = job["Namespace"]
-    return job['ID']
+    return job["ID"]
 
 
 def nomad_find_namespace(prefix: str):
@@ -117,7 +120,16 @@ def common_options():
     )
 
 
+def json_loads(txt: str) -> Any:
+    try:
+        return json.loads(txt)
+    except json.JSONDecodeError:
+        log.exception(f"Could not json.loads: {txt!r}")
+        raise
+
+
 ###############################################################################
+
 
 def __alias_option_callback(
     aliased: Dict[str, Any],

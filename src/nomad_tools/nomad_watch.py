@@ -43,6 +43,7 @@ from .common import (
     complete_job,
     completor,
     composed,
+    json_loads,
     mynomad,
     namespace_option,
     nomad_find_job,
@@ -361,7 +362,7 @@ class TaskLogger(threading.Thread):
                 # Nomad happens to be consistent, the jsons are flat.
                 if c == "}":
                     try:
-                        ret = json.loads(txt)
+                        ret = json_loads(txt)
                         # log.debug(f"RECV: {ret}")
                         yield ret
                     except json.JSONDecodeError as e:

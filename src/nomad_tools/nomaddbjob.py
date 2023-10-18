@@ -7,7 +7,7 @@ from typing import Callable, Dict, Iterable, List, Optional, TypeVar, Union
 import requests
 
 from . import nomadlib
-from .common import mynomad
+from .common import json_loads, mynomad
 from .nomadlib import Event, EventTopic, EventType
 
 log = logging.getLogger(__name__)
@@ -65,7 +65,7 @@ class NomadDbJob:
         ) as stream:
             for line in stream.iter_lines():
                 if line:
-                    data = json.loads(line)
+                    data = json_loads(line)
                     events: List[Event] = [
                         Event(
                             EventTopic[event["Topic"]],
