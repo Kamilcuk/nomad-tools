@@ -8,7 +8,7 @@ job "test-echo10sleep05" {
     task "example" {
       driver = "docker"
       config {
-        image = "busybox"
+        image = "busybox:stable"
         args = [
           "sh",
           "-xc",

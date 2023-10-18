@@ -31,7 +31,7 @@ job "test-listen" {
         delay    = "1s"
       }
       config {
-        image   = "busybox"
+        image   = "busybox:stable"
         command = "sh"
         args = [
           "-xc",

@@ -67,7 +67,7 @@ def gen_job(
     docker_task = {
         "Driver": "docker",
         "Config": {
-            "image": "busybox",
+            "image": "busybox:stable",
             "command": "sh",
             "args": ["-xc", script],
             "init": True,

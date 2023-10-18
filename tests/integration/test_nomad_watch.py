@@ -73,7 +73,7 @@ def test_nomad_watch_run_short():
             task "{name}" {{
                 driver = "{'docker' if nomad_has_docker() else 'raw_exec'}"
                 config {{
-                    {'image = "busybox"' if nomad_has_docker() else ''}
+                    {'image = "busybox:stable"' if nomad_has_docker() else ''}
                     command = "sh"
                     args = ["-xc", <<EOF
                         for i in $(seq 5); do echo MARK $i; sleep 0.123; done
@@ -120,7 +120,7 @@ def test_nomad_watch_run_multiple():
               task "{name}_task_{i}_{j}" {{
                 driver = "{'docker' if nomad_has_docker() else 'raw_exec'}"
                 config {{
-                  {'image = "busybox"' if nomad_has_docker() else ''}
+                  {'image = "busybox:stable"' if nomad_has_docker() else ''}
                   command = "sh"
                   args = ["-xc", <<EOF
                     echo {start}
