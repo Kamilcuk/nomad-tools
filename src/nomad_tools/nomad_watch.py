@@ -111,20 +111,22 @@ class LOGFORMAT:
     post = "{message}{reset}"
     task = "{task + '>' if task else ''}"
     DEFAULT = (
-        pre
-        + mark
-        + "{id:.{args.log_id_len}}{'>' if args.log_id_len else ''}"
-        + "{'#' + str(jobversion) + '>' if jobversion is not None else ''}"
-        + "{group + '>' if group else ''}"
-        + task
-        + " "
-        + post
+        pre + mark + "{id:.{args.log_id_len}}>#{str(jobversion)}>" + task + " " + post
     )
-    """Default log format. The log is templated with f-string using eval() below."""
+    """
+    Default log format. The log is templated with f-string using eval() below.
+        O>45fbbd>#0>group1>task1> hello world
+    """
     ONE = pre + mark + task + " " + post
-    """Log format with -1 option"""
+    """
+    Log format with -1 option.
+        O>task1> hello world
+    """
     ZERO = pre + post
-    """Log format with -0 option"""
+    """
+    Log format with -0 option.
+        hello world
+    """
     LOGGING = (
         COLORS.blue
         + "{'%(asctime)s>' if args.log_time else ''}"
@@ -133,7 +135,7 @@ class LOGFORMAT:
         + " %(levelname)s %(message)s"
         + COLORS.reset
     )
-    """Logging format, first templated with f-string, then by logging"""
+    """Logging format, first templated with f-string, then by logging."""
     colors: Dict[LogWhat, str] = {
         LogWhat.deploy: COLORS.brightmagenta,
         LogWhat.eval: COLORS.magenta,
