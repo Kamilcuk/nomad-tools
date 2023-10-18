@@ -461,9 +461,8 @@ class TaskHandler:
 
     def notify(self, tk: TaskKey, taskstate: nomadlib.AllocTaskState):
         """Receive notification that a task state has changed"""
-        events = taskstate.Events
         if LOGENABLED.alloc:
-            for e in events:
+            for e in taskstate.Events or []:
                 msgtime_ns = e.Time
                 # Ignore message before ignore times.
                 if (

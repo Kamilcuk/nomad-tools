@@ -277,7 +277,7 @@ class AllocTaskStateEvent(DataDict):
 
 
 class AllocTaskState(DataDict):
-    Events: List[AllocTaskStateEvent]
+    Events: Optional[List[AllocTaskStateEvent]]
     State: str
     Failed: bool
     FinishedAt: Optional[str]
@@ -287,7 +287,7 @@ class AllocTaskState(DataDict):
 
     def find_event(self, type_: str) -> Optional[AllocTaskStateEvent]:
         """Find event in TaskStates task Events. Return empty dict if not found"""
-        return next((e for e in self.Events if e.Type == type_), None)
+        return next((e for e in self.Events or [] if e.Type == type_), None)
 
     def was_started(self):
         return self.find_event(AllocTaskStateEventType.TaskStarted) is not None
