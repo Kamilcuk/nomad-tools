@@ -135,19 +135,18 @@ def run(
     print(f"+ {quotearr(cmda)}", file=sys.stderr, flush=True)
     stdout = stdout or bool(output)
     # Run subprocess.Popen, input stdin and output stdout.
-    pp = subprocess.Popen(
+    with subprocess.Popen(
         cmda,
         text=text,
         stdout=subprocess.PIPE if stdout else sys.stderr,
         stdin=subprocess.PIPE if input else subprocess.DEVNULL,
         **kwargs,
-    )
-    captured_stdout = None
-    try:
+    ) as pp:
         if input:
             assert pp.stdin
             pp.stdin.write(input)
             pp.stdin.close()
+        captured_stdout = None
         if stdout:
             captured_stdout = ""
             assert pp.stdout
@@ -155,10 +154,6 @@ def run(
                 line = line.rstrip()
                 captured_stdout += line + "\n"
                 print(line)
-        pp.wait()
-    finally:
-        pp.terminate()
-        pp.wait()
     rr = subprocess.CompletedProcess(cmda, pp.returncode, captured_stdout, None)
     #
     if check is True:
