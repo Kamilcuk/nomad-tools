@@ -4,8 +4,11 @@ import dataclasses
 import datetime
 import enum
 import logging
+import re
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, Generic, List, Optional, TypeVar, Union
+
+import dateutil.parser
 
 from .datadict import DataDict
 
@@ -185,6 +188,10 @@ class EvalStatus(MyStrEnum):
     canceled = enum.auto()
 
 
+def fromisoformat(txt: str) -> datetime.datetime:
+    return dateutil.parser.isoparse(txt)
+
+
 class Eval(DataDict):
     ID: str
     Namespace: str
@@ -203,7 +210,7 @@ class Eval(DataDict):
         if not self.WaitUntil:
             return None
         return (
-            datetime.datetime.fromisoformat(self.WaitUntil)
+            fromisoformat(self.WaitUntil)
             .replace(tzinfo=datetime.timezone.utc)
             .astimezone()
         )

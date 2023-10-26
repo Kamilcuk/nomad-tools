@@ -15,6 +15,7 @@ dependencies = [
 	"requests",
 	"setuptools",
 	"pyyaml",
+	"python-dateutil",
 ]
 dynamic = ["version"]
 
