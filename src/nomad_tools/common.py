@@ -12,36 +12,21 @@ log = logging.getLogger(__name__)
 mynomad = nomadlib.NomadConn()
 
 
-def nomad_find_job(jobprefix: str) -> str:
-    """Find job named jobprefix"""
-    jobs = mynomad.get("jobs", params={"prefix": jobprefix})
-    assert len(jobs) > 0, f"No jobs found with prefix {jobprefix}"
-    jobsnames = " ".join(f"{x['ID']}@{x['Namespace']}" for x in jobs)
-    assert len(jobs) < 2, f"Multiple jobs found with name {jobprefix}: {jobsnames}"
-    job = jobs[0]
-    assert (
-        jobprefix == job["ID"]
-    ), f"Could not find job named {jobprefix}, closest is {job['ID']}"
-    mynomad.namespace = job["Namespace"]
-    return job["ID"]
-
-
-def nomad_find_namespace(prefix: str):
-    """Finds a nomad namespace by prefix"""
-    if prefix == "*":
-        return prefix
-    namespaces = mynomad.get("namespaces")
-    names = [x["Name"] for x in namespaces]
-    namesstr = " ".join(names)
-    matchednames = [x for x in names if x.startswith(prefix)]
-    matchednamesstr = " ".join(matchednames)
-    assert (
-        len(matchednames) > 0
-    ), f"Couldn't find namespace maching prefix {prefix} from {namesstr}"
-    assert (
-        len(matchednames) < 2
-    ), f"Prefix {prefix} matched multiple namespaces: {matchednamesstr}"
-    return matchednames[0]
+def nomad_find_job(id: str) -> str:
+    """Find job named jobprefix if namespace is *."""
+    if os.environ["NOMAD_NAMESPACE"] != "*":
+        mynomad.namespace = os.environ["NOMAD_NAMESPACE"]
+        return id
+    jobs = mynomad.get("jobs", params={"prefix": id})
+    jobsstr = " ".join(f"{job['ID']}@{job['Namespace']}" for job in jobs)
+    try:
+        found = next(job for job in jobs if job["ID"] == id)
+        mynomad.namespace = found["Namespace"]
+        os.environ["NOMAD_NAMESPACE"] = found["Namespace"]
+        return found
+    except StopIteration:
+        log.exception(f"There are no jobs named {id}, closest are {jobsstr}")
+        raise
 
 
 def _complete_set_namespace(ctx: click.Context):
