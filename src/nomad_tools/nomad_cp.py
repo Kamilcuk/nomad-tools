@@ -162,10 +162,10 @@ def mypath_factory(txt: str) -> Mypath:
             ]
             assert (
                 len(allocs) < 2
-            ), f"Multiple running allocatino found for job {place[0]} and task {place[1]}: {' '.join(x['ID'] for x in allocs)}"
+            ), f"Multiple running allocations found for job {place[0]} and task {place[1]}: {' '.join(x['ID'] for x in allocs)}"
             assert (
                 len(allocs) > 0
-            ), f"No running allocatino found for job {place[0]} and task {place[1]}"
+            ), f"No running allocations found for job {place[0]} and task {place[1]}"
             return NomadMypath(Path(arr[1]), allocs[0]["ID"])
 
 

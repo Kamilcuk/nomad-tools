@@ -1235,6 +1235,8 @@ class NomadAllocationWatcher:
 
 
 class JobPath:
+    """Unused currently"""
+
     jobname: str
     group: Optional[Pattern[str]]
     task: Optional[Pattern[str]]
