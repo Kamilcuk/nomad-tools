@@ -23,9 +23,9 @@ def nomad_find_job(id: str) -> str:
         found = next(job for job in jobs if job["ID"] == id)
         mynomad.namespace = found["Namespace"]
         os.environ["NOMAD_NAMESPACE"] = found["Namespace"]
-        return found
+        return found["ID"]
     except StopIteration:
-        log.exception(f"There are no jobs named {id}, closest are {jobsstr}")
+        log.exception(f"Job named {id} not found")
         raise
 
 
