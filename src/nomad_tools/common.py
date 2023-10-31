@@ -18,15 +18,13 @@ def nomad_find_job(id: str) -> str:
         mynomad.namespace = os.environ["NOMAD_NAMESPACE"]
         return id
     jobs = mynomad.get("jobs", params={"prefix": id})
-    jobsstr = " ".join(f"{job['ID']}@{job['Namespace']}" for job in jobs)
-    try:
-        found = next(job for job in jobs if job["ID"] == id)
-        mynomad.namespace = found["Namespace"]
-        os.environ["NOMAD_NAMESPACE"] = found["Namespace"]
-        return found["ID"]
-    except StopIteration:
-        log.exception(f"Job named {id} not found")
-        raise
+    matches = [job for job in jobs if job["ID"] == id]
+    assert len(matches) > 0, f"Job named {id} not found"
+    assert len(matches) < 2, f"Found multiple jobs named {id}"
+    found = matches[0]
+    mynomad.namespace = found["Namespace"]
+    os.environ["NOMAD_NAMESPACE"] = found["Namespace"]
+    return found["ID"]
 
 
 def _complete_set_namespace(ctx: click.Context):
