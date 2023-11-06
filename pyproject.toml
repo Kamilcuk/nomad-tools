@@ -7,6 +7,7 @@ enabled = true
 
 [project]
 name = "nomad-tools"
+description = "Set of tools and utilities to ease interacting with Hashicorp Nomad scheduling solution."
 readme = "README.md"
 authors = [{name = "Kamil Cukrowski"}]
 license = {text = "GPL-3.0-or-later"}
@@ -20,9 +21,9 @@ dependencies = [
 dynamic = ["version"]
 
 [project.urls]
-homepage = "https://gitlab.com/Kamcuk/nomad-tools"
-repository = "https://gitlab.com/Kamcuk/nomad-tools"
-documentation = "https://gitlab.com/Kamcuk/nomad-tools"
+homepage = "https://github.com/Kamilcuk/nomad-tools"
+repository = "https://github.com/Kamilcuk/nomad-tools"
+documentation = "https://github.com/Kamilcuk/nomad-tools"
 
 [project.scripts]
 nomad-watch = "nomad_tools:nomad_watch.cli"
