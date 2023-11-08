@@ -1524,7 +1524,7 @@ def mode_eval(evalid):
 
 @cli_command_run_nomad_job_run(
     "run",
-    help=f"Run a Nomad job and then act like started mode.",
+    help=f"Run a Nomad job and then act like stopped mode.",
 )
 def mode_run(cmd: Tuple[str]):
     evaluation = nomad_start_job(cmd)
