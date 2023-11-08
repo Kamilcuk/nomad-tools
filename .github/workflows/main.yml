@@ -29,6 +29,8 @@ jobs:
         run: pip install -e '.[test]'
       - name: run pyright
         uses: jakebailey/pyright-action@v1
+        with:
+          version: 1.1.334
       - name: run unit tests
         run: pytest -sxv tests/unit
       - name: install nomad server
