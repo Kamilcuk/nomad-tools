@@ -688,7 +688,11 @@ def __nomad_job_run(opts: Tuple[str]) -> str:
         output.lower(),
         re.MULTILINE,
     )
-    assert len(founduuids) == 1, f"Could not find uuid in nomad job run output"
+    assert len(founduuids) == 1, (
+        "Could not find UUID in nomad job run output."
+        " This may be caused by the job being parametric or periodic,"
+        " or nomad command line has upgraded its output or there is an error in this script."
+    )
     evalid = founduuids[0]
     return evalid
 
