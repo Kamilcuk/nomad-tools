@@ -243,7 +243,12 @@ class NomadDbJob:
         return default
 
     def find_job_from_modifyindex(self, jobmodifyindex: int) -> Optional[nomadlib.Job]:
-        for _, job in sorted(self.jobversions.items(), reverse=True):
+        # Note that job versions may not be in JobModifyIndex order.
+        # Job versions of previous job (after purge and start) may be here.
+        # Sort explicitly over JobModifyIndex
+        for job in sorted(
+            self.jobversions.values(), key=lambda job: job.JobModifyIndex, reverse=True
+        ):
             if job.JobModifyIndex <= jobmodifyindex:
                 return job
         return None
