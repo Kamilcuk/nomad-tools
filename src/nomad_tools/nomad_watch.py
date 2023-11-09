@@ -557,7 +557,7 @@ class NotifierWorker:
     def notify_alloc(self, alloc: nomadlib.Alloc):
         if LOGENABLED.eval:
             evaluation = self.db.evaluations.get(alloc.EvalID)
-            if evaluation and self.lineno_key_not_printed(alloc.EvalID):
+            if evaluation and self.lineno_key_not_printed(f"{alloc.ID} {alloc.EvalID}"):
                 Mylogger.log_eval(
                     self.db,
                     evaluation,
@@ -568,7 +568,7 @@ class NotifierWorker:
         #
         if LOGENABLED.eval and alloc.is_finished():
             evaluation = self.db.evaluations.get(alloc.EvalID)
-            if evaluation and self.lineno_key_not_printed(alloc.EvalID):
+            if evaluation and self.lineno_key_not_printed(f"{alloc.ID} {alloc.EvalID}"):
                 Mylogger.log_eval(
                     self.db, evaluation, f"Allocation {alloc.ID} finished"
                 )
