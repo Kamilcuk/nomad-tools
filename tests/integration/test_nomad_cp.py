@@ -4,7 +4,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from tests.testlib import gen_job, run, run_nomad_cp, run_nomad_watch
+from tests.testlib import gen_job, get_templatejob, run, run_nomad_cp, run_nomad_watch
 
 alloc_exec = "nomad alloc exec -i=false -t=false -job"
 
@@ -24,17 +24,16 @@ class NomadTempdir:
 
 
 def run_temp_job():
-    jobjson = gen_job(script="exec sleep 60")
-    job = jobjson["Job"]
-    jobname = job["ID"]
-    run_nomad_watch(f"-x purge {jobname}")
+    hcl = get_templatejob(script="exec sleep 60")
+    jobid = hcl.id
+    run_nomad_watch(f"-x purge {jobid}")
     try:
-        run_nomad_watch("start -json -", input=json.dumps(jobjson))
-        with NomadTempdir(jobname) as nomaddir:
+        run_nomad_watch("start -", input=hcl.hcl)
+        with NomadTempdir(jobid) as nomaddir:
             with tempfile.TemporaryDirectory() as hostdir:
-                yield jobname, nomaddir, hostdir
+                yield jobid, nomaddir, hostdir
     finally:
-        run_nomad_watch(f"-x purge {jobname}")
+        run_nomad_watch(f"-x purge {jobid}")
 
 
 def test_nomad_cp_dir():

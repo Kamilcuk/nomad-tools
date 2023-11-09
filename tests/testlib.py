@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shlex
+import string
 import subprocess
 import sys
 import tempfile
@@ -55,14 +56,15 @@ class NamedTemporaryFileContent:
             self.file.close()
 
 
+def get_testname() -> str:
+    return os.environ.get("PYTEST_CURRENT_TEST", caller(1)).split(":")[-1].split(" ")[0]
+
+
 def gen_job(
     script=""" echo hello world """, name: Optional[str] = None, mode: str = "raw_exec"
 ):
     assert name is None or " " not in name
-    name = (
-        name
-        or os.environ.get("PYTEST_CURRENT_TEST", caller(1)).split(":")[-1].split(" ")[0]
-    )
+    name = name or get_testname()
     jobname = f"test-nomad-utils-{name}"
     docker_task = {
         "Driver": "docker",
@@ -110,6 +112,25 @@ def get_testjobs() -> Dict[str, Path]:
     ret = {f.name[: -len(".nomad.hcl")]: f for f in files}
     print(ret)
     return ret
+
+
+@dataclasses.dataclass
+class JobHcl:
+    id: str
+    hcl: str
+
+
+def get_templatejob(name: str = "", script: str = "") -> JobHcl:
+    name = name or get_testname()
+    return JobHcl(
+        f"test-{name}",
+        string.Template(get_testjobs()["test-template"].read_text()).safe_substitute(
+            dict(
+                NAME=name,
+                SCRIPT=script.replace("${", "$${").replace("%{", "%%{"),
+            )
+        ),
+    )
 
 
 def quotearr(cmd: List[str]):
