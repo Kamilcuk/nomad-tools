@@ -179,5 +179,4 @@ def test_nomad_watch2_deploymulti():
             check=False,
         )
     finally:
-        pass
-        # run_nomad_watch(f"-x purge {job}")
+        run_nomad_watch(f"-x purge {job}")
