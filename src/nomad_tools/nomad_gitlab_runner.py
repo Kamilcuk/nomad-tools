@@ -23,7 +23,7 @@ import click
 import yaml
 
 from . import nomad_watch, nomadlib
-from .common import common_options, get_version, mynomad
+from .common import cached_property, common_options, get_version, mynomad
 from .nomadlib.datadict import DataDict
 from .nomadlib.types import Job, JobTask, JobTaskConfig
 
@@ -457,7 +457,7 @@ class Config(DataDict):
                 assert isinstance(v, str)
                 os.environ[k] = v
 
-    @functools.lru_cache(maxsize=0)
+    @cached_property
     def get_driverconfig(self) -> ConfigCustom:
         modes: Dict[ConfigMode, ConfigCustom] = {
             ConfigMode.raw_exec: self.raw_exec,
@@ -473,7 +473,7 @@ class Config(DataDict):
         return cc
 
     def _add_meta(self, job: Job):
-        dc = self.get_driverconfig()
+        dc = self.get_driverconfig
         task = job.TaskGroups[0].Tasks[0]
         job.Meta = job.Meta if "Meta" in job and job.Meta else {}
         job.Meta.update(
@@ -499,7 +499,7 @@ class Config(DataDict):
 
     def _gen_main_task(self) -> JobTask:
         """Get the task to run, apply transformations and configuration as needed"""
-        task: JobTask = self.get_driverconfig().task
+        task: JobTask = self.get_driverconfig.task
         assert task, f"is invalid: {task}"
         assert "Config" in task
         task = JobTask(
@@ -514,9 +514,7 @@ class Config(DataDict):
             }
         )
         # Apply override on config
-        task.Config = JobTaskConfig(
-            {**task.Config, **self.override.task_config}
-        )
+        task.Config = JobTaskConfig({**task.Config, **self.override.task_config})
         return task
 
     def get_nomad_job(self) -> Job:
@@ -538,7 +536,7 @@ class Config(DataDict):
         )
         self._add_meta(nomadjob)
         # Apply driver specific configuration. I.e. docker.
-        self.get_driverconfig().apply(nomadjob)
+        self.get_driverconfig.apply(nomadjob)
         # Force apply 0 restart policy to every task.
         for t in nomadjob.TaskGroups[0].Tasks:
             t.setdefault("RestartPolicy", {"Attempts": 0})
@@ -828,7 +826,7 @@ def cli(verbose: int, configpath: Path, runner_id: int):
     )
     log.debug(f"+ {sys.argv}")
     #
-    dc = config.get_driverconfig()
+    dc = config.get_driverconfig
     if dc.get("image"):
         os.environ.setdefault("CUSTOM_ENV_CI_JOB_IMAGE", dc["image"])
 
@@ -837,7 +835,7 @@ def cli(verbose: int, configpath: Path, runner_id: int):
     "config", help="https://docs.gitlab.com/runner/executors/custom.html#config"
 )
 def mode_config():
-    dc = config.get_driverconfig()
+    dc = config.get_driverconfig
     driver_config = {
         "builds_dir": dc.builds_dir,
         "cache_dir": dc.cache_dir,
@@ -876,7 +874,7 @@ def mode_run(script: str, stage: str):
     je = Jobenv()
     set_x = "-x" if config.verbose > 1 else ""
     # Execute all except step_ and build_ in that special gitlab docker container.
-    taskname = config.get_driverconfig().get_task_for_stage(stage)
+    taskname = config.get_driverconfig.get_task_for_stage(stage)
     rr = run(
         f"nomad alloc exec -t=false -task {quote(taskname)} -job {quote(je.jobname)}"
         f" sh -c {quote(config.script)} gitlabrunner {set_x} -- {quote(stage)}",

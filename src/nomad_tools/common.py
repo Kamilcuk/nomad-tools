@@ -1,7 +1,7 @@
 import json
 import logging
 import os
-from typing import Any, Callable, Dict, Iterable
+from typing import Any, Callable, Dict, Generic, Iterable, TypeVar
 
 import click
 import pkg_resources
@@ -146,3 +146,33 @@ def alias_option(
         callback=lambda *args: __alias_option_callback(aliased, *args),
         **attrs,
     )
+
+
+###############################################################################
+
+
+T = TypeVar("T")
+R = TypeVar("R")
+
+
+class cached_property(Generic[T, R]):
+    """
+    Descriptor (non-data) for building an attribute on-demand on first use.
+    No cached_property in pip has correct typing, so I wrote my own.
+    """
+
+    def __init__(self, factory: Callable[[T], R]):
+        """
+        <factory> is called such: factory(instance) to build the attribute.
+        """
+        self._attr_name = factory.__name__
+        self._factory = factory
+
+    def __get__(self, instance: T, owner) -> R:
+        # Build the attribute.
+        attr: R = self._factory(instance)
+
+        # Cache the value; hide ourselves.
+        setattr(instance, self._attr_name, attr)
+
+        return attr
