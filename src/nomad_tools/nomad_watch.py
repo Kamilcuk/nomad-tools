@@ -1051,10 +1051,17 @@ class NomadJobWatcher(ABC):
             or self.has_active_deployments()
             or self.has_active_evaluations()
         ):
+            # The job is still doing somthing. Wait for it.
             return False
         allocations = self.db.allocations.values()
-        if not allocations:
+        if (
+            not allocations
+            or any(alloc.is_pending() for alloc in allocations)
+            or any(alloc.TaskStates is None for alloc in allocations)
+        ):
+            # There are still allocations which Tasks have not started yet. Wait for them.
             return False
+        #
         groupmsgs: List[str] = []
         for group in self.job.TaskGroups:
             groupallocs: List[nomadlib.Alloc] = [
@@ -1084,7 +1091,7 @@ class NomadJobWatcher(ABC):
                 notrunningmaintasks = maintasks.difference(startedtasks)
                 if notrunningmaintasks:
                     # There are main tasks that are not running.
-                    if alloc.is_pending_or_running():
+                    if alloc.TaskStates is None or alloc.is_pending_or_running():
                         # Wait for them.
                         return False
                     else:

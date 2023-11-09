@@ -304,6 +304,15 @@ class AllocTaskState(DataDict):
         return self.find_event(AllocTaskStateEventType.TaskStarted) is not None
 
 
+class AllocClientStatus(MyStrEnum):
+    pending = enum.auto()
+    running = enum.auto()
+    complete = enum.auto()
+    failed = enum.auto()
+    lost = enum.auto()
+    unknown = enum.auto()
+
+
 class Alloc(DataDict):
     ID: str
     NodeName: str
@@ -329,10 +338,16 @@ class Alloc(DataDict):
         return [k for k in self.get_taskstates().keys()]
 
     def is_pending_or_running(self):
-        return self.ClientStatus in ["pending", "running"]
+        return self.ClientStatus in [
+            AllocClientStatus.pending,
+            AllocClientStatus.running,
+        ]
+
+    def is_pending(self):
+        return self.ClientStatus == AllocClientStatus.pending
 
     def is_running(self):
-        return self.ClientStatus == "running"
+        return self.ClientStatus == AllocClientStatus.running
 
     def is_finished(self):
         return not self.is_pending_or_running()
