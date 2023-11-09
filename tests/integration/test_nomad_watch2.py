@@ -98,6 +98,7 @@ def test_nomad_watch2_maintask():
     """
     job = "test-maintask"
     try:
+        run_nomad_watch(f"purge {job}", check=None)
         out = run_nomad_watch(
             f"start {testjobs[job]}",
             output=[
@@ -108,8 +109,8 @@ def test_nomad_watch2_maintask():
             ],
         ).stdout
         assert "+ echo poststop" not in out
-        assert len(mynomad.get(f"job/{job}/allocations")) == 1
-    except:
+        assert len(mynomad.get(f"job/{job}/allocations")) == 2
+    finally:
         run_nomad_watch(f"-x purge {job}")
 
 
