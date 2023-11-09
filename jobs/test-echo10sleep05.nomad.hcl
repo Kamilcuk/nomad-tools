@@ -1,6 +1,5 @@
 job "test-echo10sleep05" {
   type = "batch"
-  namespace = "test"
   meta {
     uuid = uuidv4()
   }
