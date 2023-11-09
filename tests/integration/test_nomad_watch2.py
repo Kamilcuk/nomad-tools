@@ -1,10 +1,35 @@
 import re
+from shlex import quote
 from typing import List, Union
 
 from nomad_tools.common import mynomad
 from tests.testlib import get_testjobs, run, run_nomad_watch
 
 testjobs = get_testjobs()
+
+
+def test_nomad_watch2_start():
+    job = "test-start"
+    mark = "7bc8413c-8619-48bf-a46d-f42727724632"
+    exitstatus = 234
+    script = f"sleep 1; echo {mark} ; exit {exitstatus}"
+    try:
+        run_nomad_watch(f"start -var script={quote(script)} {testjobs[job]}")
+        run_nomad_watch(f"started {job}", output=[mark])
+        cmds = [
+            f"stop {job}",
+            f"stopped {job}",
+            f"--no-follow job {job}",
+            f"--no-follow -o out job {job}",
+            f"--no-follow -o err job {job}",
+            f"--no-follow -o out -o err job {job}",
+            f"--no-follow -o all job {job}",
+        ]
+        for cmd in cmds:
+            run_nomad_watch(cmd, check=exitstatus, output=[mark])
+    finally:
+        run_nomad_watch(f"stop {job}", check=exitstatus)
+    run_nomad_watch(f"--purge stop {job}", check=exitstatus)
 
 
 def test_nomad_watch2_canary():
