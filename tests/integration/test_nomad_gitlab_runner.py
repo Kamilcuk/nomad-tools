@@ -1,13 +1,12 @@
 import dataclasses
 import json
 import os
-import sys
 import time
 from shlex import quote
 from textwrap import dedent
 from typing import Dict, List
 
-from tests.testlib import NamedTemporaryFileContent, run
+from tests.testlib import NamedTemporaryFileContent, get_testname, run
 
 
 @dataclasses.dataclass
@@ -21,12 +20,10 @@ class GitlabState:
     def __post_init__(self):
         self.script = dedent(self.script)
         self.env.update(os.environ)
-        current_pytest = os.environ["PYTEST_CURRENT_TEST"].split(":")[-1].split(" ")[0]
-        unique_id = str(hash(current_pytest) % ((sys.maxsize + 1) * 2))
         defaults: Dict[str, str] = dict(
-            CUSTOM_ENV_CI_JOB_ID=str(time.time_ns()),
-            CUSTOM_ENV_CI_RUNNER_ID=str(abs(hash(current_pytest))),
-            CUSTOM_ENV_CI_PROJECT_PATH_SLUG="PATH",
+            CUSTOM_ENV_CI_JOB_ID=str(hash(time.time_ns())),
+            CUSTOM_ENV_CI_RUNNER_ID=str(hash(time.time_ns())),
+            CUSTOM_ENV_CI_PROJECT_PATH_SLUG=get_testname(),
             CUSTOM_ENV_CI_CONCURRENT_ID="ID",
             CUSTOM_ENV_CI_JOB_TIMEOUT="60",
             BUILD_FAILURE_EXIT_CODE=str(self.build_failure),
@@ -38,7 +35,7 @@ class GitlabState:
     def nomad_gitlab_runner(self, cmd: str, check: List[int], **kwargs):
         # [0, self.build_failure, self.system_failure],
         return run(
-            f"python3 -m nomad_tools.nomad_gitlab_runner -c {quote(self.configfile)} {cmd}",
+            f"python3 -m nomad_tools.nomad_gitlab_runner -v -c {quote(self.configfile)} {cmd}",
             env=self.env,
             check=check,
             **kwargs,
@@ -134,7 +131,6 @@ def test_nomad_gitlab_runner_alias():
     cycle(
         {
             "default": {
-                "purge": False,
                 "mode": "docker",
                 "docker": {"image": "nginxdemos/hello:0.3"},
             }
