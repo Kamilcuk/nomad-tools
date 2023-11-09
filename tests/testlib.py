@@ -125,6 +125,16 @@ def run(
     input: Optional[str] = None,
     **kwargs,
 ) -> subprocess.CompletedProcess:
+    """
+    Run a command and process its output and exit status for testing.
+
+    :param cmd: command to run
+    :param check: if null, don't perform any checks, if true, exit status has to be zero, if false, exit status
+    :param text: passed to subprocess.run
+    :param input: pass input to subprocess.run
+    :param output: an array of strings or patterns to check output of command against
+    :param stdout: capture stdout. tru if output is given
+    """
     cmda: List[str] = []
     for i in shlex.split(cmd):
         if i in "nomad-cp nomad-watch nomad-port".split():
@@ -176,9 +186,9 @@ def run(
         assert rr.stdout is not None
         for pat in output:
             if isinstance(pat, str):
-                assert pat in rr.stdout, f"String {pat} not found"
+                assert pat in rr.stdout, f"String not found: {pat!r}"
             elif isinstance(pat, re.Pattern):
-                assert pat.findall(rr.stdout.strip()), f"Pattern {pat} not found"
+                assert pat.findall(rr.stdout.strip()), f"Pattern not found: {pat}"
             else:
                 assert 0
     #

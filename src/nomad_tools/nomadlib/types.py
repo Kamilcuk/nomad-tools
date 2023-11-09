@@ -461,7 +461,7 @@ class Event:
             "ClientStatus": self.data.get("ClientStatus"),
             "stream": 1 if self.stream else 0,
         }
-        statusstr = " ".join(f"{k}={v}" for k, v in status.items() if v)
+        statusstr = " ".join(f"{k}={v}" for k, v in status.items() if v is not None)
         return f"Event({self.topic.name}.{self.type.name} {statusstr})"
 
     def is_job(self):

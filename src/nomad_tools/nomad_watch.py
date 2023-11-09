@@ -514,7 +514,7 @@ class AllocWorker:
                 continue
             tk = TaskKey(
                 alloc.ID,
-                str(self.db.get_allocation_job_version(alloc, "?")),
+                str(self.db.get_allocation_jobversion(alloc, "?")),
                 alloc.NodeName,
                 alloc.TaskGroup,
                 taskname,
@@ -542,10 +542,15 @@ class NotifierWorker:
     db: NomadDbJob
     """Link to database"""
     workers: Dict[str, AllocWorker] = dataclasses.field(default_factory=dict)
+    """Allocation ID to allocation worker of this allocation"""
     messages: Set[Tuple[int, str]] = dataclasses.field(default_factory=set)
     """A set of evaluation ModifyIndex to know what has been printed."""
 
     def lineno_key_not_printed(self, key: str) -> bool:
+        """
+        Nomad has no timestamp of messages. I want to keep track of messages printed not to print them twice.
+        I check if a specific message was printed already by tracking unique key and file line number information.
+        """
         lineno = inspect.currentframe().f_back.f_lineno  # type: ignore
         return set_not_in_add(self.messages, (lineno, key))
 
@@ -745,19 +750,23 @@ class NomadJobWatcher(ABC):
         self.notifier = NotifierWorker(self.db)
         """Notification worker dispatching Nomad stream events"""
         self.done = threading.Event()
-        """I am using threading.Event because you can't handle KeyboardInterrupt while Thread.join()."""
+        """
+        Notifies that self.thread has finished.
+        I am using threading.Event because you can't handle KeyboardInterrupt while Thread.join().
+        """
         self.thread = threading.Thread(
             target=self.__thread_run,
             name=f"{self.__class__.__name__}({self.jobid})",
             daemon=True,
         )
+        """The thread that parses database events"""
         self.dbseenjob: bool = False
         """The job was found at least once."""
         self.purged: bool = False
         """If set, we are waiting until the job is there and it means that JobNotFound is not an error - the job was removed."""
         self.purgedlock: threading.Lock = threading.Lock()
         """A special lock to synchronize callback with changing finish conditions"""
-        self.donemsg = ""
+        self.donemsg: Optional[str] = None
         """Message printed when done watching. It is not printed right away, because we might decide to wait for purging later."""
         self.started: bool = False
         """The job finished because all allocations started, not because they failed."""
@@ -785,14 +794,13 @@ class NomadJobWatcher(ABC):
                     Event(EventTopic.Job, EventType.JobRegistered, self.job.asdict())
                 ]
             raise
-        # Set the job if not set.
+        # Set the job if not set for the first time.
         if not self.job:
             self.job = nomadlib.Job(job)
             log.debug(
                 f"Found job {self.job.description()} from {self.eval.ID if self.eval else None}"
+                f" with {len(allocations)} allocations"
             )
-        if not allocations:
-            log.debug(f"Job {self.job.description()} has no allocations")
         if self.jobmodifyindex is None:
             # set jobmodifyindex
             self.jobmodifyindex = self.job.JobModifyIndex
@@ -882,6 +890,7 @@ class NomadJobWatcher(ABC):
         return False
 
     def __thread_run(self):
+        """Thread entrypoint that handles events from Nomad event stream database"""
         untilstr = (
             "forever"
             if args.all
@@ -926,6 +935,7 @@ class NomadJobWatcher(ABC):
                 )
             ):
                 self.done.set()
+                # No break here - self.done may be set again when the job gets purged.
         log.debug(f"Watching job {self.jobid}@{mynomad.namespace} exiting")
 
     @abstractmethod
@@ -933,8 +943,8 @@ class NomadJobWatcher(ABC):
         raise NotImplementedError()
 
     def get_exitcode(self) -> int:
-        assert self.db.stopevent.is_set(), "stop not called"
-        assert self.done.is_set(), "stop not called"
+        assert self.db.stopevent.is_set(), f"{self.stop_threads.__name__} not called"
+        assert self.done.is_set(), f"{self.stop_threads.__name__} not called"
         return self._get_exitcode_cb()
 
     def wait(self):
