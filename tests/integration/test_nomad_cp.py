@@ -27,13 +27,14 @@ def run_temp_job():
     jobjson = gen_job(script="exec sleep 60")
     job = jobjson["Job"]
     jobname = job["ID"]
+    run_nomad_watch(f"-x purge {jobname}")
     try:
         run_nomad_watch("start -json -", input=json.dumps(jobjson))
         with NomadTempdir(jobname) as nomaddir:
             with tempfile.TemporaryDirectory() as hostdir:
                 yield jobname, nomaddir, hostdir
     finally:
-        run(f"nomad job stop --purge {jobname}", check=None)
+        run_nomad_watch(f"-x purge {jobname}")
 
 
 def test_nomad_cp_dir():

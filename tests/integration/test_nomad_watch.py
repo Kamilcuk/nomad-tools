@@ -28,7 +28,7 @@ def test_nomad_watch_run():
     exitstatus = 123
     job = gen_job(script=f"echo {mark}; exit {exitstatus}")
     jobid = job["Job"]["ID"]
-    run(f"nomad stop --purge {jobid}", check=False)
+    run_nomad_watch(f"-x purge {jobid}")
     run_nomad_watch(
         "run -json -",
         input=json.dumps(job),

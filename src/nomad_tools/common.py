@@ -14,16 +14,13 @@ mynomad = nomadlib.NomadConn()
 
 def nomad_find_job(id: str) -> str:
     """Find job named jobprefix if namespace is *."""
-    if os.environ["NOMAD_NAMESPACE"] != "*":
-        mynomad.namespace = os.environ["NOMAD_NAMESPACE"]
-        return id
     jobs = mynomad.get("jobs", params={"prefix": id})
     matches = [job for job in jobs if job["ID"] == id]
-    assert len(matches) > 0, f"Job named {id} not found"
+    if len(matches) == 0:
+        raise nomadlib.JobNotFound(f"Job named {id} not found")
     assert len(matches) < 2, f"Found multiple jobs named {id}"
     found = matches[0]
-    mynomad.namespace = found["Namespace"]
-    os.environ["NOMAD_NAMESPACE"] = found["Namespace"]
+    os.environ["NOMAD_NAMESPACE"] = mynomad.namespace = found["Namespace"]
     return found["ID"]
 
 

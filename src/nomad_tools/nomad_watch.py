@@ -27,8 +27,8 @@ import requests
 from . import colors, exit_on_thread_exception, nomadlib
 from .common import (
     _complete_set_namespace,
-    cached_property,
     alias_option,
+    cached_property,
     common_options,
     complete_job,
     completor,
@@ -1070,7 +1070,7 @@ class NomadJobWatcher(ABC):
             if len(groupallocs) != group.Count:
                 # This group has no active evaluation and deployments (checked above).
                 log.error(
-                    f"Job {self.job.description()} group {group.Name!r} started only {len(groupallocs)} allocation out of {group.Count}."
+                    f"Job {self.job.description()} group {group.Name!r} started {len(groupallocs)} allocation out of {group.Count}."
                 )
                 return True
             maintasks: Set[str] = self.nomad_job_group_main_tasks(group)
@@ -1591,7 +1591,6 @@ def mode_started(jobid: str):
 
 
 def mode_stop_in(jobid: str):
-    jobid = nomad_find_job(jobid)
     do = NomadJobWatcherUntilFinished(jobid)
     purge: bool = args.purge or (
         args.purge_successful and do.job_running_successfully()
@@ -1607,17 +1606,30 @@ def mode_stop_in(jobid: str):
 @cli_jobid
 @common_options()
 def mode_stop(jobid: str):
+    jobid = nomad_find_job(jobid)
     mode_stop_in(jobid)
 
 
 @cli.command(
     "purge",
-    help="Alias to --purge stop.",
+    help=f"""
+Alias to `--purge stop`, with the following difference in exit status.
+If the option --no-preserve-status is given, then exit with the following status:
+  {ExitCode.success}  when the job was purged or does not exist from the start.
+The command `-x purge` exits with zero exit status if the job just does not exists.
+""",
 )
 @cli_jobid
 @common_options()
 def mode_purge(jobid: str):
     args.purge = True
+    try:
+        jobid = nomad_find_job(jobid)
+    except nomadlib.JobNotFound:
+        if args.no_preserve_status:
+            return
+        else:
+            raise
     mode_stop_in(jobid)
 
 
@@ -1631,7 +1643,7 @@ no active deployments and no active evaluations.
 
 \b
 If the option --no-preserve-status is given, then exit with the following status:
-  {ExitCode.success           }    when the job was stopped
+  {ExitCode.success           }    when the job was stopped.
 Otherwise, exit with the following status:
   {'?'                        }    when the job has one task, with that task exit status,
   {ExitCode.success           }    when all tasks of the job exited with 0 exit status,
