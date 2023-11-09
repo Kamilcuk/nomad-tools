@@ -1,4 +1,3 @@
-import json
 import logging
 import queue
 import threading
@@ -36,7 +35,7 @@ class NomadDbJob:
         self.queue: queue.Queue[Optional[List[Event]]] = queue.Queue()
         """Queue where database thread puts the received events"""
         self.job: Optional[nomadlib.Job] = None
-        """Watched job"""
+        """Watched job. Is None if the job was deregistered."""
         self.jobversions: Dict[int, nomadlib.Job] = {}
         """Job version to job definition"""
         self.evaluations: Dict[str, nomadlib.Eval] = {}
@@ -227,20 +226,43 @@ class NomadDbJob:
             yield self.handle_events(events)
         log.debug("db exiting")
 
-    def get_allocation_job_version(
+    def get_allocation_jobmodifyindex(
+        self, alloc: nomadlib.Alloc, default: T = None
+    ) -> Union[T, int]:
+        """Given an allocation, return associated JobModifyIndex"""
+        if alloc.JobVersion is not None:
+            job = self.jobversions.get(alloc.JobVersion)
+            if job:
+                return job.JobModifyIndex
+        evaluation = self.evaluations.get(alloc.EvalID)
+        if evaluation:
+            if evaluation.JobModifyIndex is not None:
+                return evaluation.JobModifyIndex
+            if evaluation.DeploymentID is not None:
+                deployment = self.deployments.get(evaluation.DeploymentID)
+                if deployment:
+                    return deployment.JobModifyIndex
+        return default
+
+    def get_allocation_jobversion(
         self, alloc: nomadlib.Alloc, default: T = None
     ) -> Union[T, int]:
         """Given an allocation return the job version associated with that allocation"""
-        if "JobVersion" in alloc and alloc.JobVersion is not None:
-            return alloc.JobVersion
-        evaluation = self.evaluations.get(alloc.EvalID)
-        if not evaluation:
-            return default
-        jobversion = self.find_jobversion_from_modifyindex(evaluation.JobModifyIndex)
-        if jobversion is not None:
-            alloc.JobVersion = jobversion
-            return jobversion
-        return default
+        # If alloc JobVersion is missing, try to set it.
+        if alloc.JobVersion is None:
+            evaluation = self.evaluations.get(alloc.EvalID)
+            if evaluation:
+                # If we can find Job from JobModifyIndex, lets find it.
+                if evaluation.JobModifyIndex is not None:
+                    job = self.find_job_from_modifyindex(evaluation.JobModifyIndex)
+                    if job is not None:
+                        alloc.JobVersion = job.Version
+                # Otherwise we may find deployment that may have jobversion.
+                if alloc.JobVersion is None and evaluation.DeploymentID is not None:
+                    deployment = self.deployments.get(evaluation.DeploymentID)
+                    if deployment:
+                        alloc.JobVersion = deployment.JobVersion
+        return alloc.JobVersion if alloc.JobVersion is not None else default
 
     def find_job_from_modifyindex(self, jobmodifyindex: int) -> Optional[nomadlib.Job]:
         # Note that job versions may not be in JobModifyIndex order.

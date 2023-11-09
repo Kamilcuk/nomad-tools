@@ -195,16 +195,22 @@ def fromisoformat(txt: str) -> datetime.datetime:
 class Eval(DataDict):
     ID: str
     Namespace: str
+    DeploymentID: Optional[str] = None
+    """May be missing when evaluation started by user starting the job"""
     JobID: str
-    JobModifyIndex: int
+    JobModifyIndex: Optional[int] = None
+    """May be missing. No idea when"""
     ModifyIndex: int
     ModifyTime: int
     Status: str
     WaitUntil: str
     FailedTGAllocs: Dict[str, AllocationMetric]
 
-    def is_pending(self):
-        return self.Status == "pending"
+    def is_pending_or_blocked(self):
+        return self.Status in [EvalStatus.pending, EvalStatus.blocked]
+
+    def is_blocked(self):
+        return self.Status == EvalStatus.blocked
 
     def getWaitUntil(self) -> Optional[datetime.datetime]:
         if not self.WaitUntil:
@@ -314,7 +320,7 @@ class Alloc(DataDict):
     # Also may be missing!
     TaskStates: Optional[Dict[str, AllocTaskState]] = None
     # May be missing!
-    JobVersion: Optional[int]
+    JobVersion: Optional[int] = None
     FollowupEvalID: Optional[str] = None
 
     def get_taskstates(self) -> Dict[str, AllocTaskState]:
@@ -332,7 +338,6 @@ class Alloc(DataDict):
 
     def is_finished(self):
         return not self.is_pending_or_running()
-
 
 class DeploymentStatus(MyStrEnum):
     running = enum.auto()

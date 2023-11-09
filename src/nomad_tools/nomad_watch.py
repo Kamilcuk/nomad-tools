@@ -19,17 +19,7 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from http import client as http_client
-from typing import (
-    Callable,
-    Dict,
-    Iterable,
-    List,
-    Optional,
-    Pattern,
-    Set,
-    Tuple,
-    TypeVar,
-)
+from typing import Dict, Iterable, List, Optional, Pattern, Set, Tuple, TypeVar
 
 import click
 import requests
@@ -37,6 +27,7 @@ import requests
 from . import colors, exit_on_thread_exception, nomadlib
 from .common import (
     _complete_set_namespace,
+    cached_property,
     alias_option,
     common_options,
     complete_job,
@@ -554,6 +545,9 @@ class NotifierWorker:
         lineno = inspect.currentframe().f_back.f_lineno  # type: ignore
         return set_not_in_add(self.messages, (lineno, key))
 
+    def alloc_notified(self, alloc: nomadlib.Alloc):
+        return alloc.ID in self.workers
+
     def notify_alloc(self, alloc: nomadlib.Alloc):
         if LOGENABLED.eval:
             evaluation = self.db.evaluations.get(alloc.EvalID)
@@ -731,10 +725,8 @@ class NomadJobWatcher(ABC):
         self.jobid: str = self.eval.JobID if self.eval else jobid if jobid else ""
         assert self.jobid
         """Watched job ID"""
-        self.jobmodifyindex = self.eval.JobModifyIndex if self.eval else None
-        """Watching job ID from this JobModifyIndex"""
         self.job: Optional[nomadlib.Job] = None
-        """Last valid Job with ID"""
+        """Last valid job with matching watched job ID"""
         self.db = NomadDbJob(
             topics=[
                 f"Job:{self.jobid}",
@@ -742,8 +734,8 @@ class NomadJobWatcher(ABC):
                 f"Allocation:{self.jobid}",
                 f"Deployment:{self.jobid}",
             ],
-            select_event_cb=self.db_select_event_job,
-            init_cb=self.db_init_cb,
+            select_event_cb=self.__db_select_event_job,
+            init_cb=self.__db_init_cb,
             force_polling=True if args.polling else None,
         )
         """Database listening to Nomad stream"""
@@ -778,14 +770,14 @@ class NomadJobWatcher(ABC):
         with self.purgedlock:
             return self.purged
 
-    def db_init_cb(self) -> List[Event]:
+    def __db_init_cb(self) -> List[Event]:
         """Db initialization callback"""
         try:
             job: dict = mynomad.get(f"job/{self.jobid}")
             jobversions: dict = mynomad.get(f"job/{self.jobid}/versions")["Versions"]
+            deployments: List[dict] = mynomad.get(f"job/{self.jobid}/deployments")
             evaluations: List[dict] = mynomad.get(f"job/{self.jobid}/evaluations")
             allocations: List[dict] = mynomad.get(f"job/{self.jobid}/allocations")
-            deployments: List[dict] = mynomad.get(f"job/{self.jobid}/deployments")
         except nomadlib.JobNotFound:
             # This is fine to fail if it was purged, potentially.
             if self.was_purged() and self.job:
@@ -801,35 +793,13 @@ class NomadJobWatcher(ABC):
                 f"Found job {self.job.description()} from {self.eval.ID if self.eval else None}"
                 f" with {len(allocations)} allocations"
             )
-        if self.jobmodifyindex is None:
-            # set jobmodifyindex
-            self.jobmodifyindex = self.job.JobModifyIndex
-            # If there are active alocations with JobModifyIndex lower than current watched one,
-            # also start watching them by lowering JobModfyIndex threashold.
-            minactiveallocationjobmodifyindex = min(
-                (
-                    next((e for e in evaluations if e["ID"] == a["EvalID"]), {}).get(
-                        "JobModifyIndex", self.jobmodifyindex
-                    )
-                    for a in allocations
-                    if nomadlib.Alloc(a).is_pending_or_running()
-                ),
-                default=self.jobmodifyindex,
-            )
-            self.jobmodifyindex = min(
-                self.jobmodifyindex, minactiveallocationjobmodifyindex
-            )
-            # Set the JobModifyIndex to the last still running Job version.
-            runningjobs = [job for job in jobversions if not job["Stop"]]
-            if runningjobs:
-                lastrunningjob = sorted(
-                    runningjobs, key=lambda job: job["ModifyIndex"]
-                )[-1]
-                self.jobmodifyindex = min(
-                    self.jobmodifyindex, lastrunningjob["JobModifyIndex"]
-                )
         # Finally output the events for database to pick up.
         return [
+            Event(EventTopic.Job, EventType.JobRegistered, job),
+            *[
+                Event(EventTopic.Job, EventType.JobRegistered, job)
+                for job in jobversions
+            ],
             *[
                 Event(EventTopic.Deployment, EventType.DeploymentStatusUpdate, d)
                 for d in deployments
@@ -838,18 +808,14 @@ class NomadJobWatcher(ABC):
                 Event(EventTopic.Evaluation, EventType.EvaluationUpdated, e)
                 for e in evaluations
             ],
-            Event(EventTopic.Job, EventType.JobRegistered, job),
             *[
                 Event(EventTopic.Allocation, EventType.AllocationUpdated, a)
                 for a in allocations
             ],
-            *[
-                Event(EventTopic.Job, EventType.JobRegistered, job)
-                for job in jobversions
-            ],
         ]
 
-    def db_select_event_jobid(self, e: Event):
+    def __db_select_event_job_id(self, e: Event):
+        """Select only events about observed job ID. Ignore all events about other jobs."""
         return self.db.apply_selects(
             e,
             lambda job: job.ID == self.jobid,
@@ -858,36 +824,84 @@ class NomadJobWatcher(ABC):
             lambda deploy: deploy.JobID == self.jobid,
         )
 
-    def db_select_event_job(self, e: Event) -> bool:
-        if args.all:
-            return True
-        job_filter: Callable[[nomadlib.Job], bool] = lambda _: True
-        eval_filter: Callable[[nomadlib.Eval], bool] = lambda eval: (
-            (self.eval is not None and self.eval.ID == eval.ID)
-            # The JobModifyIndex has to be greater.
-            or eval.get("JobModifyIndex", -1) >= self.jobmodifyindex
-        )
-        alloc_filter: Callable[[nomadlib.Alloc], bool] = lambda alloc: (
-            # If allocation has JobVersion, then it has to match the version in the job.
-            (self.job and alloc.get("JobVersion", -1) >= self.job.Version)
-            or (
-                # If the allocation has no JobVersion, find the maching evaluation.
-                # The JobModifyIndex from the evaluation has to match.
-                self.db.evaluations.get(alloc.EvalID, {}).get("JobModifyIndex", -1)
-                >= self.jobmodifyindex
-            )
-        )
-        deploy_filter: Callable[[nomadlib.Deploy], bool] = lambda deploy: (
-            deploy.get("JobModifyIndex", -1) >= self.jobmodifyindex
-        )
-        return self.db_select_event_jobid(e) and self.db.apply_selects(
-            e, job_filter, eval_filter, alloc_filter, deploy_filter
-        )
+    def __db_select_event_job(self, e: Event):
+        return args.all or self.__db_select_event_job_id(e)
 
     def finish_cb(self) -> bool:
         """Overloaded callback to call to determine if we should finish watching the job"""
-        # Default is to return False and fallback to job_is_finished.
+        # Default is to return False and fallback to job_is_finished called below.
         return False
+
+    @cached_property
+    def jobmodifyindex(self) -> int:
+        """
+        Get the JobModifyIndex we are watching events from.
+        It captures the moment in time where from we started watching the job.
+        Return smallest value of JobModifyIndex of interesting events.
+        """
+        assert self.job, f"should be set in {self.__db_init_cb.__name__}"
+        jobmodifyindex: int = self.job.JobModifyIndex
+        if self.eval is not None and self.eval.JobModifyIndex is not None:
+            jobmodifyindex = min(jobmodifyindex, self.eval.JobModifyIndex)
+        # If there are active alocations with JobModifyIndex lower than current watched one,
+        # also start watching them by lowering JobModfyIndex threashold.
+        min_active_allocation_jobmodifyindex: int = min(
+            (
+                self.db.get_allocation_jobmodifyindex(alloc, jobmodifyindex)
+                for alloc in self.db.allocations.values()
+                if nomadlib.Alloc(alloc).is_pending_or_running()
+            ),
+            default=jobmodifyindex,
+        )
+        jobmodifyindex = min(jobmodifyindex, min_active_allocation_jobmodifyindex)
+        # Set the JobModifyIndex to the last still running Job version.
+        not_stopped_jobs = [job for job in self.db.jobversions.values() if not job.Stop]
+        if not_stopped_jobs:
+            last_not_stopped_job = sorted(
+                not_stopped_jobs, key=lambda job: job.ModifyIndex
+            )[-1]
+            jobmodifyindex = min(jobmodifyindex, last_not_stopped_job.JobModifyIndex)
+        return jobmodifyindex
+
+    def __handle_event(self, event: Event):
+        """Handle a single event from event stream"""
+        if event.topic == EventTopic.Allocation:
+            allocation = nomadlib.Alloc(event.data)
+            if (
+                args.all
+                or self.notifier.alloc_notified(allocation)
+                or self.db.get_allocation_jobmodifyindex(allocation, -1)
+                >= self.jobmodifyindex
+            ):
+                self.notifier.notify_alloc(allocation)
+        elif event.topic == EventTopic.Evaluation:
+            evaluation = nomadlib.Eval(event.data)
+            if self.eval and self.eval.ID == evaluation.ID:
+                self.eval = evaluation
+                self.notifier.notify_eval(evaluation)
+            elif (
+                args.all
+                or (
+                    evaluation.JobModifyIndex is not None
+                    and evaluation.JobModifyIndex >= self.jobmodifyindex
+                )
+                or evaluation.is_blocked()
+            ):
+                self.notifier.notify_eval(evaluation)
+        elif event.topic == EventTopic.Deployment:
+            deployment = nomadlib.Deploy(event.data)
+            if args.all or deployment.JobModifyIndex >= self.jobmodifyindex:
+                self.notifier.notify_deploy(deployment)
+        elif event.topic == EventTopic.Job:
+            if self.db.job:
+                self.dbseenjob = True
+            if (
+                self.job
+                and self.db.job
+                and self.job.ModifyIndex < self.db.job.ModifyIndex
+            ):
+                # self.job follows newest job definition.
+                self.job = self.db.job
 
     def __thread_run(self):
         """Thread entrypoint that handles events from Nomad event stream database"""
@@ -903,32 +917,12 @@ class NomadJobWatcher(ABC):
         no_follow_timeend = time.time() + args.shutdown_timeout
         for events in self.db.events():
             for event in events:
-                if event.topic == EventTopic.Allocation:
-                    alloc = nomadlib.Alloc(event.data)
-                    self.notifier.notify_alloc(alloc)
-                elif event.topic == EventTopic.Evaluation:
-                    evaluation = nomadlib.Eval(event.data)
-                    self.notifier.notify_eval(evaluation)
-                    if self.eval and self.eval.ID == evaluation.ID:
-                        self.eval = evaluation
-                elif event.topic == EventTopic.Deployment:
-                    deployment = nomadlib.Deploy(event.data)
-                    self.notifier.notify_deploy(deployment)
-                elif event.topic == EventTopic.Job:
-                    if self.db.job:
-                        self.dbseenjob = True
-                    if (
-                        self.job
-                        and self.db.job
-                        and self.job.ModifyIndex < self.db.job.ModifyIndex
-                    ):
-                        # self.job follows newest job definition.
-                        self.job = self.db.job
+                self.__handle_event(event)
             if (
                 not self.done.is_set()
                 and not args.follow
-                # Evaluation is finished if was passed.
-                and (self.eval is None or not self.eval.is_pending())
+                # Evaluation is finished if it was passed.
+                and (self.eval is None or not self.eval.is_pending_or_blocked())
                 and (
                     (self.finish_cb() or self.job_is_finished())
                     or (args.no_follow and time.time() > no_follow_timeend)
@@ -989,7 +983,7 @@ class NomadJobWatcher(ABC):
 
     def has_active_evaluations(self):
         for evaluation in self.db.evaluations.values():
-            if evaluation.is_pending():
+            if evaluation.is_pending_or_blocked():
                 return True
         return False
 
@@ -1023,14 +1017,6 @@ class NomadJobWatcher(ABC):
                     self.donemsg = f"{self._job_is_dead_message()} Exiting."
                     return True
         return False
-
-    def is_current_allocation(self, alloc: nomadlib.Alloc) -> bool:
-        """Return True if the allocation is for the current job version"""
-        return self.job is not None and (
-            alloc.get("JobVersion", -1) >= self.job.Version
-            or self.db.evaluations.get(alloc.EvalID, {}).get("JobModifyIndex", -1)
-            >= self.job.JobModifyIndex
-        )
 
     @staticmethod
     def nomad_job_group_main_tasks(group: nomadlib.JobTaskGroup):
@@ -1071,17 +1057,20 @@ class NomadJobWatcher(ABC):
             return False
         groupmsgs: List[str] = []
         for group in self.job.TaskGroups:
-            # Similar logic in db_filter_event_job()
             groupallocs: List[nomadlib.Alloc] = [
                 alloc
                 for alloc in allocations
-                if alloc.TaskGroup == group.Name and self.is_current_allocation(alloc)
+                if alloc.TaskGroup == group.Name
+                and self.db.get_allocation_jobmodifyindex(alloc, -1)
+                >= self.jobmodifyindex
+                and self.db.get_allocation_jobversion(alloc, -1) == self.job.Version
             ]
+            # There have to be at exactly group.Count allocations of this group for it to be deployed.
+            # The allocation not necessarily have to be running - they may have finished.
             if len(groupallocs) != group.Count:
-                # This group has no current allocations,
-                # and no active evaluation and deployments (checked above).
-                log.info(
-                    f"Job {self.job.description()} has failed to start group {group.Name!r}"
+                # This group has no active evaluation and deployments (checked above).
+                log.error(
+                    f"Job {self.job.description()} group {group.Name!r} started only {len(groupallocs)} allocation out of {group.Count}."
                 )
                 return True
             maintasks: Set[str] = self.nomad_job_group_main_tasks(group)
@@ -1096,11 +1085,12 @@ class NomadJobWatcher(ABC):
                 if notrunningmaintasks:
                     # There are main tasks that are not running.
                     if alloc.is_pending_or_running():
+                        # Wait for them.
                         return False
                     else:
                         # The allocation has finished - the tasks will never start.
-                        log.info(
-                            f"Job {self.job.description()} has failed to start group {group.Name!r} tasks {' '.join(notrunningmaintasks)}"
+                        log.error(
+                            f"Job {self.job.description()} failed to start group {group.Name!r} tasks {' '.join(notrunningmaintasks)}"
                         )
                         return True
             groupallocsidsstr = andjoin(alloc.ID[:6] for alloc in groupallocs)

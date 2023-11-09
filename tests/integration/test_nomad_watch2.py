@@ -76,17 +76,20 @@ def test_nomad_watch2_blocked():
     job = "test-blocked"
     for i in "start run".split():
         try:
-            run_nomad_watch(
-                f"{i} -var block=true {testjobs[job]}",
-                pre="timeout 1",
-                check=124,
-                output=[
-                    "Placement Failures",
-                    "Resources exhaused",
-                    "Dimension memory exhaused",
-                ],
-            )
-            run_nomad_watch(f"{i} -var block=false {testjobs[job]}", output=["+ true"])
+            for j in range(2):
+                run_nomad_watch(
+                    f"{i} -var block=true {testjobs[job]}",
+                    pre="timeout 2",
+                    check=124,
+                    output=[
+                        "Placement Failures",
+                        "Resources exhaused",
+                        "Dimension memory exhaused",
+                    ],
+                )
+                run_nomad_watch(
+                    f"{i} -var block=false {testjobs[job]}", output=["+ true"]
+                )
         finally:
             run_nomad_watch(f"-x purge {job}")
 
@@ -137,3 +140,44 @@ def test_nomad_watch2_invalidconfig():
         check=126,
         output=["Failed Validation 3 errors occurred"],
     )
+
+
+def test_nomad_watch2_deploymulti():
+    job = "test-deploymulti"
+    try:
+        pp = run_nomad_watch(f"purge {job}", check=None)
+        run_nomad_watch(
+            f"start {testjobs[job]}",
+            output=[
+                re.compile(r"( Allocation .* started.*){2}", re.MULTILINE | re.DOTALL),
+                re.compile(
+                    "Canaries=0/0 Placed=2 Desired=2 Healthy=2 Unhealthy=0 Deployment completed successfully"
+                ),
+                re.compile("E>[0-9a-fA-F]*>#0>web> .*response"),
+            ],
+        )
+        run_nomad_watch(
+            f"start {testjobs[job]}",
+            output=[
+                re.compile(r"( Allocation .* started.*){2}", re.MULTILINE | re.DOTALL),
+                re.compile(
+                    r"( Allocation .* finished.*){2}",
+                    re.MULTILINE | re.DOTALL,
+                ),
+                re.compile(
+                    "Canaries=1/1 Placed=2 Desired=2 Healthy=2 Unhealthy=0 Deployment completed successfully"
+                ),
+                re.compile("E>[0-9a-fA-F]*>#1>web> .*response"),
+            ],
+        )
+        run_nomad_watch(
+            f"start -var ok=false {testjobs[job]}",
+            output=[
+                "Failed due to unhealthy allocations - rolling back to job",
+                re.compile("E>[0-9a-fA-F]*>#2>web> .*response"),
+            ],
+            check=False,
+        )
+    finally:
+        pass
+        # run_nomad_watch(f"-x purge {job}")
