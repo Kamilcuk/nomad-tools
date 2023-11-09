@@ -128,7 +128,16 @@ class NomadDbJob:
         elif e.topic == EventTopic.Deployment:
             return e.data["ID"] in self.deployments
         elif e.topic == EventTopic.Job:
-            return e.data["Version"] in self.jobversions
+            # Get the first available job ID to compare.
+            jobid = (
+                self.job.ID
+                if self.job is not None
+                else next((job.ID for job in self.jobversions.values()), None)
+            )
+            # Explicitly filter against job ID. Also compare versions.
+            return (jobid is None or e.data["ID"] == jobid) and e.data[
+                "Version"
+            ] in self.jobversions
         return False
 
     def _add_event_to_db(self, e: Event):
@@ -136,7 +145,11 @@ class NomadDbJob:
         if e.topic == EventTopic.Job:
             job = nomadlib.Job(e.data)
             self.jobversions[job.get("Version")] = job
-            self.job = None if e.type == EventType.JobDeregistered else job
+            if e.type == EventType.JobDeregistered:
+                self.job = None
+            elif self.job is None or job.ModifyIndex >= self.job.ModifyIndex:
+                # self.job follows newest modify index.
+                self.job = job
         elif e.topic == EventTopic.Evaluation:
             if e.type == EventType.JobDeregistered:
                 self.job = None
