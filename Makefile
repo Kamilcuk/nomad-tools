@@ -11,3 +11,12 @@ vagrant_test:
 
 vagrant_destroy:
 	vagrant destroy -f
+
+pyright:
+	pyright src/ tests/ $(ARGS)
+
+integration_tests:
+	./integration_tests.sh $(ARGS)
+
+paralell_integration_tests:
+	./integration_tests.sh -n auto $(ARGS)
