@@ -74,8 +74,8 @@ def cycle(config: dict, script: str, env: Dict[str, str] = {}):
     with NamedTemporaryFileContent(json.dumps(config), suffix=".json") as configfile:
         gl = GitlabState(script, configfile, dict(env))
         gl.stage_config()
-        gl.stage_prepare()
         try:
+            gl.stage_prepare()
             with NamedTemporaryFileContent(
                 "#!/bin/bash\nset -xeuo pipefail\n" + script,
                 suffix=".sh",

@@ -896,7 +896,7 @@ def mode_cleanup():
     run_nomad_watch(
         f" {'--purge' if config.purge else ''}"
         f" {'--purge-successful' if config.purge_successful and config.purge is None else ''}"
-        f" -xn0 stop {quote(je.jobname)}"
+        f" -x -n0 stop {quote(je.jobname)}"
     )
 
 
