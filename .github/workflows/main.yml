@@ -38,7 +38,7 @@ jobs:
       - name: run nomad server
         run: bash ./tests/provision.sh nomad_start
       - name: run integration tests
-        run: pytest -sxv tests/integration
+        run: ./integration_tests.sh --durations=10 --cov=nomad_tools -n 4
 
 
   pypi-publish:

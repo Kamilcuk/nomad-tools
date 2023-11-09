@@ -38,6 +38,7 @@ test = [
 	"tomli",
 	"pytest",
 	"pytest-xdist",
+	"pytest-cov",
 ]
 
 
