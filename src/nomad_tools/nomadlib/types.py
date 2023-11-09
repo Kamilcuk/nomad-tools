@@ -4,9 +4,7 @@ import dataclasses
 import datetime
 import enum
 import logging
-import re
-from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, Generic, List, Optional, TypeVar, Union
+from typing import Any, Callable, Dict, List, Optional, TypeVar, Union
 
 import dateutil.parser
 
@@ -339,6 +337,7 @@ class Alloc(DataDict):
     def is_finished(self):
         return not self.is_pending_or_running()
 
+
 class DeploymentStatus(MyStrEnum):
     running = enum.auto()
     paused = enum.auto()
@@ -394,7 +393,7 @@ class Deploy(DataDict):
     TaskGroups: Dict[str, DeploymentTaskGroup]
 
 
-class EventTopic(enum.Enum):
+class EventTopic(MyStrEnum):
     """Topic of an event from Nomad event stream"""
 
     ACLToken = enum.auto()
@@ -446,13 +445,13 @@ R = TypeVar("R")
 
 @dataclasses.dataclass
 class Event:
-    """A single Event as returned from Nomad event stream"""
+    """Parsed Event from Nomad event stream"""
 
     topic: EventTopic
     type: EventType
     data: dict
-    time: Optional[datetime.datetime] = None
     stream: bool = False
+    """Is the event coming from a stream?"""
 
     def __str__(self):
         status = {
@@ -495,52 +494,19 @@ class Event:
 
     def apply(
         self,
-        job: Optional[Callable[[Job], R]] = None,
-        eval: Optional[Callable[[Eval], R]] = None,
-        alloc: Optional[Callable[[Alloc], R]] = None,
-        deploy: Optional[Callable[[Deploy], R]] = None,
+        job: Callable[[Job], R],
+        eval: Callable[[Eval], R],
+        alloc: Callable[[Alloc], R],
+        deploy: Callable[[Deploy], R],
     ) -> R:
-        callbacks = {}
-        if job:
-            callbacks[EventTopic.Job] = lambda data: job(Job(data))
-        if eval:
-            callbacks[EventTopic.Evaluation] = lambda data: eval(Eval(data))
-        if alloc:
-            callbacks[EventTopic.Allocation] = lambda data: alloc(Alloc(data))
-        if deploy:
-            callbacks[EventTopic.Deployment] = lambda data: deploy(Deploy(data))
+        callbacks: Dict[EventTopic, Callable[[dict], R]] = {
+            EventTopic.Job: lambda data: job(Job(data)),
+            EventTopic.Evaluation: lambda data: eval(Eval(data)),
+            EventTopic.Allocation: lambda data: alloc(Alloc(data)),
+            EventTopic.Deployment: lambda data: deploy(Deploy(data)),
+        }
         assert len(callbacks), f"At least one callback has to be specified"
         return callbacks[self.topic](self.data)
-
-
-class EventApplier(ABC, Generic[R]):
-    @abstractmethod
-    def apply_job(self, job: Job) -> R:
-        raise NotImplementedError()
-
-    @abstractmethod
-    def apply_eval(self, eval: Eval) -> R:
-        raise NotImplementedError()
-
-    @abstractmethod
-    def apply_alloc(self, alloc: Alloc) -> R:
-        raise NotImplementedError()
-
-    @abstractmethod
-    def apply_deploy(self, deploy: Deploy) -> R:
-        raise NotImplementedError()
-
-    def apply(self, e: Event) -> R:
-        if e.is_job():
-            return self.apply_job(Job(e.data))
-        elif e.is_alloc():
-            return self.apply_alloc(Alloc(e.data))
-        elif e.is_eval():
-            return self.apply_eval(Eval(e.data))
-        elif e.is_deployment():
-            return self.apply_deploy(Deploy(e.data))
-        else:
-            raise KeyError(f"{e.topic} not handled")
 
 
 class VariableNoItems(DataDict):
