@@ -77,12 +77,25 @@ def get_version():
     return pkg_resources.get_distribution(__package__).version
 
 
-def __print_version(ctx, param, value):
+def __print_version(ctx: click.Context, param: click.Parameter, value: str):
     if not value or ctx.resilient_parsing:
         return
     # Copied from version_option()
     prog_name = ctx.find_root().info_name
     click.echo(f"{prog_name}, version {get_version()}")
+    ctx.exit()
+
+
+def __print_shell_completion(ctx: click.Context, param: click.Parameter, value: str):
+    if not value or ctx.resilient_parsing:
+        return
+    click.echo("This project uses click python module.")
+    click.echo(
+        "See https://click.palletsprojects.com/en/8.1.x/shell-completion/ on how to install completion."
+    )
+    click.echo(f"For bash add the following to ~/.bashrc:")
+    for name in "watch port cp".split():
+        click.echo(f'eval "$(_NOMAD_{name.upper()}_COMPLETE=bash_source nomad-{name})"')
     ctx.exit()
 
 
@@ -96,6 +109,14 @@ def common_options():
             expose_value=False,
             is_eager=True,
             help="Print program version then exit.",
+        ),
+        click.option(
+            "--shell-completion",
+            is_flag=True,
+            callback=__print_shell_completion,
+            expose_value=False,
+            is_eager=True,
+            help="Print shell completion information.",
         ),
     )
 
