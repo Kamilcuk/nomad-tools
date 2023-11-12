@@ -334,8 +334,8 @@ class Alloc(DataDict):
         """The same as TaskStates but returns an empty dict in case the field is None"""
         return self.get("TaskStates") or {}
 
-    def get_tasknames(self):
-        return [k for k in self.get_taskstates().keys()]
+    def get_tasknames(self) -> List[str]:
+        return list(self.get_taskstates().keys())
 
     def is_pending_or_running(self):
         return self.ClientStatus in [
