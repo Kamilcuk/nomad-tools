@@ -348,7 +348,11 @@ class TaskLogger(threading.Thread):
     @staticmethod
     def read_json_stream(stream: requests.Response):
         txt: str = ""
-        for data in stream.iter_content(decode_unicode=True):
+        for dataorbytes in stream.iter_content(decode_unicode=True):
+            try:
+                data: str = dataorbytes.decode()
+            except (UnicodeDecodeError, AttributeError):
+                data: str = dataorbytes
             for c in data:
                 txt += c
                 # Nomad happens to be consistent, the jsons are flat.
