@@ -172,10 +172,21 @@ def mypath_factory(txt: str) -> Mypath:
 ###############################################################################
 
 
-def bash(script: str):
-    cmd = ["bash", "-o", "pipefail", "-c", script]
-    log.debug(f"+ {listquote(cmd)}")
-    subprocess.check_call(cmd)
+def pipe(cmda: str, cmdb: str):
+    """Run a pipe of cmda | cmdb"""
+    arra = shlex.split(cmda)
+    arrb = shlex.split(cmdb)
+    log.debug(f"+ {arrquote(arra)} | {arrquote(arrb)}")
+    with subprocess.Popen(arrb, stdin=subprocess.PIPE) as ps:
+        subprocess.check_call(arra, stdin=subprocess.PIPE, stdout=ps.stdin)
+    if ps.returncode:
+        raise subprocess.CalledProcessError(ps.returncode, ps.args)
+
+
+def run(cmd: str):
+    """Run a command"""
+    log.debug(f"+ {cmd}")
+    subprocess.check_call(shlex.split(cmd), stdin=subprocess.DEVNULL)
 
 
 def get_tar_x_opt():
@@ -193,8 +204,10 @@ def get_tar_x_opt():
 def tarpipe(src: Mypath, dst: Mypath, tar_c: str, tar_x: str):
     global args
     x = get_tar_x_opt()
-    script = f"{src.nomadrun()} tar -cf - {tar_c} | {dst.nomadrun(stdin=1)} tar -{x}f - {tar_x}"
-    bash(script)
+    pipe(
+        f"{src.nomadrun()} tar -cf - {tar_c}",
+        f"{dst.nomadrun(stdin=1)} tar -{x}f - {tar_x}",
+    )
 
 
 def copy_mode(src: Mypath, dst: Mypath):
@@ -267,10 +280,10 @@ def stream_mode(src: Mypath, dst: Mypath):
         log.info(f"Stream stdin -> {args.dest}")
         assert args.dest != "-", "Both operands are '-'"
         x = get_tar_x_opt()
-        bash(f"{dst.nomadrun(stdin=1)} tar -{x}f - -C {dst.quotepath()}")
+        run(f"{dst.nomadrun(stdin=1)} tar -{x}f - -C {dst.quotepath()}")
     elif args.dest == "-":
         log.info(f"Stream {args.source} -> stdout")
-        bash(f"{src.nomadrun()} tar -cf - -C {src.quoteparent()} -- {src.quotename()}")
+        run(f"{src.nomadrun()} tar -cf - -C {src.quoteparent()} -- {src.quotename()}")
     else:
         assert 0, "Internal error - neither source nor dest is equal to -"
 
