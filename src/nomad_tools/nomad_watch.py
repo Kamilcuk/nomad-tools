@@ -553,6 +553,9 @@ class NotifierWorker:
         return alloc.ID in self.workers
 
     def notify_alloc(self, alloc: nomadlib.Alloc):
+        if args.group and not args.group.search(alloc.TaskGroup):
+            return
+        #
         if LOGENABLED.eval:
             evaluation = self.db.evaluations.get(alloc.EvalID)
             if evaluation and self.lineno_key_not_printed(f"{alloc.ID} {alloc.EvalID}"):
@@ -1408,6 +1411,12 @@ Examples:
     "--task",
     type=re.compile,
     help="Only watch tasks names matching this regex.",
+)
+@click.option(
+    "-g",
+    "--group",
+    type=re.compile,
+    help="Only watch group names matching this regex.",
 )
 @click.option(
     "--polling",
