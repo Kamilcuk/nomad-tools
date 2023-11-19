@@ -1083,6 +1083,11 @@ class NomadJobWatcher(ABC):
             # The allocation not necessarily have to be running - they may have finished.
             if len(groupallocs) != group.Count:
                 # This group has no active evaluation and deployments (checked above).
+                log.debug(
+                    f"groupallocs={[x.ID for x in groupallocs]}"
+                    f" {[self.db.get_allocation_jobmodifyindex(alloc, -1) for alloc in groupallocs]}"
+                    f" {[self.db.get_allocation_jobversion(alloc, -1) for alloc in groupallocs]}"
+                )
                 log.error(
                     f"Job {self.job.description()} group {group.Name!r} started {len(groupallocs)} allocation out of {group.Count}."
                 )
