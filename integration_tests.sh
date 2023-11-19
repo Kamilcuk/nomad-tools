@@ -9,4 +9,4 @@ trap_exit() {
 	r docker ps
 }
 trap 'trap_exit' exit
-r pytest -sxv tests/integration "$@"
+r pytest -sxv tests/unit tests/integration "$@"

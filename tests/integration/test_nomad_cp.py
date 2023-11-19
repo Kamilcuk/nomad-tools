@@ -54,7 +54,7 @@ def test_nomad_cp_complete():
         run_nomad_watch("start -", input=hcl.hcl)
         allocid = mynomad.get(f"job/{jobid}/allocations")[0]["ID"]
         task = group = jobid.replace("test-", "")
-        tests = "/t:/tmp ./h:./home h:home /usr/bi:/usr/bin"
+        tests = "/t:/tmp/ ./h:./home/ h:home/ /usr/bi:/usr/bin/"
         for src, dst in (x.split(":") for x in tests.split()):
             assert g(f"{jobid}:{src}") == [dst], f"{src} {dst}"
             assert g(f"{jobid}:{group}:{src}") == [dst], f"{src} {dst}"
@@ -89,7 +89,3 @@ def test_nomad_cp_file():
         run_nomad_cp(f"{jobname}:{nomaddir}/file {hostdir}/file2")
         with Path(f"{hostdir}/file2").open() as f:
             assert f.read() == txt
-
-
-def test_nomad_cp___test():
-    run_nomad_cp("--test")

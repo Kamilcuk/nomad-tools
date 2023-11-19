@@ -529,7 +529,7 @@ def test(ctx, param, value):
     script = """
         set -xeuo pipefail
         cmd="$1"
-        cmd() { "$cmd" -vv "$@"; }
+        cmd() { python -m nomad_tools.nomad_cp -vv "$@"; }
         tmpd=$(mktemp -d)
         trap 'rm -vrf "$tmpd"' EXIT
         mkdir "$tmpd/src" "$tmpd/dst"
