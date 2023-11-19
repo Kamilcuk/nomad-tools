@@ -47,7 +47,7 @@ def test_nomad_watch2_canary():
         run(f"nomad-port {job}", output=[re.compile(r"[0-9\.]+:[0-9]+")])
         run(
             f"nomad-port -l {job}",
-            output=[re.compile(r"[0-9\.]+:[0-9]+ http [^ ]* [^ ]*")],
+            output=[re.compile(r"[0-9\.]+ [0-9]+ http [^ ]* [^ ]*")],
         )
         # This should fail and revert deployment.
         run_nomad_watch(
@@ -61,7 +61,7 @@ def test_nomad_watch2_canary():
         run(f"nomad-port {job}", output=[re.compile(r"[0-9\.]+:[0-9]+")])
         run(
             f"nomad-port -l {job}",
-            output=[re.compile(r"[0-9\.]+:[0-9]+ http [^ ]* [^ ]*")],
+            output=[re.compile(r"[0-9\.]+ [0-9]+ http [^ ]* [^ ]*")],
         )
         run_nomad_watch(f"-x stop {job}")
     finally:
