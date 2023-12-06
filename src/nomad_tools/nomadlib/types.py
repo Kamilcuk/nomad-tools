@@ -140,7 +140,7 @@ class AllocationMetric(DataDict):
         """https://github.com/hashicorp/nomad/blob/484f91b893c6f054e9339f8db6bd157429c2ef20/command/monitor.go#L345"""
         out = []
         if self.NodesEvaluated == 0:
-            out += [f"No nodes were eligible for evaluation"]
+            out += ["No nodes were eligible for evaluation"]
         for dc, available in self.NodesAvailable.items():
             if available == 0:
                 out += [f"No nodes are available in datacenter {dc}"]
@@ -520,7 +520,7 @@ class Event:
             EventTopic.Allocation: lambda data: alloc(Alloc(data)),
             EventTopic.Deployment: lambda data: deploy(Deploy(data)),
         }
-        assert len(callbacks), f"At least one callback has to be specified"
+        assert len(callbacks), "At least one callback has to be specified"
         return callbacks[self.topic](self.data)
 
 

@@ -19,7 +19,7 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from http import client as http_client
-from typing import Dict, Iterable, List, Optional, Pattern, Set, Tuple, TypeVar
+from typing import Dict, List, Optional, Pattern, Set, Tuple, TypeVar
 
 import click
 import requests
@@ -28,6 +28,7 @@ from . import colors, exit_on_thread_exception, nomadlib
 from .common import (
     _complete_set_namespace,
     alias_option,
+    andjoin,
     cached_property,
     common_options,
     complete_job,
@@ -37,7 +38,6 @@ from .common import (
     mynomad,
     namespace_option,
     nomad_find_job,
-    andjoin,
 )
 from .nomaddbjob import NomadDbJob
 from .nomadlib import Event, EventTopic, EventType, MyStrEnum, ns2dt
@@ -149,7 +149,11 @@ def click_log_options():
             "-T",
             "--log-time",
             is_flag=True,
-            help="Additionally add timestamp to the logs. The timestamp of stdout and stderr streams is when the log was received, as Nomad does not store timestamp of task logs.",
+            help="""
+                Additionally add timestamp to the logs.
+                The timestamp of stdout and stderr streams is when the log was received,
+                as Nomad does not store timestamp of task logs.
+                """,
         ),
         click.option(
             "--log-time-format",
@@ -1304,7 +1308,7 @@ class JobPath:
 
 
 @click.group(
-    help=f"""
+    help="""
 Depending on the command, run or stop a Nomad job. Watch over the job and
 print all job allocation events and tasks stdouts and tasks stderrs
 logs. Depending on command, wait for a specific event to happen to finish
@@ -1436,7 +1440,7 @@ def cli(**kwargs):
         (not args.follow and not args.no_follow)
         or (args.follow and not args.no_follow)
         or (not args.follow and args.no_follow)
-    ), f"--follow and --no-follow conflict"
+    ), "--follow and --no-follow conflict"
     #
     global START_NS
     START_NS = time.time_ns()
@@ -1516,7 +1520,7 @@ def cli_command_run_nomad_job_run(name: str, help: str):
 )
 @common_options()
 def mode_alloc(allocid):
-    allocs = mynomad.get(f"allocations", params={"prefix": allocid})
+    allocs = mynomad.get("allocations", params={"prefix": allocid})
     assert len(allocs) > 0, f"Allocation with id {allocid} not found"
     assert len(allocs) < 2, f"Multiple allocations found starting with id {allocid}"
     alloc = nomadlib.Alloc(allocs[0])
@@ -1533,7 +1537,7 @@ def mode_alloc(allocid):
 )
 @common_options()
 def mode_eval(evalid):
-    evaluation = mynomad.get(f"evaluations", params={"prefix": evalid})
+    evaluation = mynomad.get("evaluations", params={"prefix": evalid})
     assert len(evaluation) > 0, f"Evaluation with id {evalid} not found"
     assert len(evaluation) < 2, f"Multiple evaluations found starting with id {evalid}"
     NomadJobWatcherUntilFinished(None, evaluation).run_and_exit()
@@ -1541,7 +1545,7 @@ def mode_eval(evalid):
 
 @cli_command_run_nomad_job_run(
     "run",
-    help=f"Run a Nomad job and then act like stopped mode.",
+    help="Run a Nomad job and then act like stopped mode.",
 )
 def mode_run(cmd: Tuple[str]):
     evaluation = nomad_start_job(cmd)
@@ -1573,7 +1577,7 @@ def mode_job(jobid: str):
 
 
 @cli_command_run_nomad_job_run(
-    "start", help=f"Start a Nomad Job and then act like started command."
+    "start", help="Start a Nomad Job and then act like started command."
 )
 def mode_start(cmd: Tuple[str]):
     evaluation = nomad_start_job(cmd)

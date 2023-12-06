@@ -102,7 +102,7 @@ def __print_shell_completion(ctx: click.Context, param: click.Parameter, value: 
     click.echo(
         "See https://click.palletsprojects.com/en/8.1.x/shell-completion/ on how to install completion."
     )
-    click.echo(f"For bash add the following to ~/.bashrc:")
+    click.echo("For bash add the following to ~/.bashrc:")
     for name in "watch port cp".split():
         click.echo(f'eval "$(_NOMAD_{name.upper()}_COMPLETE=bash_source nomad-{name})"')
     ctx.exit()
