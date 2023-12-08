@@ -11,14 +11,11 @@ description = "Set of tools and utilities to ease interacting with Hashicorp Nom
 readme = "README.md"
 authors = [{name = "Kamil Cukrowski"}]
 license = {text = "GPL-3.0-or-later"}
-dependencies = [
-	"click",
-	"requests",
-	"setuptools",
-	"pyyaml",
-	"python-dateutil",
-]
-dynamic = ["version"]
+dynamic = ["version", "dependencies", "optional-dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+optional-dependencies = {test = { file = ["requirements-test.txt"] }}
 
 [project.urls]
 homepage = "https://github.com/Kamilcuk/nomad-tools"
@@ -32,15 +29,6 @@ nomad-vardir = "nomad_tools:nomad_vardir.cli"
 nomad-gitlab-runner = "nomad_tools:nomad_gitlab_runner.main"
 nomad-port = "nomad_tools:nomad_port.cli"
 #nomadt = "nomad_tools:nomadt.cli"
-
-[project.optional-dependencies]
-test = [
-	"tomli",
-	"pytest",
-	"pytest-xdist",
-	"pytest-cov",
-]
-
 
 [tool.setuptools.package-data]
 "*" = ["*/*.sh"]
