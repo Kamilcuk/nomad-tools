@@ -134,7 +134,8 @@ def print_shell_completion():
         "See https://click.palletsprojects.com/en/8.1.x/shell-completion/ on how to install completion."
     )
     print("For bash-completion, execute the following:")
-    print("  mkdir -p ~/.bash_completion && cd ~/.bash_completion")
+    print("  mkdir -p ~/.local/share/bash-completion/completions")
+    print("  cd ~/.local/share/bash-completion/completions")
     cmds = "nomad-watch nomad-port nomad-cp nomad-vardir nomad-dockers nomadt".split()
     for name in cmds:
         upname = name.upper().replace("-", "_")
