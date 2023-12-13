@@ -418,7 +418,7 @@ class TaskLogger(threading.Thread):
             if e.response and e.response.status_code == 404:
                 self.tk.log_alloc(
                     datetime.datetime.now(),
-                    f"{self.__typestr()} logs were garbage collected from Nomad",
+                    f"Error getting {self.__typestr()} logs: {e.response}",
                 )
             else:
                 raise
@@ -487,8 +487,8 @@ class TaskHandler:
     def stop(self):
         if self.stoptimer:
             self.stoptimer.cancel()
-        for l in self.loggers or []:
-            l.stop()
+        for ll in self.loggers or []:
+            ll.stop()
 
 
 @dataclasses.dataclass
@@ -1036,7 +1036,7 @@ class NomadJobWatcher(ABC):
             or t.Lifecycle is None
             or (
                 t.Lifecycle.Hook == nomadlib.LifecycleHook.prestart
-                and t.Lifecycle.get_sidecar() == True
+                and t.Lifecycle.get_sidecar() is True
             )
             or t.Lifecycle.Hook == nomadlib.LifecycleHook.poststart
         )
