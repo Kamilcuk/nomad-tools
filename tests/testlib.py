@@ -233,3 +233,51 @@ run_nomadt = prefixed_run("python3 -m nomad_tools.nomadt --verbose")
 
 def run_bash(script: str, **kwargs):
     return run(f"bash -o pipefail -euxc {shlex.quote(script)}", **kwargs)
+
+
+###############################################################################
+
+
+@dataclasses.dataclass
+class TestNomadVardir:
+    prefix: str
+
+    def run(
+        self,
+        cmds: str,
+        check: Optional[Union[bool, int, List[int]]] = True,
+        text=True,
+        stdout: Union[bool, int] = False,
+        output: Union[List[str], List[Union[str, re.Pattern]], List[re.Pattern]] = [],
+        input: Optional[str] = None,
+        **kwargs,
+    ):
+        return run_nomad_vardir(
+            f"{self.prefix} {cmds}",
+            check=check,
+            text=text,
+            stdout=stdout,
+            output=output,
+            input=input,
+        )
+
+
+@contextlib.contextmanager
+def Chdir(where: Union[Path, str]):
+    old_cwd = Path.cwd()
+    os.chdir(where)
+    try:
+        yield
+    finally:
+        os.chdir(old_cwd)
+
+
+@contextlib.contextmanager
+def nomad_vardir_test():
+    with tempfile.TemporaryDirectory() as d:
+        with Chdir(d):
+            with tempfile.NamedTemporaryFile() as testf:
+                t = TestNomadVardir(
+                    f"--test {shlex.quote(testf.name)} {shlex.quote(testf.name)}"
+                )
+                yield t

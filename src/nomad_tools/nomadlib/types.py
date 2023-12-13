@@ -53,6 +53,12 @@ class JobTaskLifecycle(DataDict):
         return self.get("Sidecar", False)
 
 
+class JobTaskTemplates(DataDict):
+    EmbeddedTmpl: str
+    LeftDelim: str
+    RightDelim: str
+
+
 class JobTask(DataDict):
     Name: str
     Driver: str
@@ -61,6 +67,7 @@ class JobTask(DataDict):
     Lifecycle: Optional[JobTaskLifecycle] = None
     Env: Optional[Dict[str, str]]
     Services: Optional[List[Any]]
+    Templates: Optional[List[JobTaskTemplates]] = None
 
 
 class JobTaskGroup(DataDict):
@@ -85,7 +92,7 @@ class Job(DataDict):
     ID: str
     Version: int
     Status: str
-    Namespace: str
+    Namespace: Optional[str]
     ModifyIndex: int
     JobModifyIndex: int
     TaskGroups: List[JobTaskGroup]
@@ -535,6 +542,7 @@ class VariableNoItems(DataDict):
 
 class Variable(VariableNoItems):
     Items: Dict[str, str]
+    ModifyIndex: int
 
 
 class VariableNew(DataDict):

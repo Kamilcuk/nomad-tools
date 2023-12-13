@@ -1,6 +1,35 @@
+import re
+import uuid
+
 import pytest
 
 from nomad_tools.nomad_vardir import human_size
+from tests.testlib import nomad_vardir_test, run_bash
+
+
+def test_nomad_vardir_test():
+    with nomad_vardir_test() as t:
+        val = str(uuid.uuid4())
+        # putting works?
+        t.run("ls", output=[re.compile("^$")])
+        run_bash(f"echo {val} > a")
+        t.run("put a")
+        t.run("cat a", output=[f"{val}"])
+        t.run("diff a")
+        t.run("ls", output=[re.compile(r"a +[0-9]+$")])
+        # getting works?
+        run_bash("rm a")
+        t.run("cat a", output=[f"{val}"])
+        t.run("diff a", check=False)
+        t.run("get a")
+        t.run("diff a")
+
+
+def test_nomad_vardir_test2():
+    with nomad_vardir_test() as t:
+        t.run("put a", check=False)
+        t.run("diff", check=False)
+        t.run("get a", check=False)
 
 
 def test_units():
