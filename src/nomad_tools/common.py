@@ -33,8 +33,12 @@ def _complete_set_namespace(ctx: click.Context):
         os.environ["NOMAD_NAMESPACE"] = namespace
 
 
-def completor(cb: Callable[[], Iterable[str]]):
-    def completor_cb(ctx: click.Context, param: str, incomplete: str):
+def completor(
+    cb: Callable[[], Iterable[str]]
+) -> Callable[[click.Context, str, str], Optional[List[str]]]:
+    def completor_cb(
+        ctx: click.Context, param: str, incomplete: str
+    ) -> Optional[List[str]]:
         _complete_set_namespace(ctx)
         try:
             return [x for x in cb() if x.startswith(incomplete)]
@@ -48,7 +52,7 @@ def namespace_option():
     return click.option(
         "-N",
         "--namespace",
-        help="Finds Nomad namespace matching given prefix and sets NOMAD_NAMESPACE environment variable.",
+        help="Set NOMAD_NAMESPACE environment variable.",
         envvar="NOMAD_NAMESPACE",
         show_default=True,
         default="default",
@@ -110,20 +114,7 @@ def __print_version(ctx: click.Context, param: click.Parameter, value: str):
     ctx.exit()
 
 
-def __print_shell_completion(ctx: click.Context, param: click.Parameter, value: str):
-    if not value or ctx.resilient_parsing:
-        return
-    click.echo("This project uses click python module.")
-    click.echo(
-        "See https://click.palletsprojects.com/en/8.1.x/shell-completion/ on how to install completion."
-    )
-    click.echo("For bash add the following to ~/.bashrc:")
-    for name in "watch port cp".split():
-        click.echo(f'eval "$(_NOMAD_{name.upper()}_COMPLETE=bash_source nomad-{name})"')
-    ctx.exit()
-
-
-def common_options():
+def group_common_options():
     return composed(
         click.help_option("-h", "--help"),
         click.option(
@@ -134,10 +125,38 @@ def common_options():
             is_eager=True,
             help="Print program version then exit.",
         ),
+    )
+
+
+def print_shell_completion():
+    print("This project uses click python module.")
+    print(
+        "See https://click.palletsprojects.com/en/8.1.x/shell-completion/ on how to install completion."
+    )
+    print("For bash-completion, execute the following:")
+    print("  mkdir -p ~/.bash_completion && cd ~/.bash_completion")
+    cmds = "nomad-watch nomad-port nomad-cp nomad-vardir nomad-dockers nomadt".split()
+    for name in cmds:
+        upname = name.upper().replace("-", "_")
+        print(f"  echo 'eval \"$(_{upname}_COMPLETE=bash_source {name})\"' > ./{name}")
+
+
+def __print_shell_completion_callback(
+    ctx: click.Context, param: click.Parameter, value: str
+):
+    if not value or ctx.resilient_parsing:
+        return
+    print_shell_completion()
+    ctx.exit()
+
+
+def common_options():
+    return composed(
+        group_common_options(),
         click.option(
             "--shell-completion",
             is_flag=True,
-            callback=__print_shell_completion,
+            callback=__print_shell_completion_callback,
             expose_value=False,
             is_eager=True,
             help="Print shell completion information.",
