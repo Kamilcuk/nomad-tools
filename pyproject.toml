@@ -28,6 +28,7 @@ nomad-cp = "nomad_tools:nomad_cp.cli"
 nomad-vardir = "nomad_tools:nomad_vardir.cli"
 nomad-gitlab-runner = "nomad_tools:nomad_gitlab_runner.main"
 nomad-port = "nomad_tools:nomad_port.cli"
+nomad-dockers = "nomad_tools:nomad_dockers.cli"
 nomadt = "nomad_tools:nomadt.cli"
 
 [tool.setuptools.package-data]
