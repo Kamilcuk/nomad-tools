@@ -1,21 +1,19 @@
 #!/usr/bin/env python3
 
-import argparse
+import dataclasses
 import distutils.spawn
 import json
 import logging
 import os
 import subprocess
 import tempfile
-from itertools import chain
 from pathlib import Path
-from shlex import quote, split
-from typing import Dict
+from shlex import split
+from typing import Dict, List, Optional
 
 import click
 
-from .common import common_options, complete_job, mynomad, namespace_option
-from .nomadlib import VariableNotFound
+from .common import andjoin, common_options, complete_job, mynomad, namespace_option
 from .nomadlib.connection import VariableConflict
 
 log = logging.getLogger(__file__)
@@ -23,144 +21,175 @@ log = logging.getLogger(__file__)
 ###############################################################################
 
 
-def dryrunstr():
-    return "DRYRUN: " if args.dryrun else ""
+@dataclasses.dataclass
+class Arguments:
+    maxsize: float
 
 
-def get_namespace_job_from_nomad_service_file(file: Path):
-    try:
-        with file.open() as f:
-            jobjson = json.load(f)
-    except json.JSONDecodeError:
-        jobjson = json.loads(
-            subprocess.check_output(
-                "nomad job run -output".split() + [str(file)], text=True
-            )
-        )
-    return jobjson["Job"]["Namespace"], jobjson["Job"]["ID"]
-
-
-def create_tree(dir: Path, data: Dict[str, str]):
-    """Create files with pahts as keys from data and content as values from data in directory dir"""
+def create_tree(dir: Path, items: Dict[str, str]):
+    """Create files with paths as keys from data and content as values from data in directory dir"""
     dir.mkdir(parents=True, exist_ok=True)
-    for k, v in data.items():
+    for k, v in items.items():
         p = dir / k
         p.parent.mkdir(parents=True, exist_ok=True)
         with p.open("w+") as f:
             f.write(v)
 
 
+def load_directory(directory: Path) -> Dict[str, str]:
+    files: List[Path] = [x for x in directory.rglob("*") if x.is_file()]
+    limit_mb: float = ARGS.maxsize
+    if limit_mb:
+        for file in files:
+            filesize_mb = int(file.stat().st_size / 1024 / 1024)
+            assert (
+                filesize_mb < limit_mb
+            ), f"{file} size is {filesize_mb} greater than {limit_mb} mb, exiting"
+    return {str(file): file.read_text() for file in files}
+
+
+def show_diff(directory: Path, olditems: Dict[str, str]) -> bool:
+    newitems = load_directory(directory)
+    if distutils.spawn.find_executable("diff"):
+        with tempfile.TemporaryDirectory(prefix="nomad-var-dir_") as tmpd:
+            tmpd = Path(tmpd)
+            create_tree(tmpd / "nomad", olditems)
+            create_tree(tmpd / "local", newitems)
+            cmd = "diff --color -ru nomad local"
+            log.info(f"+ {cmd}")
+            subprocess.run(split(cmd), cwd=tmpd)
+    else:
+        log.error("diff: command not found")
+    return newitems != olditems
+
+
+def dict_keys_str(data: Dict[str, str]) -> str:
+    return " ".join(data.keys())
+
+
 ###############################################################################
 
 
-class NomadVarDirMain:
-    def __init__(self, ctx):
-        global args
-        args = argparse.Namespace(**{**vars(args), **ctx.params})
-        logging.basicConfig(
-            format="%(module)s: %(message)s",
-            level=logging.DEBUG if args.verbose else logging.INFO,
-        )
-        if args.path:
-            assert not args.service, "--service can't be passed with --path"
-            assert not args.job, "--job can't be passed with --path"
-        elif args.service:
-            assert not args.job, "--service can't be passed with --job"
-            args.namespace, args.job = get_namespace_job_from_nomad_service_file(
-                args.service
-            )
-            os.environ["NOMAD_NAMESPACE"] = args.namespace
-        elif args.job:
-            args.path = f"nomad/job/{args.job}"
-        else:
-            assert 0, "One of --path --service or --job has to be given."
-        self.get_old_items()
+@dataclasses.dataclass
+class NomadVariable:
+    path: str
 
-    def get_old_items(self):
+    def put(self, items: Dict[str, str], cas: Optional[int] = None):
+        mynomad.variables.create(self.path, items, cas)
+
+    def get(self) -> Dict[str, str]:
+        return mynomad.variables.read(self.path).Items
+
+    def __str__(self):
+        return f"{self.path}@{os.environ['NOMAD_NAMESPACE']}"
+
+
+@dataclasses.dataclass
+class MockNomadVariableDb:
+    vars: Dict[str, Dict[str, str]] = dataclasses.field(default_factory=dict)
+
+
+@dataclasses.dataclass
+class MockNomadVariable(NomadVariable):
+    db: MockNomadVariableDb
+    path: str
+
+    def put(self, items: Dict[str, str], cas: Optional[int] = None):
+        self.db.vars[self.path] = items
+
+    def get(self) -> Dict[str, str]:
+        return self.db.vars.get(self.path, {})
+
+
+@dataclasses.dataclass
+class MakeNomadVariable:
+    """Convert command line arguments to path"""
+
+    path: Optional[str]
+    service: Optional[Path]
+    job: Optional[str]
+
+    @staticmethod
+    def get_namespace_job_from_nomad_service_file(service: Path):
         try:
-            olditems = mynomad.variables.read(args.path).Items
-        except VariableNotFound:
-            olditems = {}
-        self.olditems: Dict[str, str] = olditems
-        return olditems
+            with service.open() as f:
+                jobjson = json.load(f)
+        except json.JSONDecodeError:
+            jobjson = json.loads(
+                subprocess.check_output(
+                    "nomad job run -output".split() + [str(service)], text=True
+                )
+            )
+        return jobjson["Job"]["Namespace"], jobjson["Job"]["ID"]
 
-    def gen_new_items(self):
-        # Get all files and directories recursively passed by args.paths.
-        files = []
-        for path in args.paths:
-            if path.is_dir():
-                files += (x for x in path.rglob("*") if x.is_file())
+    def make(self) -> NomadVariable:
+        if self.path:
+            assert not self.service, "--service can't be passed with --path"
+            assert not self.job, "--job can't be passed with --path"
+            if "@" in self.path:
+                path, os.environ["NOMAD_NAMESPACE"] = self.path.split("@", 2)
             else:
-                files += [path]
-        # If args.relative, the paths are relative to the directory.
-        if args.relative:
-            os.chdir(args.relative)
-            files = [x.relative_to(args.relative) for x in files]
-        if not args.disable_size_check:
-            limit_mb = 10
-            for file in files:
-                filesize_mb = int(file.stat().st_size / 1024 / 1024)
-                assert (
-                    filesize_mb < limit_mb
-                ), f"{file} size is {filesize_mb} greater than {limit_mb} mb, exiting"
-        self.newitems: Dict[str, str] = {str(file): file.read_text() for file in files}
-        if "D" in args and args.D:
-            assert all("=" in x for x in args.D), "-D options have to be var=value"
-            self.newitems.update({k: v for x in args.D for k, v in x.split("=", 2)})
-        if "clear" in args and not args.clear:
-            self.newitems = {**self.olditems, **self.newitems}
-        return self.newitems
+                path = self.path
+        elif self.service:
+            assert not self.job, "--service can't be passed with --job"
+            (
+                os.environ["NOMAD_NAMESPACE"],
+                job,
+            ) = self.get_namespace_job_from_nomad_service_file(self.service)
+            path = f"nomad/job/{job}"
+        elif self.job:
+            path = f"nomad/job/{self.job}"
+        else:
+            raise Exception("One of --path --service or --job has to be given.")
+        return NomadVariable(path)
 
-    def show_diff_11(self):
-        if not distutils.spawn.find_executable("diff"):
-            log.warning("diff executable not found")
-            return
-        with tempfile.NamedTemporaryFile("w", prefix="nomad-var-dir_") as tmpf:
-            for k in sorted(
-                list(set(chain(self.newitems.keys(), self.olditems.keys())))
-            ):
-                old = self.olditems.get(k, "")
-                tmpf.seek(0)
-                tmpf.write(old)
-                tmpf.flush()
-                #
-                newfile = (
-                    (k if Path(k).exists() else "-")
-                    if k in self.newitems
-                    else subprocess.DEVNULL
-                )
-                stdin = self.newitems[k] if newfile == "-" else None
-                subprocess.run(
-                    split(f"diff --color -u {quote(tmpf.name)} {newfile}"),
-                    input=stdin,
-                    text=True,
-                )
 
-    def show_diff(self) -> bool:
-        newitems = dict(self.newitems)
-        olditems = dict(self.olditems)
-        if distutils.spawn.find_executable("diff"):
-            with tempfile.TemporaryDirectory(prefix="nomad-var-dir_") as tmpd:
-                tmpd = Path(tmpd)
-                create_tree(tmpd / "nomad", olditems)
-                create_tree(tmpd / "local", newitems)
-                cmd = "diff --color -ru nomad local"
-                log.info(f"+ {cmd}")
-                subprocess.run(split(cmd), cwd=tmpd)
-        return newitems != olditems
+FACTORS: list = "B K M G T P E Z Y".split()
+
+
+def human_size(size: str) -> float:
+    assert len(size) > 0
+    try:
+        factoridx = FACTORS.index(size[-1:].upper())
+    except ValueError:
+        return int(size.strip())
+    return 2 ** (10 * factoridx) * float(size[:-1].strip())
 
 
 ###############################################################################
 
 
 @click.group(
-    help="Given a list of files puts the file content into a nomad variable storage.",
-    epilog="Written by Kamil Cukrowski 2023. All right reserved.",
+    help="""
+This is a solution for managing Nomad variables as directories and files.
+Single Nomad variable can be represented as a directory.
+Each file inside the directory represent a JSON key inside the Nomad variable.
+This tool can update and edit the keys in Nomad variables as files.
+
+\b
+Typical workflow would look like the following:
+- create a template to generate a file that you want to upload to nomad variables,
+   - for example an `nginx.conf` configuration,
+- write a makefile that will generate the `nginx.conf` from the template using consul-template,
+- use this script on the directory containing generated `nginx.conf` to upload it to Nomad variables.
+""",
+    epilog="""
+\b
+Examples:
+    nomad-vardir -p nomad/job/nginx@nginx get nginx.conf
+    nomad-vardir -j nginx@nginx get nginx.conf
+    nomad-vardir nginx.nomad.hcl ls
+    nomad-vardir nginx.nomad.hcl diff
+    nomad-vardir nginx.nomad.hcl put
+    nomad-vardir nginx.nomad.hcl get
+
+Written by Kamil Cukrowski 2023. All rights reserved.
+""",
 )
-@click.option("-n", "--dryrun", is_flag=True)
 @click.option("-v", "--verbose", is_flag=True)
 @namespace_option()
-@click.option("-p", "--path", help="The path of the variable to save")
+@common_options()
+@click.option("-p", "--path", help="The first argument is the full path of Nomad variable")
 @click.option(
     "-j",
     "--job",
@@ -168,123 +197,112 @@ class NomadVarDirMain:
     shell_complete=complete_job,
 )
 @click.option(
-    "-s",
-    "--service",
-    type=click.Path(exists=True, dir_okay=False),
+    "-f",
+    "--file",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
     help="Get namespace and job name from this nomad service file",
 )
 @click.option(
-    "--disable-size-check",
-    is_flag=True,
-    help="Disable checking if the file is smaller than 10mb",
+    "--maxsize",
+    default="1M",
+    show_default=True,
+    help=f"""
+        Protect against uploading files greater than this size.
+        Supports following units: {andjoin(FACTORS)}.
+        """,
+    type=human_size,
 )
-@click.pass_context
-@common_options()
-def cli(ctx, **kwargs):
-    global args
-    args = argparse.Namespace(**ctx.params)
+@click.argument("path")
+def cli(
+    path: Optional[str],
+    file: Optional[Path],
+    job: Optional[str],
+    verbose: bool,
+    maxsize: float,
+    **kwargs,
+):
+    logging.basicConfig(
+        format="%(module)s: %(message)s",
+        level=logging.DEBUG if verbose else logging.INFO,
+    )
+    global ARGS
+    ARGS = Arguments(maxsize)
+    global VAR
+    VAR = MakeNomadVariable(path, service, job).make()
 
 
-@cli.command(
-    "put",
-    help="Recursively scan files in given PATHS and upload filenames as key and file content as value to nomad variable store.",
-)
-@click.option("--force", is_flag=True, help="Like nomad var put -force")
-@click.option("--check-index", type=int, help="Like nomad var put -check-index")
-@click.option(
-    "--relative",
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
-    help="Files have paths relative to this directory instead of current working directory",
-)
-@click.option(
-    "-D",
-    "D",
-    type=str,
-    help="Additional var=value to store in nomad variables",
-    multiple=True,
-)
-@click.option("--clear", is_flag=True, help="Remove keys that are not found in files")
-@click.argument(
-    "paths",
-    type=click.Path(exists=True, path_type=Path),
-    nargs=-1,
-)
-@common_options()
-@click.pass_context
-def mode_put(ctx, **kvargs):
-    nvd = NomadVarDirMain(ctx)
-    print(ctx.params)
-    if args.force:
-        assert args.check_index is None, "either --force or --check-index"
-    nvd.gen_new_items()
-    if not nvd.show_diff():
-        log.info("No difference in var {args.path}@{args.namespace}")
-    else:
-        keysstr = " ".join(nvd.newitems.keys())
-        log.info(
-            f"{dryrunstr()}Putting var {args.path}@{args.namespace} with keys: {keysstr}"
-        )
-        if not args.dryrun:
-            try:
-                mynomad.variables.create(
-                    args.path,
-                    nvd.newitems,
-                    cas=args.check_index
-                    if args.check_index is not None
-                    else 0
-                    if not args.force
-                    else None,
-                )
-            except VariableConflict as e:
-                raise Exception(
-                    f"Variable update conflict. Pass --check-index={e.variable.ModifyIndex}"
-                ) from e
+@cli.command("ls")
+def mode_ls():
+    d = VAR.get()
+    w = max(len(k) for k in d.keys())
+    print("{:w} {}".format("name", "size"))
+    for k, v in d.items():
+        print(f"{k:{w}} {len(v)}")
 
 
-@cli.command("diff", help="Show only diff")
-@click.option(
-    "--relative",
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
-    help="Files have paths relative to this directory instead of current working directory",
-)
-@click.argument(
-    "paths",
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
-    nargs=-1,
-)
-@click.pass_context
-@common_options()
-def mode_diff(ctx, **kwargs):
-    nvd = NomadVarDirMain(ctx)
-    nvd.gen_new_items()
-    isdiff = nvd.show_diff()
-    exit(2 if isdiff else 0)
+@cli.command("cat")
+@click.argument("filename")
+def mode_cat(filename):
+    print(VAR.get()[filename])
 
 
 @cli.command(
     "get",
-    help="Get files stored in nomad variables adnd store them in specific directory",
+    help="Get files stored in Nomad variables and store them",
 )
 @click.argument(
-    "dest",
-    type=click.Path(file_okay=False, writable=True, path_type=Path),
+    "paths",
+    type=click.Path(exists=True, file_okay=False, writable=True, path_type=Path),
+    nargs=-1,
 )
-@click.pass_context
+def mode_get(paths: List[Path]):
+    create_tree(destination, VAR.get())
+
+
+@cli.command("diff", help="Show diff between directory and Nomad variable")
+@click.argument(
+    "paths",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    nargs=-1,
+)
 @common_options()
-def mode_get(ctx, **kwargs):
-    nvd = NomadVarDirMain(ctx)
-    #
-    args.dest.mkdir(exist_ok=True, parents=True)
-    for file, content in nvd.olditems.items():
-        file = args.dest / file
-        if file.exists() and file.is_file() and file.read_text() == content:
-            log.info(f"nochange {file}")
-        else:
-            log.info(f"{dryrunstr()}writting {file}")
-            if not args.dryrun:
-                file.parent.mkdir(exist_ok=True, parents=True)
-                with file.open("w+") as f:
-                    f.write(content)
+def mode_diff(directory):
+    exit(2 * show_diff(directory, VAR.get()))
+
+
+@cli.command(
+    "put",
+    help="""
+    Recursively scan files in given PATHS and upload filenames as key and file content as value to nomad variable store.
+    """,
+)
+@click.option("--force", is_flag=True, help="Like nomad var put -force")
+@click.option("--check-index", type=int, help="Like nomad var put -check-index")
+@click.option("--clear", is_flag=True, help="Remove keys that are not found in files")
+@click.argument(
+    "paths",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    nargs=-1,
+)
+def mode_put(force: bool, check_index: Optional[int], clear: bool, directory: Path):
+    if force:
+        assert check_index is None, "either --force or --check-index"
+    olditems = VAR.get()
+    items = {} if clear else dict(olditems)
+    items.update(load_directory(directory))
+    if items == olditems:
+        log.info("No changes in {VAR}")
+    else:
+        log.info(f"Putting var {VAR} with keys: {dict_keys_str(items)}")
+        cas: Optional[int] = (
+            check_index if check_index is not None else 0 if not force else None
+        )
+        try:
+            VAR.put(items, cas)
+        except VariableConflict as e:
+            raise Exception(
+                f"Variable update conflict. Pass --check-index={e.variable.ModifyIndex}"
+            ) from e
 
 
 ###############################################################################
