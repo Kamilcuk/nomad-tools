@@ -1,3 +1,4 @@
+import contextlib
 import dataclasses
 import functools
 import inspect
@@ -108,10 +109,10 @@ def gen_job(
 
 
 def get_testjobs() -> Dict[str, Path]:
-    files = list(Path(f"./jobs/").glob("*.nomad.hcl"))
+    files = list(Path("./jobs/").glob("*.nomad.hcl"))
     assert len(files) > 3
     ret = {f.name[: -len(".nomad.hcl")]: f for f in files}
-    print(ret)
+    # print(ret)
     return ret
 
 
@@ -128,7 +129,7 @@ def get_templatejob(name: str = "", script: str = "") -> JobHcl:
         string.Template(get_testjobs()["test-template"].read_text()).safe_substitute(
             dict(
                 NAME=name,
-                SCRIPT=script.replace("${", "$${").replace("%{", "%%{"),
+                SCRIPT=script.replace("${", "$${").replace("%{", "%%{"),  # }}}}
             )
         ),
     )
@@ -141,6 +142,7 @@ def run(
     stdout: Union[bool, int] = False,
     output: Union[List[str], List[Union[str, re.Pattern]], List[re.Pattern]] = [],
     input: Optional[str] = None,
+    timeout: int = 120,
     **kwargs,
 ) -> subprocess.CompletedProcess:
     """
@@ -153,6 +155,7 @@ def run(
     :param output: an array of strings or patterns to check output of command against
     :param stdout: capture stdout. tru if output is given
     """
+    cmd = f"timeout {timeout} {cmd}"
     cmda: List[str] = []
     for i in shlex.split(cmd):
         if i in "nomad-cp nomad-watch nomad-port".split():
@@ -213,30 +216,20 @@ def run(
     return rr
 
 
-def run_nomad_cp(cmd: str, **kwargs):
-    return run(f"python3 -m nomad_tools.nomad_cp -v {cmd}", **kwargs)
+def prefixed_run(prefix: str):
+    @functools.wraps(run)
+    def inner(cmd: str, *args, **kwargs):
+        return run(f"{prefix} {cmd}", *args, **kwargs)
+
+    return inner
 
 
-def run_nomad_watch(
-    cmd: str,
-    pre: str = "",
-    check: Optional[Union[bool, int, List[int]]] = True,
-    text=True,
-    stdout: Union[bool, int] = False,
-    output: Union[List[str], List[Union[str, re.Pattern]], List[re.Pattern]] = [],
-    input: Optional[str] = None,
-    **kwargs,
-):
-    return run(
-        f"{pre} python3 -m nomad_tools.nomad_watch -v {cmd}",
-        check=check,
-        text=text,
-        stdout=stdout,
-        output=output,
-        input=input,
-        **kwargs,
-    )
+run_nomad_cp = prefixed_run("python3 -m nomad_tools.nomad_cp -v")
+run_nomad_watch = prefixed_run("python3 -m nomad_tools.nomad_watch -v")
+run_nomad_vardir = prefixed_run("python3 -m nomad_tools.nomad_vardir -v")
+run_nomad_dockers = prefixed_run("python3 -m nomad_tools.nomad_dockers")
+run_nomadt = prefixed_run("python3 -m nomad_tools.nomadt --verbose")
 
 
-def run_nomad_vardir(cmd: str, **kwargs):
-    return run(f"python3 -m nomad_tools.nomad_vardir -v {cmd}", **kwargs)
+def run_bash(script: str, **kwargs):
+    return run(f"bash -o pipefail -euxc {shlex.quote(script)}", **kwargs)
