@@ -12,13 +12,23 @@ fatal() {
 
 nomad_install() {
 	if ! hash nomad 2>/dev/null; then
-		wget -O- https://apt.releases.hashicorp.com/gpg |
-			gpg --dearmor |
-			sudo tee /usr/share/keyrings/hashicorp-archive-keyring.gpg >/dev/null
-		echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" |
-			sudo tee /etc/apt/sources.list.d/hashicorp.list
-		sudo apt-get update
-		sudo apt-get install -y --no-install-recommends nomad containernetworking-plugins
+		if hash sudo gpg apt-get 2>/dev/null; then
+			wget -O- https://apt.releases.hashicorp.com/gpg |
+				gpg --dearmor |
+				sudo tee /usr/share/keyrings/hashicorp-archive-keyring.gpg >/dev/null
+			echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" |
+				sudo tee /etc/apt/sources.list.d/hashicorp.list
+			sudo apt-get update
+			sudo apt-get install -y --no-install-recommends nomad containernetworking-plugins
+		else
+			version=$(
+				curl -sS https://releases.hashicorp.com/nomad/ | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+' | sort -V | tail -n1
+			)
+			curl -sS "https://releases.hashicorp.com/nomad/$version/nomad_${version}_linux_amd64.zip" -o nomad.zip
+			unzip nomad.zip
+			mv -v nomad /usr/local/bin
+			rm -v nomad.zip
+		fi
 		if [[ ! -e /opt/cni/bin && -e /usr/lib/cni/ ]]; then
 			mkdir -vp /opt/cni
 			ln -vs /usr/lib/cni/ /opt/cni/bin
