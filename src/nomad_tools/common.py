@@ -73,6 +73,15 @@ def composed(*decs):
     return deco
 
 
+def andjoin(arr: Iterable[Any]) -> str:
+    arr = list(arr)
+    if not len(arr):
+        return ""
+    if len(arr) == 1:
+        return str(arr[0])
+    return ", ".join(str(x) for x in arr[:-1]) + " and " + str(arr[-1])
+
+
 def get_version():
     return pkg_resources.get_distribution(__package__).version
 

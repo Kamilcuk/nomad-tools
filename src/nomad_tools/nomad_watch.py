@@ -37,6 +37,7 @@ from .common import (
     mynomad,
     namespace_option,
     nomad_find_job,
+    andjoin,
 )
 from .nomaddbjob import NomadDbJob
 from .nomadlib import Event, EventTopic, EventType, MyStrEnum, ns2dt
@@ -62,15 +63,6 @@ def set_not_in_add(s: Set[T], value: T) -> bool:
         return False
     s.add(value)
     return True
-
-
-def andjoin(arr: Iterable[str]) -> str:
-    arr = list(arr)
-    if not len(arr):
-        return ""
-    if len(arr) == 1:
-        return arr[0]
-    return ", ".join(arr[:-1]) + " and " + arr[-1]
 
 
 ###############################################################################
