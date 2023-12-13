@@ -228,6 +228,7 @@ run_nomad_cp = prefixed_run("python3 -m nomad_tools.nomad_cp -v")
 run_nomad_watch = prefixed_run("python3 -m nomad_tools.nomad_watch -v")
 run_nomad_vardir = prefixed_run("python3 -m nomad_tools.nomad_vardir -v")
 run_nomad_dockers = prefixed_run("python3 -m nomad_tools.nomad_dockers")
+run_downloadrelease = prefixed_run("python3 -m nomad_tools.bin_downloadrelease")
 run_nomadt = prefixed_run("python3 -m nomad_tools.nomadt --verbose")
 
 
