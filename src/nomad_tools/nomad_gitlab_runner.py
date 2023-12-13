@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import enum
-import functools
 import json
 import logging
 import os
-import pkgutil
 import socket
 import string
 import subprocess
@@ -23,7 +21,14 @@ import click
 import yaml
 
 from . import nomad_watch, nomadlib
-from .common import cached_property, common_options, get_version, mynomad
+from .common import (
+    cached_property,
+    common_options,
+    get_package_file,
+    get_version,
+    mynomad,
+    quotearr,
+)
 from .nomadlib.datadict import DataDict
 from .nomadlib.types import Job, JobTask, JobTaskConfig
 
@@ -31,10 +36,6 @@ from .nomadlib.types import Job, JobTask, JobTaskConfig
 
 NAME = "nomad-gitlab-runner"
 log = logging.getLogger(NAME)
-
-
-def quotearr(cmd: List[str]):
-    return " ".join(quote(x) for x in cmd)
 
 
 def run(cmdstr: str, *args, check=True, quiet=False, **kvargs):
@@ -50,12 +51,8 @@ def run(cmdstr: str, *args, check=True, quiet=False, **kvargs):
         exit(e.returncode)
 
 
-@functools.lru_cache(maxsize=0)
-def get_package_file(file: str) -> str:
-    """Get a file relative to current package"""
-    res = pkgutil.get_data(__package__, "nomad_gitlab_runner/" + file)
-    assert res is not None, f"Could not find {file}"
-    return res.decode()
+def get_gitlab_runner_package_script(file: str):
+    return get_package_file(f"nomad_gitlab_runner/{file}")
 
 
 def get_CUSTOM_ENV() -> Dict[str, str]:
@@ -234,7 +231,7 @@ class ConfigDocker(ConfigCustom):
                     "command": "sh",
                     "args": [
                         "-c",
-                        nomadlib.escape(get_package_file("waiter.sh")),
+                        nomadlib.escape(get_gitlab_runner_package_script("waiter.sh")),
                         "waiter",
                         str(self.wait_for_services_timeout),
                         *[s.alias for s in services],
@@ -433,7 +430,7 @@ class Config(DataDict):
     """The default job constraints."""
     MemoryMaxMB: Optional[int] = None
     """The default job constraints."""
-    script: str = get_package_file("script.sh")
+    script: str = get_gitlab_runner_package_script("script.sh")
     """See https://docs.gitlab.com/runner/executors/custom.html#config"""
     oom_score_adjust: int = 10
     """OOM score adjustment. Positive means kill earlier."""

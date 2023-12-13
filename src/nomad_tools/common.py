@@ -1,7 +1,10 @@
+import functools
 import json
 import logging
 import os
-from typing import Any, Callable, Dict, Generic, Iterable, TypeVar
+import pkgutil
+import shlex
+from typing import Any, Callable, Dict, Generic, Iterable, List, Optional, TypeVar
 
 import click
 import pkg_resources
@@ -60,6 +63,18 @@ def namespace_option():
 
 def complete_job():
     return completor(lambda: (x["ID"] for x in mynomad.get("jobs")))
+
+
+def quotearr(cmd: List[str]):
+    return " ".join(shlex.quote(x) for x in cmd)
+
+
+@functools.lru_cache()
+def get_package_file(file: str) -> str:
+    """Get a file relative to current package"""
+    res = pkgutil.get_data(__package__, file)
+    assert res is not None, f"Could not find {file}"
+    return res.decode()
 
 
 def composed(*decs):

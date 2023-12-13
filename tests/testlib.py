@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import IO, Dict, List, Optional, Union
 
 from nomad_tools import nomadlib
+from nomad_tools.common import quotearr
 
 os.environ.setdefault("NOMAD_NAMESPACE", "default")
 
@@ -131,10 +132,6 @@ def get_templatejob(name: str = "", script: str = "") -> JobHcl:
             )
         ),
     )
-
-
-def quotearr(cmd: List[str]):
-    return " ".join(shlex.quote(x) for x in cmd)
 
 
 def run(
