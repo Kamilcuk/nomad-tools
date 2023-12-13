@@ -26,7 +26,7 @@ jobs:
       - name: checkout
         uses: actions/checkout@v3
       - name: install editable package
-        run: pip install -e '.[test]'
+        run: pip install -e . && pip install -r ./requirements-test.txt
       - name: run pyright
         uses: jakebailey/pyright-action@v1
         with:
