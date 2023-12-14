@@ -33,7 +33,7 @@ nomad-downloadrelease = "nomad_tools:nomad_downloadrelease.cli"
 nomadt = "nomad_tools:nomadt.cli"
 
 [tool.setuptools.package-data]
-"*" = ["*/*.sh"]
+"*" = ["*/*.sh", "*.sh"]
 
 [tool.pytest.ini_options]
 minversion = "6.0"
