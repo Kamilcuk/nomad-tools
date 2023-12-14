@@ -9,7 +9,7 @@ from typing import Set
 
 from click.shell_completion import CompletionItem
 
-from .common import get_package_file, get_version, print_shell_completion, quotearr
+from .common import get_package_file, get_version, quotearr, shell_completion
 
 NOMAD_HELP = """\
 Usage: nomad [-version] [-help] [-autocomplete-(un)install] <command> [args]
@@ -65,11 +65,13 @@ def get_nomad_commands() -> Set[str]:
 def handle_bash_completion():
     """Custom bash completion with same interface as click"""
     arg = os.environ.get("_NOMADT_COMPLETE")
-    if arg is None or arg != "bash_source":
+    if arg is None:
         return
+    if arg != "bash_source":
+        exit()
     script = get_package_file("nomadt_completion.sh")
     print(script)
-    exit(0)
+    exit()
 
 
 ###############################################################################
@@ -172,9 +174,14 @@ def cli():
     )
     parser.add_argument("--version", action="store_true", help="Print version and exit")
     parser.add_argument(
-        "--shell-completion",
+        "--autocomplete-info",
         action="store_true",
         help="Print shell completion information and exit",
+    )
+    parser.add_argument(
+        "--autocomplete-install",
+        action="store_true",
+        help="Install bash shell completion and exit",
     )
     parser.add_argument(
         "--verbose", action="store_true", help="Print the command before executing"
@@ -185,8 +192,11 @@ def cli():
         prog_name = parser.prog
         print(f"{prog_name}, version {get_version()}")
         exit()
-    if args.shell_completion:
-        print_shell_completion()
+    if args.autocomplete_info:
+        shell_completion.print()
+        exit()
+    if args.autocomplete_install:
+        shell_completion.install()
         exit()
     if args.namespace:
         os.environ["NOMAD_NAMESPACE"] = args.namespace

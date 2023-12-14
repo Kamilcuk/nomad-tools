@@ -4,6 +4,9 @@ import logging
 import os
 import pkgutil
 import shlex
+import shutil
+import subprocess
+import sys
 from typing import Any, Callable, Dict, Generic, Iterable, List, Optional, TypeVar
 
 import click
@@ -114,7 +117,75 @@ def __print_version(ctx: click.Context, param: click.Parameter, value: str):
     ctx.exit()
 
 
-def group_common_options():
+def get_entrypoints() -> List[str]:
+    txt = """
+nomadt = "nomad_tools:nomadt.cli"
+nomad-watch = "nomad_tools:nomad_watch.cli"
+nomad-cp = "nomad_tools:nomad_cp.cli"
+nomad-vardir = "nomad_tools:nomad_vardir.cli"
+nomad-gitlab-runner = "nomad_tools:nomad_gitlab_runner.main"
+nomad-port = "nomad_tools:nomad_port.cli"
+nomad-dockers = "nomad_tools:nomad_dockers.cli"
+nomad-downloadrelease = "nomad_tools:bin_downloadrelease.cli"
+"""
+    return [
+        name
+        for line in txt.splitlines()
+        for name in [line.split("=")[0].strip()]
+        if name
+    ]
+
+
+def eprint(*args, **kwargs):
+    print(*args, file=sys.stderr, **kwargs)
+
+
+class shell_completion:
+    @staticmethod
+    def install_script() -> List[str]:
+        dir = "~/.local/share/bash-completion/completions"
+        script: List[str] = []
+        script.append(f"mkdir -vp {dir}")
+        for name in get_entrypoints():
+            upname = name.upper().replace("-", "_")
+            script.append(
+                f"echo 'eval \"$(_{upname}_COMPLETE=bash_source {name})\"' > {dir}/{name}"
+            )
+        return script
+
+    @staticmethod
+    def install():
+        if shutil.which("bash"):
+            for line in shell_completion.install_script():
+                eprint(f"+ {line}")
+                subprocess.check_call(["bash", "-c", line])
+
+    @staticmethod
+    def print():
+        print("This project uses click python module.")
+        print(
+            "See https://click.palletsprojects.com/en/8.1.x/shell-completion/ on how to install completion."
+        )
+        print("For bash-completion, execute the following:")
+        for line in shell_completion.install_script():
+            print(f"   {line}")
+
+    @staticmethod
+    def click_install(ctx: click.Context, param: click.Parameter, value: str):
+        if not value or ctx.resilient_parsing:
+            return
+        shell_completion.install()
+        ctx.exit()
+
+    @staticmethod
+    def click_print(ctx: click.Context, param: click.Parameter, value: str):
+        if not value or ctx.resilient_parsing:
+            return
+        shell_completion.print()
+        ctx.exit()
+
+
+def common_options():
     return composed(
         click.help_option("-h", "--help"),
         click.option(
@@ -125,42 +196,21 @@ def group_common_options():
             is_eager=True,
             help="Print program version then exit.",
         ),
-    )
-
-
-def print_shell_completion():
-    print("This project uses click python module.")
-    print(
-        "See https://click.palletsprojects.com/en/8.1.x/shell-completion/ on how to install completion."
-    )
-    print("For bash-completion, execute the following:")
-    print("  mkdir -p ~/.local/share/bash-completion/completions")
-    print("  cd ~/.local/share/bash-completion/completions")
-    cmds = "nomad-watch nomad-port nomad-cp nomad-vardir nomad-dockers nomadt".split()
-    for name in cmds:
-        upname = name.upper().replace("-", "_")
-        print(f"  echo 'eval \"$(_{upname}_COMPLETE=bash_source {name})\"' > ./{name}")
-
-
-def __print_shell_completion_callback(
-    ctx: click.Context, param: click.Parameter, value: str
-):
-    if not value or ctx.resilient_parsing:
-        return
-    print_shell_completion()
-    ctx.exit()
-
-
-def common_options():
-    return composed(
-        group_common_options(),
         click.option(
-            "--shell-completion",
+            "--autocomplete-info",
             is_flag=True,
-            callback=__print_shell_completion_callback,
+            callback=shell_completion.click_print,
             expose_value=False,
             is_eager=True,
             help="Print shell completion information.",
+        ),
+        click.option(
+            "--autocomplete-install",
+            is_flag=True,
+            callback=shell_completion.click_install,
+            expose_value=False,
+            is_eager=True,
+            help="Install shell completion.",
         ),
     )
 
