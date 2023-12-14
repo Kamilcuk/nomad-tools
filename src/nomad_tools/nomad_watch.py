@@ -1518,7 +1518,6 @@ def cli_command_run_nomad_job_run(name: str, help: str):
     "allocid",
     shell_complete=completor(lambda: (x["ID"] for x in mynomad.get("allocations"))),
 )
-@common_options()
 def mode_alloc(allocid):
     allocs = mynomad.get("allocations", params={"prefix": allocid})
     assert len(allocs) > 0, f"Allocation with id {allocid} not found"
@@ -1535,7 +1534,6 @@ def mode_alloc(allocid):
     "evalid",
     shell_complete=completor(lambda: (x["ID"] for x in mynomad.get("evaluations"))),
 )
-@common_options()
 def mode_eval(evalid):
     evaluation = mynomad.get("evaluations", params={"prefix": evalid})
     assert len(evaluation) > 0, f"Evaluation with id {evalid} not found"
@@ -1570,7 +1568,6 @@ def mode_run(cmd: Tuple[str]):
     help="Alias to stopped command.",
 )
 @cli_jobid
-@common_options()
 def mode_job(jobid: str):
     jobid = nomad_find_job(jobid)
     NomadJobWatcherUntilFinished(jobid).run_and_exit()
@@ -1605,7 +1602,6 @@ Exit with the following status:
 """,
 )
 @cli_jobid
-@common_options()
 def mode_started(jobid: str):
     jobid = nomad_find_job(jobid)
     NomadJobWatcherUntilStarted(jobid).run_and_exit()
@@ -1625,7 +1621,6 @@ def mode_stop_in(jobid: str):
     help="Stop a Nomad job and then act like stopped command.",
 )
 @cli_jobid
-@common_options()
 def mode_stop(jobid: str):
     jobid = nomad_find_job(jobid)
     mode_stop_in(jobid)
@@ -1641,7 +1636,6 @@ The command `-x purge` exits with zero exit status if the job just does not exis
 """,
 )
 @cli_jobid
-@common_options()
 def mode_purge(jobid: str):
     args.purge = True
     try:
@@ -1678,7 +1672,6 @@ In any case, exit with the following exit status:
 """,
 )
 @cli_jobid
-@common_options()
 def mode_stopped(jobid: str):
     jobid = nomad_find_job(jobid)
     NomadJobWatcherUntilFinished(jobid).run_and_exit()
