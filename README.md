@@ -4,15 +4,24 @@ Set of tools and utilities to ease interacting with Hashicorp Nomad scheduling s
 
 ## Table of Contents
 
-- [Installation](#installation)
-- [Usage](#usage)
-  - [nomad-watch](#nomad-watch)
-  - [nomad-vardir](#nomad-vardir)
-  - [nomad-cp](#nomad-cp)
-  - [nomad-gitlab-runner](#nomad-gitlab-runner)
-  - [import nomad_tools](#import-nomad_tools)
-- [Contributing](#contributing)
-- [License](#license)
+<!-- vim-markdown-toc GFM -->
+
+* [Installation](#installation)
+* [Usage](#usage)
+  * [nomadt](#nomadt)
+  * [nomad-watch](#nomad-watch)
+  * [nomad-port](#nomad-port)
+  * [nomad-vardir](#nomad-vardir)
+  * [nomad-cp](#nomad-cp)
+  * [nomad-gitlab-runner](#nomad-gitlab-runner)
+  * [nomad-dockers](#nomad-dockers)
+  * [nomad-port](#nomad-port-1)
+  * [nomad-downloadrelease](#nomad-downloadrelease)
+  * [import nomad_tools](#import-nomad_tools)
+* [Contributing](#contributing)
+* [License](#license)
+
+<!-- vim-markdown-toc -->
 
 # Installation
 
@@ -23,6 +32,56 @@ pipx install nomad-tools
 # Usage
 
 There are the following command line tools installed as part of this package:
+
+## nomadt
+
+
+
+```
++ nomadt --help
+Usage: nomad [-version] [-help] [-autocomplete-(un)install] <command> [args]
+
+Common commands:
+    run         Run a new job or update an existing job
+    stop        Stop a running job
+    status      Display the status output for a resource
+    alloc       Interact with allocations
+    job         Interact with jobs
+    node        Interact with nodes
+    agent       Runs a Nomad agent
+
+Other commands:
+    acl                 Interact with ACL policies and tokens
+    action              Run a pre-defined action from a Nomad task
+    agent-info          Display status information about the local agent
+    config              Interact with configurations
+    deployment          Interact with deployments
+    eval                Interact with evaluations
+    exec                Execute commands in task
+    fmt                 Rewrites Nomad config and job files to canonical format
+    license             Interact with Nomad Enterprise License
+    login               Login to Nomad using an auth method
+    monitor             Stream logs from a Nomad agent
+    namespace           Interact with namespaces
+    operator            Provides cluster-level tools for Nomad operators
+    plugin              Inspect plugins
+    quota               Interact with quotas
+    recommendation      Interact with the Nomad recommendation endpoint
+    scaling             Interact with the Nomad scaling endpoint
+    sentinel            Interact with Sentinel policies
+    server              Interact with servers
+    service             Interact with registered services
+    setup               Interact with setup helpers
+    system              Interact with the system API
+    tls                 Generate Self Signed TLS Certificates for Nomad
+    ui                  Open the Nomad Web UI
+    var                 Interact with variables
+    version             Prints the Nomad version
+    volume              Interact with volumes
+
+```
+
+
 
 ## nomad-watch
 
@@ -58,8 +117,7 @@ Usage: nomad-watch [OPTIONS] COMMAND [ARGS]...
       nomad-watch -N services --task redis -1f job redis
 
 Options:
-  -N, --namespace TEXT            Finds Nomad namespace matching given prefix
-                                  and sets NOMAD_NAMESPACE environment variable.
+  -N, --namespace TEXT            Set NOMAD_NAMESPACE environment variable.
                                   [default: default]
   -a, --all                       Print logs from all allocations, including
                                   previous versions of the job.
@@ -90,6 +148,7 @@ Options:
   --no-follow                     Just run once, get the logs in a best-effort
                                   style and exit.
   -t, --task COMPILE              Only watch tasks names matching this regex.
+  -g, --group COMPILE             Only watch group names matching this regex.
   --polling                       Instead of listening to Nomad event stream,
                                   periodically poll for events.
   -x, --no-preserve-status        Do not preserve tasks exit statuses.
@@ -120,13 +179,15 @@ Options:
                                   else ''}{message}{reset}"
   -h, --help                      Show this message and exit.
   --version                       Print program version then exit.
+  --shell-completion              Print shell completion information.
+  --autocomplete-install          Install shell completion.
 
 Commands:
   alloc    Watch over specific allocation.
   eval     Watch like job mode the job that results from a specific...
   job      Alias to stopped command.
-  purge    Alias to --purge stop.
-  run      Run a Nomad job and then act like started mode.
+  purge    Alias to `--purge stop`, with the following difference in exit...
+  run      Run a Nomad job and then act like stopped mode.
   start    Start a Nomad Job and then act like started command.
   started  Watch a Nomad job until the job is started.
   stop     Stop a Nomad job and then act like stopped command.
@@ -146,8 +207,7 @@ Usage: nomad-watch alloc [OPTIONS] ALLOCID
   filtered.
 
 Options:
-  -h, --help  Show this message and exit.
-  --version   Print program version then exit.
+  --help  Show this message and exit.
 
 ```
 
@@ -160,8 +220,7 @@ Usage: nomad-watch eval [OPTIONS] EVALID
   Watch like job mode the job that results from a specific evaluation.
 
 Options:
-  -h, --help  Show this message and exit.
-  --version   Print program version then exit.
+  --help  Show this message and exit.
 
 ```
 
@@ -171,7 +230,7 @@ Options:
 + nomad-watch run --help
 Usage: nomad-watch run [OPTIONS] [CMD]...
 
-  Run a Nomad job and then act like started mode.            All following
+  Run a Nomad job and then act like stopped mode.            All following
   command arguments are passed to nomad job run command. Note that nomad job run
   has arguments with a single dash.
 
@@ -189,8 +248,7 @@ Usage: nomad-watch job [OPTIONS] JOBID
   Alias to stopped command.
 
 Options:
-  -h, --help  Show this message and exit.
-  --version   Print program version then exit.
+  --help  Show this message and exit.
 
 ```
 
@@ -230,8 +288,7 @@ Usage: nomad-watch started [OPTIONS] JOBID
     3  when job was stopped or job deployment was reverted.
 
 Options:
-  -h, --help  Show this message and exit.
-  --version   Print program version then exit.
+  --help  Show this message and exit.
 
 ```
 
@@ -244,8 +301,7 @@ Usage: nomad-watch stop [OPTIONS] JOBID
   Stop a Nomad job and then act like stopped command.
 
 Options:
-  -h, --help  Show this message and exit.
-  --version   Print program version then exit.
+  --help  Show this message and exit.
 
 ```
 
@@ -255,11 +311,13 @@ Options:
 + nomad-watch purge --help
 Usage: nomad-watch purge [OPTIONS] JOBID
 
-  Alias to --purge stop.
+  Alias to `--purge stop`, with the following difference in exit status. If the
+  option --no-preserve-status is given, then exit with the following status:   0
+  when the job was purged or does not exist from the start. The command `-x
+  purge` exits with zero exit status if the job just does not exists.
 
 Options:
-  -h, --help  Show this message and exit.
-  --version   Print program version then exit.
+  --help  Show this message and exit.
 
 ```
 
@@ -275,7 +333,7 @@ Usage: nomad-watch stopped [OPTIONS] JOBID
   evaluations.
 
   If the option --no-preserve-status is given, then exit with the following status:
-    0    when the job was stopped
+    0    when the job was stopped.
   Otherwise, exit with the following status:
     ?    when the job has one task, with that task exit status,
     0    when all tasks of the job exited with 0 exit status,
@@ -288,8 +346,7 @@ Usage: nomad-watch stopped [OPTIONS] JOBID
     2    when the process was interrupted.
 
 Options:
-  -h, --help  Show this message and exit.
-  --version   Print program version then exit.
+  --help  Show this message and exit.
 
 ```
 
@@ -308,19 +365,27 @@ Usage: nomad-port [OPTIONS] ID [LABEL]
 
   Print dynamic ports allocated by Nomad for a specific job or allocation. If no
   ports are found, exit with 2 exit status. If label argument is given, outputs
-  only redirects that match given label.
+  only redirects which label is equal to given label. Exits with the following
+  exit status:   0  if at least one redirection was found,   1  on python
+  exception, missing job,   2  if no redirections were found.
 
 Options:
-  -f, --format TEXT     The python .format() to print the output with. [default:
-                        '{host}:{port}']
-  -l, --long            Alias to --format='{host}:{port} {label} {Name} {ID}'
-  -s, --separator TEXT  [default:  ]
-  -v, --verbose         Be more verbose.
-  --alloc               The argument is an allocation, not job id
-  --all                 Show all job allocation ports, not only running or
-                        pending allocations.
-  -h, --help            Show this message and exit.
-  --version             Print program version then exit.
+  -f, --format TEXT       The python .format() to print the output with.
+                          [default: '{host}:{port}']
+  -l, --long              Alias to --format='{host} {port} {label} {Name} {ID}'
+  -j, --json              Output a json
+  -s, --separator TEXT    Line separator. [default: newline]
+  -v, --verbose           Be more verbose.
+  --alloc                 The argument is an allocation, not job id
+  --all                   Show all allocation ports, not only running or pending
+                          allocations.
+  -n, --name COMPILE      Show only ports which name matches this regex.
+  -h, --help              Show this message and exit.
+  --version               Print program version then exit.
+  --shell-completion      Print shell completion information.
+  --autocomplete-install  Install shell completion.
+  -N, --namespace TEXT    Set NOMAD_NAMESPACE environment variable.  [default:
+                          default]
 
 ```
 
@@ -336,66 +401,161 @@ Actually there is. You can set the template to be `data = "{{with nomadVar \"nom
 
 ```
 + nomad-vardir --help
-Usage: nomad-vardir [OPTIONS] COMMAND [ARGS]...
+Usage: nomad-vardir [OPTIONS] PATH COMMAND [ARGS]...
 
-  Given a list of files puts the file content into a nomad variable storage.
+  This is a solution for managing Nomad variables as directories and files.
+  Single Nomad variable can be represented as a directory. Each file inside the
+  directory represent a JSON key inside the Nomad variable. This tool can update
+  and edit the keys in Nomad variables as files.
+
+  Typical workflow would look like the following:
+  - create a template to generate a file that you want to upload to nomad variables,
+     - for example an `nginx.conf` configuration,
+  - write a makefile that will generate the `nginx.conf` from the template using consul-template,
+  - use this script on the directory containing generated `nginx.conf` to upload it to Nomad variables.
 
 Options:
-  -n, --dryrun
   -v, --verbose
-  -N, --namespace TEXT  Finds Nomad namespace matching given prefix and sets
-                        NOMAD_NAMESPACE environment variable.  [default:
-                        default]
-  -p, --path TEXT       The path of the variable to save
-  -j, --job TEXT        Equal to --path=nomad/job/<JOB>
-  -s, --service FILE    Get namespace and job name from this nomad service file
-  --disable-size-check  Disable checking if the file is smaller than 10mb
-  -h, --help            Show this message and exit.
-  --version             Print program version then exit.
+  -N, --namespace TEXT      Set NOMAD_NAMESPACE environment variable.  [default:
+                            default]
+  -h, --help                Show this message and exit.
+  --version                 Print program version then exit.
+  --shell-completion        Print shell completion information.
+  --autocomplete-install    Install shell completion.
+  -j, --job                 Prepends the path with nomad/jobs/
+  -f, --jobfile             The path is a Nomad job file rfom which the job name
+                            and namespace is read
+  --maxsize HUMAN_SIZE      Protect against uploading files greater than this
+                            size. Supports following units: B, K, M, G, T, P, E,
+                            Z and Y.  [default: 1M]
+  -C, --relative DIRECTORY  Parse everything relative to this directory
 
 Commands:
-  diff  Show only diff
-  get   Get files stored in nomad variables adnd store them in specific...
-  put   Recursively scan files in given PATHS and upload filenames as key...
+  cat
+  diff  Show diff between directory and Nomad variable
+  get   Get files stored in Nomad variables and store them
+  ls
+  put   Put files in given PATHS and upload filenames as keys and files...
+  rm
 
-  Written by Kamil Cukrowski 2023. All right reserved.
+  Examples:
+      nomad-vardir nomad/jobs/nginx@nginx get nginx.conf
+      nomad-vardir -j nginx@nginx ls
+      nomad-vardir -j nginx@nginx put ./nginx.conf
+      nomad-vardir -j nginx@nginx cat ./nginx.conf
+      nomad-vardir -j nginx@nginx get ./nginx.conf
+      nomad-vardir -j nginx@nginx diff
+      nomad-vardir -j nginx@nginx rm ./nginx.conf
+
+  Written by Kamil Cukrowski 2023. All rights reserved.
 
 ```
 
 
 
 ```
-+ nomad-vardir put --help
-Usage: nomad-vardir put [OPTIONS] [PATHS]...
++ nomad-vardir ls --help
+Usage: nomad-vardir [OPTIONS] PATH COMMAND [ARGS]...
 
-  Recursively scan files in given PATHS and upload filenames as key and file
-  content as value to nomad variable store.
+  This is a solution for managing Nomad variables as directories and files.
+  Single Nomad variable can be represented as a directory. Each file inside the
+  directory represent a JSON key inside the Nomad variable. This tool can update
+  and edit the keys in Nomad variables as files.
+
+  Typical workflow would look like the following:
+  - create a template to generate a file that you want to upload to nomad variables,
+     - for example an `nginx.conf` configuration,
+  - write a makefile that will generate the `nginx.conf` from the template using consul-template,
+  - use this script on the directory containing generated `nginx.conf` to upload it to Nomad variables.
 
 Options:
-  --force                Like nomad var put -force
-  --check-index INTEGER  Like nomad var put -check-index
-  --relative DIRECTORY   Files have paths relative to this directory instead of
-                         current working directory
-  -D TEXT                Additional var=value to store in nomad variables
-  --clear                Remove keys that are not found in files
-  -h, --help             Show this message and exit.
-  --version              Print program version then exit.
+  -v, --verbose
+  -N, --namespace TEXT      Set NOMAD_NAMESPACE environment variable.  [default:
+                            default]
+  -h, --help                Show this message and exit.
+  --version                 Print program version then exit.
+  --shell-completion        Print shell completion information.
+  --autocomplete-install    Install shell completion.
+  -j, --job                 Prepends the path with nomad/jobs/
+  -f, --jobfile             The path is a Nomad job file rfom which the job name
+                            and namespace is read
+  --maxsize HUMAN_SIZE      Protect against uploading files greater than this
+                            size. Supports following units: B, K, M, G, T, P, E,
+                            Z and Y.  [default: 1M]
+  -C, --relative DIRECTORY  Parse everything relative to this directory
+
+Commands:
+  cat
+  diff  Show diff between directory and Nomad variable
+  get   Get files stored in Nomad variables and store them
+  ls
+  put   Put files in given PATHS and upload filenames as keys and files...
+  rm
+
+  Examples:
+      nomad-vardir nomad/jobs/nginx@nginx get nginx.conf
+      nomad-vardir -j nginx@nginx ls
+      nomad-vardir -j nginx@nginx put ./nginx.conf
+      nomad-vardir -j nginx@nginx cat ./nginx.conf
+      nomad-vardir -j nginx@nginx get ./nginx.conf
+      nomad-vardir -j nginx@nginx diff
+      nomad-vardir -j nginx@nginx rm ./nginx.conf
+
+  Written by Kamil Cukrowski 2023. All rights reserved.
 
 ```
 
 
 
 ```
-+ nomad-vardir diff --help
-Usage: nomad-vardir diff [OPTIONS] [PATHS]...
++ nomad-vardir cat --help
+Usage: nomad-vardir [OPTIONS] PATH COMMAND [ARGS]...
 
-  Show only diff
+  This is a solution for managing Nomad variables as directories and files.
+  Single Nomad variable can be represented as a directory. Each file inside the
+  directory represent a JSON key inside the Nomad variable. This tool can update
+  and edit the keys in Nomad variables as files.
+
+  Typical workflow would look like the following:
+  - create a template to generate a file that you want to upload to nomad variables,
+     - for example an `nginx.conf` configuration,
+  - write a makefile that will generate the `nginx.conf` from the template using consul-template,
+  - use this script on the directory containing generated `nginx.conf` to upload it to Nomad variables.
 
 Options:
-  --relative DIRECTORY  Files have paths relative to this directory instead of
-                        current working directory
-  -h, --help            Show this message and exit.
-  --version             Print program version then exit.
+  -v, --verbose
+  -N, --namespace TEXT      Set NOMAD_NAMESPACE environment variable.  [default:
+                            default]
+  -h, --help                Show this message and exit.
+  --version                 Print program version then exit.
+  --shell-completion        Print shell completion information.
+  --autocomplete-install    Install shell completion.
+  -j, --job                 Prepends the path with nomad/jobs/
+  -f, --jobfile             The path is a Nomad job file rfom which the job name
+                            and namespace is read
+  --maxsize HUMAN_SIZE      Protect against uploading files greater than this
+                            size. Supports following units: B, K, M, G, T, P, E,
+                            Z and Y.  [default: 1M]
+  -C, --relative DIRECTORY  Parse everything relative to this directory
+
+Commands:
+  cat
+  diff  Show diff between directory and Nomad variable
+  get   Get files stored in Nomad variables and store them
+  ls
+  put   Put files in given PATHS and upload filenames as keys and files...
+  rm
+
+  Examples:
+      nomad-vardir nomad/jobs/nginx@nginx get nginx.conf
+      nomad-vardir -j nginx@nginx ls
+      nomad-vardir -j nginx@nginx put ./nginx.conf
+      nomad-vardir -j nginx@nginx cat ./nginx.conf
+      nomad-vardir -j nginx@nginx get ./nginx.conf
+      nomad-vardir -j nginx@nginx diff
+      nomad-vardir -j nginx@nginx rm ./nginx.conf
+
+  Written by Kamil Cukrowski 2023. All rights reserved.
 
 ```
 
@@ -403,13 +563,215 @@ Options:
 
 ```
 + nomad-vardir get --help
-Usage: nomad-vardir get [OPTIONS] DEST
+Usage: nomad-vardir [OPTIONS] PATH COMMAND [ARGS]...
 
-  Get files stored in nomad variables adnd store them in specific directory
+  This is a solution for managing Nomad variables as directories and files.
+  Single Nomad variable can be represented as a directory. Each file inside the
+  directory represent a JSON key inside the Nomad variable. This tool can update
+  and edit the keys in Nomad variables as files.
+
+  Typical workflow would look like the following:
+  - create a template to generate a file that you want to upload to nomad variables,
+     - for example an `nginx.conf` configuration,
+  - write a makefile that will generate the `nginx.conf` from the template using consul-template,
+  - use this script on the directory containing generated `nginx.conf` to upload it to Nomad variables.
 
 Options:
-  -h, --help  Show this message and exit.
-  --version   Print program version then exit.
+  -v, --verbose
+  -N, --namespace TEXT      Set NOMAD_NAMESPACE environment variable.  [default:
+                            default]
+  -h, --help                Show this message and exit.
+  --version                 Print program version then exit.
+  --shell-completion        Print shell completion information.
+  --autocomplete-install    Install shell completion.
+  -j, --job                 Prepends the path with nomad/jobs/
+  -f, --jobfile             The path is a Nomad job file rfom which the job name
+                            and namespace is read
+  --maxsize HUMAN_SIZE      Protect against uploading files greater than this
+                            size. Supports following units: B, K, M, G, T, P, E,
+                            Z and Y.  [default: 1M]
+  -C, --relative DIRECTORY  Parse everything relative to this directory
+
+Commands:
+  cat
+  diff  Show diff between directory and Nomad variable
+  get   Get files stored in Nomad variables and store them
+  ls
+  put   Put files in given PATHS and upload filenames as keys and files...
+  rm
+
+  Examples:
+      nomad-vardir nomad/jobs/nginx@nginx get nginx.conf
+      nomad-vardir -j nginx@nginx ls
+      nomad-vardir -j nginx@nginx put ./nginx.conf
+      nomad-vardir -j nginx@nginx cat ./nginx.conf
+      nomad-vardir -j nginx@nginx get ./nginx.conf
+      nomad-vardir -j nginx@nginx diff
+      nomad-vardir -j nginx@nginx rm ./nginx.conf
+
+  Written by Kamil Cukrowski 2023. All rights reserved.
+
+```
+
+
+
+```
++ nomad-vardir diff --help
+Usage: nomad-vardir [OPTIONS] PATH COMMAND [ARGS]...
+
+  This is a solution for managing Nomad variables as directories and files.
+  Single Nomad variable can be represented as a directory. Each file inside the
+  directory represent a JSON key inside the Nomad variable. This tool can update
+  and edit the keys in Nomad variables as files.
+
+  Typical workflow would look like the following:
+  - create a template to generate a file that you want to upload to nomad variables,
+     - for example an `nginx.conf` configuration,
+  - write a makefile that will generate the `nginx.conf` from the template using consul-template,
+  - use this script on the directory containing generated `nginx.conf` to upload it to Nomad variables.
+
+Options:
+  -v, --verbose
+  -N, --namespace TEXT      Set NOMAD_NAMESPACE environment variable.  [default:
+                            default]
+  -h, --help                Show this message and exit.
+  --version                 Print program version then exit.
+  --shell-completion        Print shell completion information.
+  --autocomplete-install    Install shell completion.
+  -j, --job                 Prepends the path with nomad/jobs/
+  -f, --jobfile             The path is a Nomad job file rfom which the job name
+                            and namespace is read
+  --maxsize HUMAN_SIZE      Protect against uploading files greater than this
+                            size. Supports following units: B, K, M, G, T, P, E,
+                            Z and Y.  [default: 1M]
+  -C, --relative DIRECTORY  Parse everything relative to this directory
+
+Commands:
+  cat
+  diff  Show diff between directory and Nomad variable
+  get   Get files stored in Nomad variables and store them
+  ls
+  put   Put files in given PATHS and upload filenames as keys and files...
+  rm
+
+  Examples:
+      nomad-vardir nomad/jobs/nginx@nginx get nginx.conf
+      nomad-vardir -j nginx@nginx ls
+      nomad-vardir -j nginx@nginx put ./nginx.conf
+      nomad-vardir -j nginx@nginx cat ./nginx.conf
+      nomad-vardir -j nginx@nginx get ./nginx.conf
+      nomad-vardir -j nginx@nginx diff
+      nomad-vardir -j nginx@nginx rm ./nginx.conf
+
+  Written by Kamil Cukrowski 2023. All rights reserved.
+
+```
+
+
+
+```
++ nomad-vardir rm --help
+Usage: nomad-vardir [OPTIONS] PATH COMMAND [ARGS]...
+
+  This is a solution for managing Nomad variables as directories and files.
+  Single Nomad variable can be represented as a directory. Each file inside the
+  directory represent a JSON key inside the Nomad variable. This tool can update
+  and edit the keys in Nomad variables as files.
+
+  Typical workflow would look like the following:
+  - create a template to generate a file that you want to upload to nomad variables,
+     - for example an `nginx.conf` configuration,
+  - write a makefile that will generate the `nginx.conf` from the template using consul-template,
+  - use this script on the directory containing generated `nginx.conf` to upload it to Nomad variables.
+
+Options:
+  -v, --verbose
+  -N, --namespace TEXT      Set NOMAD_NAMESPACE environment variable.  [default:
+                            default]
+  -h, --help                Show this message and exit.
+  --version                 Print program version then exit.
+  --shell-completion        Print shell completion information.
+  --autocomplete-install    Install shell completion.
+  -j, --job                 Prepends the path with nomad/jobs/
+  -f, --jobfile             The path is a Nomad job file rfom which the job name
+                            and namespace is read
+  --maxsize HUMAN_SIZE      Protect against uploading files greater than this
+                            size. Supports following units: B, K, M, G, T, P, E,
+                            Z and Y.  [default: 1M]
+  -C, --relative DIRECTORY  Parse everything relative to this directory
+
+Commands:
+  cat
+  diff  Show diff between directory and Nomad variable
+  get   Get files stored in Nomad variables and store them
+  ls
+  put   Put files in given PATHS and upload filenames as keys and files...
+  rm
+
+  Examples:
+      nomad-vardir nomad/jobs/nginx@nginx get nginx.conf
+      nomad-vardir -j nginx@nginx ls
+      nomad-vardir -j nginx@nginx put ./nginx.conf
+      nomad-vardir -j nginx@nginx cat ./nginx.conf
+      nomad-vardir -j nginx@nginx get ./nginx.conf
+      nomad-vardir -j nginx@nginx diff
+      nomad-vardir -j nginx@nginx rm ./nginx.conf
+
+  Written by Kamil Cukrowski 2023. All rights reserved.
+
+```
+
+
+
+```
++ nomad-vardir put --help
+Usage: nomad-vardir [OPTIONS] PATH COMMAND [ARGS]...
+
+  This is a solution for managing Nomad variables as directories and files.
+  Single Nomad variable can be represented as a directory. Each file inside the
+  directory represent a JSON key inside the Nomad variable. This tool can update
+  and edit the keys in Nomad variables as files.
+
+  Typical workflow would look like the following:
+  - create a template to generate a file that you want to upload to nomad variables,
+     - for example an `nginx.conf` configuration,
+  - write a makefile that will generate the `nginx.conf` from the template using consul-template,
+  - use this script on the directory containing generated `nginx.conf` to upload it to Nomad variables.
+
+Options:
+  -v, --verbose
+  -N, --namespace TEXT      Set NOMAD_NAMESPACE environment variable.  [default:
+                            default]
+  -h, --help                Show this message and exit.
+  --version                 Print program version then exit.
+  --shell-completion        Print shell completion information.
+  --autocomplete-install    Install shell completion.
+  -j, --job                 Prepends the path with nomad/jobs/
+  -f, --jobfile             The path is a Nomad job file rfom which the job name
+                            and namespace is read
+  --maxsize HUMAN_SIZE      Protect against uploading files greater than this
+                            size. Supports following units: B, K, M, G, T, P, E,
+                            Z and Y.  [default: 1M]
+  -C, --relative DIRECTORY  Parse everything relative to this directory
+
+Commands:
+  cat
+  diff  Show diff between directory and Nomad variable
+  get   Get files stored in Nomad variables and store them
+  ls
+  put   Put files in given PATHS and upload filenames as keys and files...
+  rm
+
+  Examples:
+      nomad-vardir nomad/jobs/nginx@nginx get nginx.conf
+      nomad-vardir -j nginx@nginx ls
+      nomad-vardir -j nginx@nginx put ./nginx.conf
+      nomad-vardir -j nginx@nginx cat ./nginx.conf
+      nomad-vardir -j nginx@nginx get ./nginx.conf
+      nomad-vardir -j nginx@nginx diff
+      nomad-vardir -j nginx@nginx rm ./nginx.conf
+
+  Written by Kamil Cukrowski 2023. All rights reserved.
 
 ```
 
@@ -429,31 +791,38 @@ Usage: nomad-cp [OPTIONS] SOURCE DEST
   Copy files/folders between a nomad allocation and the local filesystem. Use
   '-' as the source to read a tar archive from stdin and extract it to a
   directory destination in a container. Use '-' as the destination to stream a
-  tar archive of a container source to stdout.
+  tar archive of a container source to stdout. The logic mimics docker cp.
 
   Both source and dest take one of the forms:
-      ALLOCATION:SRC_PATH
-      JOB:SRC_PATH
-      JOB@TASK:SRC_PATH
-      SRC_PATH
-      -
+     :ALLOCATION:SRC_PATH
+     :ALLOCATION:TASK:SRC_PATH
+     :ALLOCATION:GROUP:TASK:SRC_PATH
+     JOB:SRC_PATH
+     JOB:TASK:SRC_PATH
+     JOB:GROUP:TASK:SRC_PATH
+     SRC_PATH
+     -
+
+  To use colon in any part of the part, escape it with backslash.
 
   Examples:
-    {log.name} -n 9190d781:/tmp ~/tmp
-    {log.name} -vn -Nservices -job promtail:/. ~/tmp
+      nomad-cp -n :9190d781:/tmp ~/tmp
+      nomad-cp -vn -Nservices promtail:/. ~/tmp
 
 Options:
-  -n, --dry-run                   Do tar -vt for unpacking. Usefull for listing
-                                  files for debugging.
+  -n, --dry-run           Do tar -vt for unpacking. Usefull for listing files
+                          for debugging.
   -v, --verbose
-  -N, -namespace, --namespace TEXT
-                                  Nomad namespace
-  -a, --archive                   Archive mode (copy all uid/gid information)
-  -j, -job, --job                 Use a **random** allocation from the specified
-                                  job ID.
-  --test                          Run tests
-  -h, --help                      Show this message and exit.
-  --version                       Print program version then exit.
+  -N, --namespace TEXT    Set NOMAD_NAMESPACE environment variable.  [default:
+                          default]
+  -a, --archive           Archive mode (copy all uid/gid information)
+  --test                  Run tests
+  -N, --namespace TEXT    Set NOMAD_NAMESPACE environment variable.  [default:
+                          default]
+  -h, --help              Show this message and exit.
+  --version               Print program version then exit.
+  --shell-completion      Print shell completion information.
+  --autocomplete-install  Install shell completion.
 
   Written by Kamil Cukrowski 2023. Licensed under GNU GPL version or later.
 
@@ -465,7 +834,7 @@ TODO:
 - Better job searching function.
 - Allow specifying task within a job by name instead of allocation name. Refactor options.
 
-### nomad-gitlab-runner
+## nomad-gitlab-runner
 
 Custom gitlab executor driver on Nomad.
 
@@ -590,6 +959,8 @@ Options:
                            of the runner being used.
   -h, --help               Show this message and exit.
   --version                Print program version then exit.
+  --shell-completion       Print shell completion information.
+  --autocomplete-install   Install shell completion.
 
 Commands:
   cleanup     https://docs.gitlab.com/runner/executors/custom.html#cleanup
@@ -669,7 +1040,94 @@ Options:
 
 
 
-### import nomad_tools
+## nomad-dockers
+
+
+
+```
++ nomad-dockers --help
+Usage: nomad-dockers [OPTIONS] JOB
+
+  List all docker images referenced by the service file. Typically used to
+  download or test the images like nomad-dockers ./file.nomad.hcl | xargs docker
+  pull.
+
+Options:
+  -h, --help              Show this message and exit.
+  --version               Print program version then exit.
+  --shell-completion      Print shell completion information.
+  --autocomplete-install  Install shell completion.
+  -l, --long
+  -j, --job               The argument is not a file, but a job name
+
+```
+
+
+
+## nomad-port
+
+
+
+```
++ nomad-port --help
+Usage: nomad-port [OPTIONS] ID [LABEL]
+
+  Print dynamic ports allocated by Nomad for a specific job or allocation. If no
+  ports are found, exit with 2 exit status. If label argument is given, outputs
+  only redirects which label is equal to given label. Exits with the following
+  exit status:   0  if at least one redirection was found,   1  on python
+  exception, missing job,   2  if no redirections were found.
+
+Options:
+  -f, --format TEXT       The python .format() to print the output with.
+                          [default: '{host}:{port}']
+  -l, --long              Alias to --format='{host} {port} {label} {Name} {ID}'
+  -j, --json              Output a json
+  -s, --separator TEXT    Line separator. [default: newline]
+  -v, --verbose           Be more verbose.
+  --alloc                 The argument is an allocation, not job id
+  --all                   Show all allocation ports, not only running or pending
+                          allocations.
+  -n, --name COMPILE      Show only ports which name matches this regex.
+  -h, --help              Show this message and exit.
+  --version               Print program version then exit.
+  --shell-completion      Print shell completion information.
+  --autocomplete-install  Install shell completion.
+  -N, --namespace TEXT    Set NOMAD_NAMESPACE environment variable.  [default:
+                          default]
+
+```
+
+
+
+## nomad-downloadrelease
+
+
+
+```
++ nomad-downloadrelease --help
+Usage: nomad-downloadrelease [OPTIONS] TOOL [DESTINATION]
+
+  Download specific binary from releases.hashicorp
+  Examples:
+      %(prog) nomad ./bin/nomad
+      %(prog) consul ./bin/consul
+
+Options:
+  --verbose
+  -p, --pinversion TEXT  Use this version instead of autodetecting latest
+  --os TEXT              Use this operating system instead of host  [default:
+                         linux]
+  -a, --arch TEXT        Use this architecture instead of host  [default: amd64]
+  --suffix TEXT          When searching for latest version, only get versions
+                         with this suffix
+  --ent                  Equal to --suffix=+ent
+  --help                 Show this message and exit.
+
+```
+
+
+## import nomad_tools
 
 The internal API is not at all stable and is an implementation detail as of now. `nomadlib` is internal python library that implements wrappers around some Nomad API responses and a connection to Nomad using requests. It automatically transfers from dictionary into Python object fields and back using a custom wrapper object. The API is extensible and is not full, just basic fields. Pull requests are welcome.
 

@@ -4,15 +4,24 @@ Set of tools and utilities to ease interacting with Hashicorp Nomad scheduling s
 
 ## Table of Contents
 
-- [Installation](#installation)
-- [Usage](#usage)
-  - [nomad-watch](#nomad-watch)
-  - [nomad-vardir](#nomad-vardir)
-  - [nomad-cp](#nomad-cp)
-  - [nomad-gitlab-runner](#nomad-gitlab-runner)
-  - [import nomad_tools](#import-nomad_tools)
-- [Contributing](#contributing)
-- [License](#license)
+<!-- vim-markdown-toc GFM -->
+
+* [Installation](#installation)
+* [Usage](#usage)
+  * [nomadt](#nomadt)
+  * [nomad-watch](#nomad-watch)
+  * [nomad-port](#nomad-port)
+  * [nomad-vardir](#nomad-vardir)
+  * [nomad-cp](#nomad-cp)
+  * [nomad-gitlab-runner](#nomad-gitlab-runner)
+  * [nomad-dockers](#nomad-dockers)
+  * [nomad-port](#nomad-port-1)
+  * [nomad-downloadrelease](#nomad-downloadrelease)
+  * [import nomad_tools](#import-nomad_tools)
+* [Contributing](#contributing)
+* [License](#license)
+
+<!-- vim-markdown-toc -->
 
 # Installation
 
@@ -23,6 +32,10 @@ pipx install nomad-tools
 # Usage
 
 There are the following command line tools installed as part of this package:
+
+## nomadt
+
+${nomadt}
 
 ## nomad-watch
 
@@ -62,13 +75,24 @@ TODO:
 - Better job searching function.
 - Allow specifying task within a job by name instead of allocation name. Refactor options.
 
-### nomad-gitlab-runner
+## nomad-gitlab-runner
 
 Custom gitlab executor driver on Nomad.
 
 ${nomad_gitlab_runner}
 
-### import nomad_tools
+## nomad-dockers
+
+${nomad_dockers}
+
+## nomad-port
+
+${nomad_port}
+
+## nomad-downloadrelease
+
+${nomad_downloadrelease}
+## import nomad_tools
 
 The internal API is not at all stable and is an implementation detail as of now. `nomadlib` is internal python library that implements wrappers around some Nomad API responses and a connection to Nomad using requests. It automatically transfers from dictionary into Python object fields and back using a custom wrapper object. The API is extensible and is not full, just basic fields. Pull requests are welcome.
 

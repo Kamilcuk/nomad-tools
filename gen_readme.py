@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 
 import dataclasses
+import importlib
+import stat
 import string
+import subprocess
 from pathlib import Path
 from typing import Any, List
 
 import click
 from click.testing import CliRunner
 
-from nomad_tools import nomad_cp, nomad_gitlab_runner, nomad_vardir, nomad_watch, nomad_port
+from nomad_tools.common import get_entrypoints
 
 runner = CliRunner()
 
@@ -44,6 +47,15 @@ class Command:
 """
 
     def run(self):
+        if self.key() == "nomadt":
+            return f"""
+
+```
++ {self.cmdname()} --help
+{subprocess.check_output("nomad --help".split(), text=True)}
+```
+
+"""
         ret = self.gen()
         for cmd in subcommands(self.obj.cli):
             ret += self.gen(cmd)
@@ -54,13 +66,8 @@ if __name__ == "__main__":
     dir = Path(__file__).parent
     # Generate help strings
     template_parameters = {}
-    for i in [
-        nomad_watch,
-        nomad_gitlab_runner,
-        nomad_cp,
-        nomad_vardir,
-        nomad_port,
-    ]:
+    for e in get_entrypoints():
+        i = importlib.import_module(f"nomad_tools.{e.replace('-', '_')}")
         p = Command(i)
         template_parameters[p.key()] = p.run()
     # Generate template.
@@ -69,10 +76,13 @@ if __name__ == "__main__":
     out = string.Template(template).safe_substitute(template_parameters)
     # Output
     outputfile = dir / "README.md"
+    outputfile.chmod(outputfile.stat().st_mode & ~stat.S_IWRITE)
     with outputfile.open() as f:
         if out == f.read():
             print("NO DIFFERENCE")
             exit()
+    outputfile.chmod(outputfile.stat().st_mode | stat.S_IWRITE)
     with outputfile.open("w") as f:
         print(out, end="", file=f)
+    outputfile.chmod(outputfile.stat().st_mode & ~stat.S_IWRITE)
     print(f"Written {len(out.splitlines())} lines to {outputfile}")
