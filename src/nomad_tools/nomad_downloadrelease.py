@@ -13,6 +13,8 @@ from zipfile import ZipFile
 import click
 import requests
 
+from .common_click import common_options
+
 log = logging.getLogger(__name__)
 
 
@@ -68,7 +70,7 @@ Examples:
 )
 @click.argument(
     "destination",
-    type=click.Path(file_okay=False, writable=True, path_type=Path),
+    type=click.Path(writable=True, path_type=Path),
     default=Path("."),
 )
 @click.option(
@@ -77,6 +79,7 @@ Examples:
     help="When searching for latest version, only get versions with this suffix",
 )
 @click.option("--ent", is_flag=True, help="Equal to --suffix=+ent")
+@common_options()
 def cli(
     pinversion: Optional[str],
     arch: str,
@@ -118,7 +121,8 @@ def cli(
         pinversion = f"{vv.a}.{vv.b}.{vv.c}{vv.suff}"
     #
     zipurl = f"{url}/{pinversion}/{tool}_{pinversion}_{os.lower()}_{arch.lower()}.zip"
-    destfile = destination / tool
+    destfile: Path = destination / tool if destination.is_dir() else destination
+    destfile.parent.mkdir(parents=True, exist_ok=True)
     log.info(f"Downloading {zipurl} to {destfile}")
     with requests.get(zipurl, stream=True) as stream:
         with ZipFile(io.BytesIO(stream.content)) as zipf:
