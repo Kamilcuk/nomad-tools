@@ -26,15 +26,15 @@ import requests
 
 from . import colors, exit_on_thread_exception, nomadlib
 from .common import (
-    _complete_set_namespace,
-    alias_option,
     andjoin,
     cached_property,
+    composed,
+    json_loads,
+    complete_set_namespace,
+    alias_option,
     common_options,
     complete_job,
     completor,
-    composed,
-    json_loads,
     mynomad,
     namespace_option,
     nomad_find_job,
@@ -1274,7 +1274,7 @@ class JobPath:
 
     @staticmethod
     def complete(ctx: click.Context, _: str, incomplete: str) -> List[str]:
-        _complete_set_namespace(ctx)
+        complete_set_namespace(ctx)
         try:
             jobs = mynomad.get("jobs")
         except requests.HTTPError:

@@ -2,14 +2,16 @@
 
 import argparse
 import os
-import shutil
-import subprocess
-import sys
 from typing import Set
 
-from click.shell_completion import CompletionItem
-
-from .common import get_package_file, get_version, quotearr, shell_completion
+from .common_base import (
+    NOMAD_NAMESPACE,
+    eprint,
+    get_package_file,
+    print_version,
+    quotearr,
+    shell_completion,
+)
 
 NOMAD_HELP = """\
 Usage: nomad [-version] [-help] [-autocomplete-(un)install] <command> [args]
@@ -74,91 +76,6 @@ def handle_bash_completion():
     exit()
 
 
-###############################################################################
-
-
-def get_additional_commands() -> Set[str]:
-    """
-    Search all executables in PATH environment variable and returns a List[str] of executables starting with prefix.
-    """
-    path_env = os.environ.get("PATH", os.defpath)
-    executables = set()
-    prefix = "nomad-"
-    for path in path_env.split(os.pathsep):
-        try:
-            for file in os.listdir(path):
-                if file.startswith(prefix):
-                    executables.add(file.lstrip(prefix))
-        except FileNotFoundError:
-            pass
-    return executables
-
-
-def __click_complete_cmd(ctx, param, incomplete):
-    """unused"""
-    BashComplete_source_template = """\
-        %(complete_func)s() {
-            local IFS=$'\\n'
-            local response
-            response=$(env COMP_WORDS="${COMP_WORDS[*]}" COMP_CWORD="$COMP_CWORD" %(complete_var)s=bash_complete $1)
-            for completion in $response; do
-                IFS=',' read type value <<< "$completion"
-                case $type in
-                dir) COMPREPLY=(); compopt -o dirnames; ;;
-                file) COMPREPLY=(); compopt -o default; ;;
-                plain) COMPREPLY+=($value); ;;
-                subcmd)
-                    # Use bash-completion project for completion
-                    if declare -f _init_completion 2>/dev/null >&2; then
-                        declare COMP_WORDS=($value)
-                        COMP_CWORD=${#COMP_WORDS[@]}
-                        local IFS=' '
-                        COMP_LINE=${COMP_WORDS[*]}
-                        COMP_POINT=${#COMP_LINE}
-                        echo "$value ${COMP_WORDS[*]} $COMP_CWORD $COMP_LINE"
-                        local cur prev words cword split
-                        _init_completion || return
-                        _command_offset 0
-                    fi
-                esac
-            done
-        }
-        %(complete_func)s_setup() {
-            complete -o nosort -F %(complete_func)s %(prog_name)s
-        }
-        %(complete_func)s_setup;
-    """
-    print(ctx, ctx.params, file=sys.stderr)
-    cmd = list(ctx.params["cmd"])
-    if not cmd:
-        arr = sorted(list(get_additional_commands() | get_nomad_commands()))
-        return [x for x in arr if x.startswith(incomplete)]
-    else:
-        if cmd[0] in get_nomad_commands():
-            COMP_LINE = " ".join(cmd)
-            # Run go completion. https://github.com/posener/complete/blob/v1/complete.go#L15
-            arr = subprocess.run(
-                ["nomad"],
-                check=True,
-                text=True,
-                stdout=subprocess.PIPE,
-                env=dict(
-                    COMP_LINE=COMP_LINE,
-                    COMP_POINT=str(len(COMP_LINE)),
-                ),
-            ).stdout.splitlines()
-            return [x for x in arr if x.startswith(incomplete)]
-        else:
-            cmd[0] = f"nomad-{cmd[0]}"
-            cmd.append(incomplete)
-            if shutil.which(cmd[0]):
-                return [CompletionItem(quotearr(cmd), "subcmd")]
-    return []
-
-
-###############################################################################
-
-
 def cli():
     handle_bash_completion()
     parser = argparse.ArgumentParser(
@@ -189,8 +106,7 @@ def cli():
     parser.add_argument("cmd", nargs=argparse.REMAINDER, help="Command to execute")
     args = parser.parse_args()
     if args.version:
-        prog_name = parser.prog
-        print(f"{prog_name}, version {get_version()}")
+        print_version()
         exit()
     if args.autocomplete_info:
         shell_completion.print()
@@ -199,7 +115,7 @@ def cli():
         shell_completion.install()
         exit()
     if args.namespace:
-        os.environ["NOMAD_NAMESPACE"] = args.namespace
+        os.environ[NOMAD_NAMESPACE] = args.namespace
     cmd = args.cmd
     if not cmd:
         parser.print_usage()
@@ -209,8 +125,12 @@ def cli():
     else:
         cmd = [f"nomad-{cmd[0]}", *cmd[1:]]
     if args.verbose:
-        print(f"+ {quotearr(cmd)}", file=sys.stderr)
-    os.execvp(cmd[0], cmd)
+        eprint(f"+ {quotearr(cmd)}")
+    try:
+        os.execvp(cmd[0], cmd)
+    except FileNotFoundError:
+        eprint(f"nomadt: {cmd[0]}: command not found")
+        exit(127)
 
 
 if __name__ == "__main__":

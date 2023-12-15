@@ -142,7 +142,7 @@ def cli(id: str, **kwargs):
     )
     out: List[str] = []
     if args.alloc:
-        allocs = mynomad.get(f"allocations", params={"prefix": id})
+        allocs = mynomad.get("allocations", params={"prefix": id})
         assert len(allocs) > 0, f"Allocation with id {id} not found"
         assert len(allocs) < 2, f"Multiple allocations found starting with id {id}"
         alloc = nomadlib.Alloc(mynomad.get(f"allocation/{allocs[0]['ID']}"))
