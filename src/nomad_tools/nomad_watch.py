@@ -26,15 +26,15 @@ import requests
 
 from . import colors, exit_on_thread_exception, nomadlib
 from .common import (
+    alias_option,
     andjoin,
     cached_property,
-    composed,
-    json_loads,
-    complete_set_namespace,
-    alias_option,
     common_options,
     complete_job,
+    complete_set_namespace,
     completor,
+    composed,
+    json_loads,
     mynomad,
     namespace_option,
     nomad_find_job,
@@ -414,11 +414,11 @@ class TaskLogger(threading.Thread):
         """Listen to Nomad log stream and print the logs"""
         try:
             self.__run_in()
-        except requests.HTTPError as e:
-            if e.response and e.response.status_code == 404:
+        except (requests.HTTPError, requests.exceptions.HTTPError) as e:
+            if e.response and e.response.status_code in (404, 500):
                 self.tk.log_alloc(
                     datetime.datetime.now(),
-                    f"Error getting {self.__typestr()} logs: {e.response}",
+                    f"Error getting {self.__typestr()} logs: {e.response} {e.response.text!r}",
                 )
             else:
                 raise
