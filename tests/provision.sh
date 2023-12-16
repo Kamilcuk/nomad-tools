@@ -27,9 +27,7 @@ nomad_start() {
 		echo "nomad already running: $(xargs ps aux "$pid")"
 		return
 	fi
-	sudo mkdir -vp /etc/nomad.d
-	sudo cp -v ./tests/nomad.hcl /etc/nomad.d/nomad.hcl
-	sudo nomad agent -dev -config /etc/nomad.d &
+	sudo nomad agent -dev -config ./tests/nomad.hcl &
 	NOMADPID=$!
 	# Wait for nomad
 	now=$(date +%s)
