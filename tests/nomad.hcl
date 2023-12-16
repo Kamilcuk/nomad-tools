@@ -1,12 +1,14 @@
 # Example nomad server configuration used for testing this project.
 bind_addr            = "0.0.0.0"
-disable_update_check = false
+disable_update_check = true
 server {
   enabled          = true
   bootstrap_expect = 1
 }
 client {
-  enabled = true
+  enabled                  = true
+  gc_disk_usage_threshold  = 100
+  gc_inode_usage_threshold = 100
 }
 plugin "raw_exec" {
   config {
