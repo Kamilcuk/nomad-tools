@@ -55,7 +55,7 @@ class Mypath(ABC):
     def nomadrun(self, stdin: Union[bool, int] = False) -> str:
         return ""
 
-    def isnomad(self):
+    def isnomad(self) -> bool:
         return False
 
     def exists(self):
@@ -263,6 +263,11 @@ class NomadOrHostMyPath(click.ParamType):
             ],
         ]
 
+    @staticmethod
+    def debug(msg: str):
+        if os.environ.get("COMP_DEBUG"):
+            print(msg, file=sys.stderr)
+
     @classmethod
     def __compgen(cls, incomplete: str) -> List[CompletionItem]:
         """Given incomplete line, generate compgen of files inside a running allocation if possible"""
@@ -294,7 +299,7 @@ class NomadOrHostMyPath(click.ParamType):
             .replace(r"?", r"\?")
             .replace(r"[", r"\["),
         ]
-        # print(f"+ {arrquote(cmd)}", file=sys.stderr)
+        cls.debug(f"+ {arrquote(cmd)}")
         try:
             output = subprocess.check_output(cmd, text=True)
         except subprocess.CalledProcessError:

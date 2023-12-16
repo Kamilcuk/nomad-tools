@@ -1,3 +1,4 @@
+import os
 import tempfile
 import time
 from dataclasses import dataclass
@@ -40,6 +41,7 @@ def run_temp_job():
 
 def g(incomplete: str) -> List[str]:
     """Wrapper around gen_shell_complete which converts ShellComplete objects to string for easier comparison"""
+    os.environ["COMP_DEBUG"] = "1"
     ret = NomadOrHostMyPath.gen_shell_complete(incomplete)
     arr = [x.value if x.type == "plain" else x.type for x in ret]
     print(f"gen_shell_complete {incomplete} -> {arr}")
