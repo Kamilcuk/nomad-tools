@@ -39,45 +39,26 @@ There are the following command line tools installed as part of this package:
 
 ```
 + nomadt --help
-Usage: nomad [-version] [-help] [-autocomplete-(un)install] <command> [args]
+usage: nomadt [-h] [-N NAMESPACE] [--version] [--autocomplete-info]
+              [--autocomplete-install] [--verbose]
+              ...
 
-Common commands:
-    run         Run a new job or update an existing job
-    stop        Stop a running job
-    status      Display the status output for a resource
-    alloc       Interact with allocations
-    job         Interact with jobs
-    node        Interact with nodes
-    agent       Runs a Nomad agent
+Wrapper around nomad to execute nomad-anything as nomadt anything. If a 'nomad
+cmd' exists, then 'nomadt cmd' will forward to it. Otherwise, it will try to
+execute 'nomad-cmd' command. It is a wrapper that works similar to git.
 
-Other commands:
-    acl                 Interact with ACL policies and tokens
-    action              Run a pre-defined action from a Nomad task
-    agent-info          Display status information about the local agent
-    config              Interact with configurations
-    deployment          Interact with deployments
-    eval                Interact with evaluations
-    exec                Execute commands in task
-    fmt                 Rewrites Nomad config and job files to canonical format
-    license             Interact with Nomad Enterprise License
-    login               Login to Nomad using an auth method
-    monitor             Stream logs from a Nomad agent
-    namespace           Interact with namespaces
-    operator            Provides cluster-level tools for Nomad operators
-    plugin              Inspect plugins
-    quota               Interact with quotas
-    recommendation      Interact with the Nomad recommendation endpoint
-    scaling             Interact with the Nomad scaling endpoint
-    sentinel            Interact with Sentinel policies
-    server              Interact with servers
-    service             Interact with registered services
-    setup               Interact with setup helpers
-    system              Interact with the system API
-    tls                 Generate Self Signed TLS Certificates for Nomad
-    ui                  Open the Nomad Web UI
-    var                 Interact with variables
-    version             Prints the Nomad version
-    volume              Interact with volumes
+positional arguments:
+  cmd                   Command to execute
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -N NAMESPACE, --namespace NAMESPACE
+                        Set NOMAD_NAMESPACE before executing the command
+  --version             Print version and exit
+  --autocomplete-info   Print shell completion information and exit
+  --autocomplete-install
+                        Install bash shell completion and exit
+  --verbose             Print the command before executing
 
 ```
 
@@ -179,7 +160,7 @@ Options:
                                   else ''}{message}{reset}"
   -h, --help                      Show this message and exit.
   --version                       Print program version then exit.
-  --shell-completion              Print shell completion information.
+  --autocomplete-info             Print shell completion information.
   --autocomplete-install          Install shell completion.
 
 Commands:
@@ -382,7 +363,7 @@ Options:
   -n, --name COMPILE      Show only ports which name matches this regex.
   -h, --help              Show this message and exit.
   --version               Print program version then exit.
-  --shell-completion      Print shell completion information.
+  --autocomplete-info     Print shell completion information.
   --autocomplete-install  Install shell completion.
   -N, --namespace TEXT    Set NOMAD_NAMESPACE environment variable.  [default:
                           default]
@@ -420,7 +401,7 @@ Options:
                             default]
   -h, --help                Show this message and exit.
   --version                 Print program version then exit.
-  --shell-completion        Print shell completion information.
+  --autocomplete-info       Print shell completion information.
   --autocomplete-install    Install shell completion.
   -j, --job                 Prepends the path with nomad/jobs/
   -f, --jobfile             The path is a Nomad job file rfom which the job name
@@ -474,7 +455,7 @@ Options:
                             default]
   -h, --help                Show this message and exit.
   --version                 Print program version then exit.
-  --shell-completion        Print shell completion information.
+  --autocomplete-info       Print shell completion information.
   --autocomplete-install    Install shell completion.
   -j, --job                 Prepends the path with nomad/jobs/
   -f, --jobfile             The path is a Nomad job file rfom which the job name
@@ -528,7 +509,7 @@ Options:
                             default]
   -h, --help                Show this message and exit.
   --version                 Print program version then exit.
-  --shell-completion        Print shell completion information.
+  --autocomplete-info       Print shell completion information.
   --autocomplete-install    Install shell completion.
   -j, --job                 Prepends the path with nomad/jobs/
   -f, --jobfile             The path is a Nomad job file rfom which the job name
@@ -582,7 +563,7 @@ Options:
                             default]
   -h, --help                Show this message and exit.
   --version                 Print program version then exit.
-  --shell-completion        Print shell completion information.
+  --autocomplete-info       Print shell completion information.
   --autocomplete-install    Install shell completion.
   -j, --job                 Prepends the path with nomad/jobs/
   -f, --jobfile             The path is a Nomad job file rfom which the job name
@@ -636,7 +617,7 @@ Options:
                             default]
   -h, --help                Show this message and exit.
   --version                 Print program version then exit.
-  --shell-completion        Print shell completion information.
+  --autocomplete-info       Print shell completion information.
   --autocomplete-install    Install shell completion.
   -j, --job                 Prepends the path with nomad/jobs/
   -f, --jobfile             The path is a Nomad job file rfom which the job name
@@ -690,7 +671,7 @@ Options:
                             default]
   -h, --help                Show this message and exit.
   --version                 Print program version then exit.
-  --shell-completion        Print shell completion information.
+  --autocomplete-info       Print shell completion information.
   --autocomplete-install    Install shell completion.
   -j, --job                 Prepends the path with nomad/jobs/
   -f, --jobfile             The path is a Nomad job file rfom which the job name
@@ -744,7 +725,7 @@ Options:
                             default]
   -h, --help                Show this message and exit.
   --version                 Print program version then exit.
-  --shell-completion        Print shell completion information.
+  --autocomplete-info       Print shell completion information.
   --autocomplete-install    Install shell completion.
   -j, --job                 Prepends the path with nomad/jobs/
   -f, --jobfile             The path is a Nomad job file rfom which the job name
@@ -821,7 +802,7 @@ Options:
                           default]
   -h, --help              Show this message and exit.
   --version               Print program version then exit.
-  --shell-completion      Print shell completion information.
+  --autocomplete-info     Print shell completion information.
   --autocomplete-install  Install shell completion.
 
   Written by Kamil Cukrowski 2023. Licensed under GNU GPL version or later.
@@ -959,7 +940,7 @@ Options:
                            of the runner being used.
   -h, --help               Show this message and exit.
   --version                Print program version then exit.
-  --shell-completion       Print shell completion information.
+  --autocomplete-info      Print shell completion information.
   --autocomplete-install   Install shell completion.
 
 Commands:
@@ -1055,7 +1036,7 @@ Usage: nomad-dockers [OPTIONS] JOB
 Options:
   -h, --help              Show this message and exit.
   --version               Print program version then exit.
-  --shell-completion      Print shell completion information.
+  --autocomplete-info     Print shell completion information.
   --autocomplete-install  Install shell completion.
   -l, --long
   -j, --job               The argument is not a file, but a job name
@@ -1091,7 +1072,7 @@ Options:
   -n, --name COMPILE      Show only ports which name matches this regex.
   -h, --help              Show this message and exit.
   --version               Print program version then exit.
-  --shell-completion      Print shell completion information.
+  --autocomplete-info     Print shell completion information.
   --autocomplete-install  Install shell completion.
   -N, --namespace TEXT    Set NOMAD_NAMESPACE environment variable.  [default:
                           default]
@@ -1110,19 +1091,23 @@ Usage: nomad-downloadrelease [OPTIONS] TOOL [DESTINATION]
 
   Download specific binary from releases.hashicorp
   Examples:
-      %(prog) nomad ./bin/nomad
+      %(prog) -p 1.7.2 nomad ./bin/nomad
       %(prog) consul ./bin/consul
 
 Options:
   --verbose
-  -p, --pinversion TEXT  Use this version instead of autodetecting latest
-  --os TEXT              Use this operating system instead of host  [default:
-                         linux]
-  -a, --arch TEXT        Use this architecture instead of host  [default: amd64]
-  --suffix TEXT          When searching for latest version, only get versions
-                         with this suffix
-  --ent                  Equal to --suffix=+ent
-  --help                 Show this message and exit.
+  -p, --pinversion TEXT   Use this version instead of autodetecting latest
+  --os TEXT               Use this operating system instead of host  [default:
+                          linux]
+  -a, --arch TEXT         Use this architecture instead of host  [default:
+                          amd64]
+  --suffix TEXT           When searching for latest version, only get versions
+                          with this suffix
+  --ent                   Equal to --suffix=+ent
+  -h, --help              Show this message and exit.
+  --version               Print program version then exit.
+  --autocomplete-info     Print shell completion information.
+  --autocomplete-install  Install shell completion.
 
 ```
 

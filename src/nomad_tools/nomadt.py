@@ -27,7 +27,7 @@ Common commands:
 
 Other commands:
     acl                 Interact with ACL policies and tokens
-    action              Run a pre-defined action from a Nomad task
+    action              Run a pre-defined command from a given context
     agent-info          Display status information about the local agent
     config              Interact with configurations
     deployment          Interact with deployments

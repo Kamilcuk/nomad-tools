@@ -41,7 +41,7 @@ def get_arch() -> str:
 \b
 Download specific binary from releases.hashicorp
 Examples:
-    %(prog) nomad ./bin/nomad
+    %(prog) -p 1.7.2 nomad ./bin/nomad
     %(prog) consul ./bin/consul
 """
 )

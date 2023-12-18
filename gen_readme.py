@@ -52,7 +52,7 @@ class Command:
 
 ```
 + {self.cmdname()} --help
-{subprocess.check_output("nomad --help".split(), text=True)}
+{subprocess.check_output("nomadt --help".split(), text=True)}
 ```
 
 """
