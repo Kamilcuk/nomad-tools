@@ -43,7 +43,7 @@ def g(incomplete: str) -> List[str]:
     """Wrapper around gen_shell_complete which converts ShellComplete objects to string for easier comparison"""
     os.environ["COMP_DEBUG"] = "1"
     ret = NomadOrHostMyPath.gen_shell_complete(incomplete)
-    arr = [x.value if x.type == "plain" else x.type for x in ret]
+    arr = [x.value for x in ret if x.type == "plain"]
     print(f"gen_shell_complete {incomplete} -> {arr}")
     return arr
 

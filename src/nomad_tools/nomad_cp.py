@@ -252,15 +252,9 @@ class NomadOrHostMyPath(click.ParamType):
         arr: List[str], prefix: str, suffix: str = ":"
     ) -> List[CompletionItem]:
         """Filter list of string by prefix and convert to CompletionItem. Also remove duplicates"""
-        if not arr:
-            return []
-        nospace = [CompletionItem(prefix, type="nospace")] if len(arr) > 1 else []
         return [
-            *nospace,
-            *[
-                CompletionItem(f"{x}{suffix}")
-                for x in sorted(list(set(x for x in arr if x.startswith(prefix))))
-            ],
+            CompletionItem(shlex.quote(f"{x}{suffix}"))
+            for x in sorted(list(set(x for x in arr if x.startswith(prefix))))
         ]
 
     @staticmethod
@@ -282,22 +276,26 @@ class NomadOrHostMyPath(click.ParamType):
         noslash: bool = len(parts) == 1
         searchdir: str = "." if noslash else parts[1][::-1] + "/"
         searchname: str = parts[0][::-1]
+        searchnamenoglob = (
+            searchname.replace("\\", "\\\\")
+            .replace(r"*", r"\*")
+            .replace(r"?", r"\?")
+            .replace(r"[", r"\[")  # ]]
+        )
         cmd = [
             *shlex.split(mypath.nomadrun()),
             "sh",
             "-c",
-            """
-            find "$2" -maxdepth 1 -mindepth 1 -type f -name "$3*"
-            find "$2" -maxdepth 1 -mindepth 1 -type d -name "$3*" |
-                while IFS= read -r line; do echo "$line/"; done
-            """,
+            textwrap.dedent(
+                """\
+                find "$1" -maxdepth 1 -mindepth 1 -type f -name "$2*"
+                find "$1" -maxdepth 1 -mindepth 1 -type d -name "$2*" |
+                    while IFS= read -r line; do echo "$line/"; done
+                """
+            ),
             "--",
-            path,
             searchdir,
-            searchname.replace("\\", "\\\\")
-            .replace(r"*", r"\*")
-            .replace(r"?", r"\?")
-            .replace(r"[", r"\["),
+            searchnamenoglob,
         ]
         cls.debug(f"+ {arrquote(cmd)}")
         try:
@@ -306,7 +304,12 @@ class NomadOrHostMyPath(click.ParamType):
             return []
         # In case of noslash is given, the initial part is going to be './'. Strip it.
         ret = [x[2 if noslash else 0 :] for x in output.splitlines()]
-        return cls.__filter(ret, path, suffix="")
+        nospace = (
+            [CompletionItem("", type="nospace")]
+            if len(ret) > 1 or any(x[-1] == "/" for x in ret)
+            else []
+        )
+        return nospace + cls.__filter(ret, path, suffix="")
 
     @classmethod
     def gen_shell_complete(cls, incomplete: str) -> List[CompletionItem]:
@@ -317,7 +320,11 @@ class NomadOrHostMyPath(click.ParamType):
             # JOB...
             # PATH...
             jobs = [x["ID"] for x in mynomad.get("jobs", params=dict(prefix=arr[0]))]
-            return files + cls.__filter(jobs, arr[0])
+            return (
+                files
+                + [CompletionItem("", type="nospace")]
+                + cls.__filter(jobs, arr[0])
+            )
         elif arr[0] == "":
             if len(arr) == 2:
                 # :ALLOCATION...
@@ -327,7 +334,9 @@ class NomadOrHostMyPath(click.ParamType):
                     for x in mynomad.get("allocations", params=dict(prefix=arr[1]))
                     if x["ID"].startswith(allocidprefix)
                 ]
-                return cls.__filter(allocations, arr[1])
+                return [CompletionItem("", type="nospace")] + cls.__filter(
+                    allocations, arr[1]
+                )
             elif len(arr) in [3, 4, 5]:
                 # :ALLOCATION:PATH...
                 # :ALLOCATION:GROUP...
@@ -349,7 +358,9 @@ class NomadOrHostMyPath(click.ParamType):
                     ), f"Found multiple or none allocation matching prefix {allocidprefix}"
                     allocation = allocations[0]
                     if len(arr) <= 4:
-                        add = cls.__filter(allocation.get_tasknames(), arr[-1])
+                        add = [CompletionItem("", type="nospace")] + cls.__filter(
+                            allocation.get_tasknames(), arr[-1]
+                        )
                 return add + cls.__compgen(incomplete)
         elif len(arr) in [2, 3, 4]:
             # JOB:PATH...
@@ -367,7 +378,9 @@ class NomadOrHostMyPath(click.ParamType):
                     if len(arr) < 3 or tg.Name == arr[2]
                     for t in tg.Tasks
                 ]
-                add = cls.__filter(tasks, arr[-1])
+                add = [CompletionItem("", type="nospace")] + cls.__filter(
+                    tasks, arr[-1]
+                )
             return add + cls.__compgen(incomplete)
         return []
 
