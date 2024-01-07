@@ -27,7 +27,7 @@ _nomadt_completion() {
 		#echo "AAAAAAAAAAA $i ${words[i]} ${COMP_WORDS[i]}"
 		case "${words[i]}" in
 		-N | --namespace) ((i += 1)) ;;
-		--verbose | --autocomplete-install | --shell-completion | --version) ;;
+		--verbose | --autocomplete-info | --autocomplete-install | --version | -h | --help) ;;
 		-N* | --namespace=*) ;;
 		*)
 			# If command is found, complete the command.
@@ -61,7 +61,7 @@ _nomadt_completion() {
 	*)
 		case "$cur" in
 		-*)
-			COMPREPLY=($(compgen -W "-N --namespace --verbose --autocomplete-install --shell-completion --version" -- "$cur"))
+			COMPREPLY=($(compgen -W "-N --namespace --verbose --autocomplete-info --autocomplete-install --version -h --help" -- "$cur"))
 			;;
 		*)
 			COMPREPLY=(
