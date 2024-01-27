@@ -121,3 +121,15 @@ def test_datadict_any():
         "b": [["b", 2], ["c", 3]],
     }
     assert A(init2).asdict() == init2
+
+
+class StrMember(DataDict):
+    ID: str
+
+    def str(self):
+        return f"{self.ID}"
+
+
+def test_datadict_strmember():
+    v = StrMember(dict(ID=1))
+    assert v.str() == f"{v.ID}"

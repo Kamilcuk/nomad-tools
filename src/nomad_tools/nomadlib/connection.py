@@ -74,8 +74,7 @@ class Requestor(ABC):
         return self._reqjson("DELETE", *args, **kvargs)
 
     def stream(self, *args, **kvargs):
-        stream = self.request("GET", *args, stream=True, **kvargs)
-        return stream
+        return self.request("GET", *args, stream=True, **kvargs)
 
 
 @dataclasses.dataclass

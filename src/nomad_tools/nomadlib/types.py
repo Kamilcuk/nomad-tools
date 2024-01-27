@@ -13,6 +13,15 @@ from .datadict import DataDict
 log = logging.getLogger(__name__)
 
 
+def strdict(**kvargs):
+    """Dictionary to var=val space separated elements"""
+    return " ".join(
+        f"{k}={int(v) if v is True or v is False else v}"
+        for k, v in kvargs.items()
+        if v is not None
+    )
+
+
 class MyStrEnum(str, enum.Enum):
     """StrEnum for python 3.7 compatibility"""
 
@@ -323,6 +332,7 @@ class AllocClientStatus(MyStrEnum):
 
 class Alloc(DataDict):
     ID: str
+    Name: str
     NodeName: str
     JobID: str
     EvalID: str
@@ -337,6 +347,9 @@ class Alloc(DataDict):
     # May be missing!
     JobVersion: Optional[int] = None
     FollowupEvalID: Optional[str] = None
+
+    def strshort(self):
+        return f"{self.__class__.__name__}({self.ID[:6]} {strdict(JobVersion=self.JobVersion)})"
 
     def get_taskstates(self) -> Dict[str, AllocTaskState]:
         """The same as TaskStates but returns an empty dict in case the field is None"""
@@ -484,17 +497,18 @@ class Event:
     """Is the event coming from a stream?"""
 
     def __str__(self):
-        status = {
-            "ID": self.data.get("ID", "")[:6],
-            "JobID": self.data.get("JobID"),
-            "Version": self.data.get("Version"),
-            "JobVersion": self.data.get("JobVersion"),
-            "JobModifyIndex": self.data.get("JobModifyIndex"),
-            "ModifyIndex": self.data.get("ModifyIndex"),
-            "Status": self.data.get("Status"),
-            "ClientStatus": self.data.get("ClientStatus"),
-            "stream": 1 if self.stream else 0,
-        }
+        status = dict(
+            ID=self.data.get("ID", "")[:6],
+            JobID=self.data.get("JobID"),
+            Version=self.data.get("Version"),
+            JobVersion=self.data.get("JobVersion"),
+            JobModifyIndex=self.data.get("JobModifyIndex"),
+            ModifyIndex=self.data.get("ModifyIndex"),
+            Status=self.data.get("Status"),
+            ClientStatus=self.data.get("ClientStatus"),
+            stream=1 if self.stream else 0,
+            TriggeredBy=self.data.get("TriggeredBy"),
+        )
         statusstr = " ".join(f"{k}={v}" for k, v in status.items() if v is not None)
         return f"Event({self.topic.name}.{self.type.name} {statusstr})"
 
