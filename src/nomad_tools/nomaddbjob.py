@@ -34,8 +34,10 @@ class NomadDbJob:
         self.force_polling = force_polling
         self.queue: queue.Queue[Optional[List[Event]]] = queue.Queue()
         """Queue where database thread puts the received events"""
+        self.job_deregistered: bool = False
+        """Is set to true if received job deregistration event"""
         self.job: Optional[nomadlib.Job] = None
-        """Watched job. Is None if the job was deregistered."""
+        """Watched job definition. Is not None means the job was at least once received."""
         self.jobversions: Dict[int, nomadlib.Job] = {}
         """Job version to job definition"""
         self.evaluations: Dict[str, nomadlib.Eval] = {}
@@ -49,7 +51,7 @@ class NomadDbJob:
         self.stopevent = threading.Event()
         """If set, the database thread should exit"""
         self.thread = threading.Thread(
-            target=self.__thread_entry, name="db", daemon=True
+            target=self.__thread_entry, name=self.__class__.__name__, daemon=True
         )
         assert self.topics
         assert not any(not x for x in topics)
@@ -149,33 +151,43 @@ class NomadDbJob:
         """Update database state to reflect received event"""
         actionstr = ""
         if e.topic == EventTopic.Job:
-            job = nomadlib.Job(e.data)
+            job = e.job()
             self.jobversions[job.get("Version")] = job
-            if e.type == EventType.JobDeregistered:
-                actionstr = "Removing job becaue eval"
-                self.job = None
-            elif self.job is None or job.ModifyIndex >= self.job.ModifyIndex:
+            if self.job is None or job.ModifyIndex >= self.job.ModifyIndex:
                 # self.job follows newest modify index.
                 self.job = job
+                if e.type == EventType.JobDeregistered:
+                    if not self.job_deregistered:
+                        self.job_deregistered = True
+                        actionstr = "JobDeregistered because job"
+                else:
+                    if self.job_deregistered:
+                        self.job_deregistered = False
+                        actionstr = "JobRegister"
         elif e.topic == EventTopic.Evaluation:
             # Handle job deregister event by clearing self.job.
-            if e.eval().Status == "complete" and (
-                e.type == EventType.JobDeregistered
-                or (
-                    e.type == EventType.EvaluationUpdated
-                    and e.eval().TriggeredBy == "job-deregister"
+            eval = e.eval()
+            if (
+                self.job
+                and eval.Status == "complete"
+                and (
+                    e.type == EventType.JobDeregistered
+                    or (
+                        e.type == EventType.EvaluationUpdated
+                        and eval.TriggeredBy == "job-deregister"
+                    )
                 )
             ):
-                actionstr = "Removing job becaue eval"
-                self.job = None
-            self.evaluations[e.data["ID"]] = nomadlib.Eval(e.data)
+                actionstr = "JobDeregister because eval"
+                self.job_deregistered = True
+            self.evaluations[e.data["ID"]] = eval
         elif e.topic == EventTopic.Allocation:
             # Events from event stream are missing JobVersion. Try to preserve it here by preserving keys.
             self.allocations[e.data["ID"]] = nomadlib.Alloc(
                 {**self.allocations.get(e.data["ID"], {}), **e.data}
             )
         elif e.topic == EventTopic.Deployment:
-            self.deployments[e.data["ID"]] = nomadlib.Deploy(e.data)
+            self.deployments[e.data["ID"]] = e.deployment()
         return actionstr
 
     def handle_event(self, e: Event) -> bool:
@@ -311,3 +323,6 @@ class NomadDbJob:
     def find_jobversion_from_modifyindex(self, jobmodifyindex: int) -> Optional[int]:
         ret = self.find_job_from_modifyindex(jobmodifyindex)
         return ret.Version if ret else None
+
+    def seen_job(self) -> bool:
+        return self.job is not None

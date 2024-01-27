@@ -24,20 +24,14 @@ from typing import Dict, List, Optional, Pattern, Set, Tuple, TypeVar
 import click
 import requests
 
-from nomad_tools.common_nomad import NoJobFound
-
-from .common import (
-    alias_option,
-    andjoin,
-    cached_property,
-    common_options,
 from . import colors, exit_on_thread_exception, flagdebug, nomadlib
+from .common import json_loads
 from .common_base import andjoin, cached_property, composed, eprint
+from .common_click import alias_option, common_options, complete_set_namespace
+from .common_nomad import (
+    NoJobFound,
     complete_job,
-    complete_set_namespace,
     completor,
-    composed,
-    json_loads,
     mynomad,
     namespace_option,
     nomad_find_job,
@@ -765,8 +759,6 @@ class NomadJobWatcher(ABC):
             daemon=True,
         )
         """The thread that parses database events"""
-        self.dbseenjob: bool = False
-        """The job was found at least once."""
         self.purgedreq: bool = False
         """If set, we have sent a request to purge the job"""
         self.purgedreq_lock: threading.Lock = threading.Lock()
@@ -907,8 +899,6 @@ class NomadJobWatcher(ABC):
             if args.all or deployment.JobModifyIndex >= self.jobmodifyindex:
                 self.notifier.notify_deploy(deployment)
         elif event.topic == EventTopic.Job:
-            if self.db.job:
-                self.dbseenjob = True
             if (
                 self.job
                 and self.db.job
@@ -1017,11 +1007,11 @@ class NomadJobWatcher(ABC):
                 return True
         return False
 
-    def has_no_active_allocations_and_evaluations_and_deployments(self):
-        for allocation in self.db.allocations.values():
-            if allocation.is_pending_or_running():
-                return False
-        return not self.has_active_deployments() and not self.has_active_evaluations()
+    def has_active_allocations(self):
+        for alloc in self.db.allocations.values():
+            if alloc.is_pending_or_running():
+                return True
+        return False
 
     def _job_is_dead_message(self):
         assert self.job
@@ -1032,14 +1022,16 @@ class NomadJobWatcher(ABC):
         # Protect against the situation when the job JSON is not in a database.
         # init_cb first queries allocations, then the job itself.
         if (
-            self.dbseenjob
+            self.db.seen_job()
             and self.job
-            and self.has_no_active_allocations_and_evaluations_and_deployments()
+            and not self.has_active_allocations()
+            and not self.has_active_evaluations()
+            and not self.has_active_deployments()
         ):
             # Depending on purge argument, we wait for the job to stop existing
             # or for the job to be dead.
             if self.was_purgedreq():
-                if self.db.job is None:
+                if self.db.job_deregistered:
                     self.donemsg = f"Job {self.job.description()} removed with no active allocations, evaluations nor deployments. Exiting."
                     return True
             else:
