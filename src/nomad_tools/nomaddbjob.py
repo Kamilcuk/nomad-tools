@@ -64,7 +64,11 @@ class NomadDbJob:
             "event/stream",
             params={"topic": self.topics},
         ) as stream:
-            for line in stream.iter_lines():
+            for line in stream.iter_lines(decode_unicode=True):
+                if line == "event dropped from buffer":
+                    # https://github.com/hashicorp/nomad/blob/main/nomad/stream/event_buffer.go#L273
+                    log.error(line)
+                    continue
                 if line:
                     data = json_loads(line)
                     events: List[Event] = [
