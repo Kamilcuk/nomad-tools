@@ -153,7 +153,7 @@ def test_nomad_watch2_deploymulti():
                 re.compile(
                     "Canaries=0/0 Placed=2 Desired=2 Healthy=2 Unhealthy=0 Deployment completed successfully"
                 ),
-                re.compile("E>[0-9a-fA-F]*>#0>web> .*response"),
+                re.compile("E>[0-9a-fA-F]*>v0>web> .*response"),
             ],
         )
         run_nomad_watch(
@@ -167,14 +167,14 @@ def test_nomad_watch2_deploymulti():
                 re.compile(
                     "Canaries=1/1 Placed=2 Desired=2 Healthy=2 Unhealthy=0 Deployment completed successfully"
                 ),
-                re.compile("E>[0-9a-fA-F]*>#1>web> .*response"),
+                re.compile("E>[0-9a-fA-F]*>v1>web> .*response"),
             ],
         )
         run_nomad_watch(
             f"start -var ok=false {testjobs[job]}",
             output=[
                 "Failed due to unhealthy allocations - rolling back to job",
-                re.compile("E>[0-9a-fA-F]*>#2>web> .*response"),
+                re.compile("E>[0-9a-fA-F]*>v2>web> .*response"),
             ],
             check=False,
         )

@@ -94,11 +94,11 @@ class LOGFORMAT:
     post = "{message}{reset}"
     task = "{task + '>' if task else ''}"
     DEFAULT = (
-        pre + mark + "{id:.{args.log_id_len}}>#{str(jobversion)}>" + task + " " + post
+        pre + mark + "{id:.{args.log_id_len}}>v{str(jobversion)}>" + task + " " + post
     )
     """
     Default log format. The log is templated with f-string using eval() below.
-        O>45fbbd>#0>group1>task1> hello world
+        O>45fbbd>v0>group1>task1> hello world
     """
     ONE = pre + mark + task + " " + post
     """
@@ -1315,7 +1315,7 @@ logs. Depending on command, wait for a specific event to happen to finish
 watching. This program is intended to help debugging issues with running
 jobs in Nomad and for synchronizing with execution of batch jobs in Nomad.
 
-Logs are printed in the format: 'mark>id>#version>group>task> message'.
+Logs are printed in the format: 'mark>id>vversion>group>task> message'.
 The mark in the log lines is equal to: 'deploy' for messages printed as
 a result of deployment, 'eval' for messages printed from evaluations,
 'A' from allocation, 'E' for stderr logs of a task and 'O' from stdout
