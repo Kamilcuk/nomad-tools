@@ -11,16 +11,19 @@ jobs:
   test:
     strategy:
       matrix:
-        version:
+        nomad:
+          - 1.6.3
+          #- 1.7.2
+        python:
           - 3.7
           - 3.11
     name: Test
     runs-on: ubuntu-latest
     steps:
-      - name: setup python ${{ matrix.version }}
+      - name: setup python ${{ matrix.python }}
         uses: actions/setup-python@v4
         with:
-          python-version: ${{ matrix.version }}
+          python-version: ${{ matrix.python }}
       - name: upgrade pip
         run: pip install --upgrade pip
       - name: checkout
@@ -29,12 +32,10 @@ jobs:
         run: pip install -e . && pip install -r ./requirements-test.txt
       - name: run pyright
         uses: jakebailey/pyright-action@v1
-        with:
-          version: 1.1.334
       - name: run unit tests
         run: pytest -sxv tests/unit
       - name: install nomad server
-        run: bash ./tests/provision.sh nomad_install
+        run: bash ./tests/provision.sh nomad_install ${{ matrix.nomad }}
       - name: run nomad server
         run: bash ./tests/provision.sh nomad_start
       - name: run integration tests

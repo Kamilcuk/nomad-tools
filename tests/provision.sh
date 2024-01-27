@@ -10,10 +10,13 @@ fatal() {
 	exit 2
 }
 
+# shellcheck disable=SC2120
 nomad_install() {
+	local version
+	version="${1:-1.6.3}"
 	if ! hash nomad 2>/dev/null; then
 		# pin to version 1.6.3
-		nomad-downloadrelease -p 1.6.3 nomad /usr/local/bin/nomad
+		nomad-downloadrelease -p "$version" nomad /usr/local/bin/nomad
 		if [[ ! -e /opt/cni/bin && -e /usr/lib/cni/ ]]; then
 			mkdir -vp /opt/cni
 			ln -vs /usr/lib/cni/ /opt/cni/bin
