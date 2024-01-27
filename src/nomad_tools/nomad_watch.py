@@ -24,6 +24,8 @@ from typing import Dict, List, Optional, Pattern, Set, Tuple, TypeVar
 import click
 import requests
 
+from nomad_tools.common_nomad import NoJobFound
+
 from . import colors, exit_on_thread_exception, nomadlib
 from .common import (
     alias_option,
@@ -1648,7 +1650,7 @@ def mode_purge(jobid: str):
     args.purge = True
     try:
         jobid = nomad_find_job(jobid)
-    except nomadlib.JobNotFound:
+    except NoJobFound:
         if args.no_preserve_status:
             return
         else:
