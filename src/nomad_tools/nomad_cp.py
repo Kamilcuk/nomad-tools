@@ -52,7 +52,7 @@ class Mypath(ABC):
     def isstdin(self):
         return str(self.path) == "-"
 
-    def nomadrun(self, stdin: Union[bool, int] = False) -> str:
+    def nomadcmd(self, stdin: Union[bool, int] = False) -> str:
         return ""
 
     def isnomad(self) -> bool:
@@ -66,6 +66,9 @@ class Mypath(ABC):
 
     def is_dir(self):
         return os.path.isdir(self.path)
+
+    def mkdir(self):
+        Path(self.path).mkdir(parents=True, exist_ok=True)
 
     @property
     def name(self):
@@ -107,26 +110,28 @@ class NomadMypath(Mypath):
     def isnomad(self):
         return True
 
-    def nomadrun(self, stdin: Union[bool, int] = False) -> str:
-        # Return a properly escaped command line that allows to execute a command in the container.
+    def nomadcmd(self, stdin: Union[bool, int] = False) -> str:
+        """Return a properly escaped command line that allows to execute a command in the container."""
         i = str(bool(stdin)).lower()
         return f"nomad alloc exec -t=false -i={i} -task={quote(self.task)} {quote(self.allocation)}"
+
+    def _nomadrunsh(self, script: str, *args: str) -> str:
+        cmd = [
+            *shlex.split(self.nomadcmd()),
+            "sh",
+            "-c",
+            script,
+            *args,
+        ]
+        log.debug(f"+ {arrquote(cmd)}")
+        return subprocess.check_output(cmd, text=True).strip()
 
     @cached_property
     def _nomadstat(self) -> FileType:
         assert self.isnomad()
         # Execute a script inside the container to determine the type of the file.
-        script = 'if [ -f "$@" ]; then echo file; elif [ -d "$@" ]; then echo dir; else echo none; fi'
-        cmd = [
-            *shlex.split(self.nomadrun()),
-            "sh",
-            "-c",
-            script,
-            "--",
-            str(self.path),
-        ]
-        log.debug(f"+ {arrquote(cmd)}")
-        stat = subprocess.check_output(cmd, text=True).strip()
+        script = 'if [ -f "$1" ]; then echo file; elif [ -d "$1" ]; then echo dir; else echo none; fi'
+        stat = self._nomadrunsh(script, "--", self.path)
         log.debug(f"stat = {stat}")
         return FileType[stat]
 
@@ -138,6 +143,10 @@ class NomadMypath(Mypath):
 
     def is_dir(self):
         return self._nomadstat == FileType.dir
+
+    def mkdir(self):
+        v = "v" if args.verbose else ""
+        self._nomadrunsh(f"mkdir -{v}p {quote(self.path)}")
 
     @staticmethod
     def __colon(arg: str):
@@ -210,7 +219,7 @@ class NomadOrHostMyPath(click.ParamType):
         if el.isalloc:
             allocations = [
                 nomadlib.Alloc(x)
-                for x in mynomad.get(f"allocations", params=dict(prefix=el.id))
+                for x in mynomad.get("allocations", params=dict(prefix=el.id))
             ]
             allocations = [x for x in allocations if x["ID"].startswith(el.id)]
             assert len(allocations) >= 1, f"No allocation starts with {el.id}"
@@ -283,7 +292,7 @@ class NomadOrHostMyPath(click.ParamType):
             .replace(r"[", r"\[")  # ]]
         )
         cmd = [
-            *shlex.split(mypath.nomadrun()),
+            *shlex.split(mypath.nomadcmd()),
             "sh",
             "-c",
             textwrap.dedent(
@@ -442,10 +451,14 @@ def run(cmd: str):
     subprocess.check_call(shlex.split(cmd), stdin=subprocess.DEVNULL)
 
 
+def nomadpipe(src: Mypath, dst: Mypath, srccmd: str, dstcmd: str):
+    pipe(f"{src.nomadcmd()} {srccmd}", f"{dst.nomadcmd(stdin=1)} {dstcmd}")
+
+
 def get_tar_x_opt():
     return (
-        # If dry_run, pass vt to print to stdout.
-        ("vt" if args.dry_run else "x")
+        # If dryrun, pass vt to print to stdout.
+        ("vt" if args.dryrun else "x")
         + ("v" if args.verbose else "")
         # If archive, pass p to preserve permissions when not root.
         # If not archive, pass o to do not preserve permissions even as root.
@@ -454,13 +467,10 @@ def get_tar_x_opt():
     )
 
 
-def tarpipe(src: Mypath, dst: Mypath, tar_c: str, tar_x: str):
+def nomadtarpipe(src: Mypath, dst: Mypath, tar_c: str, tar_x: str):
     global args
     x = get_tar_x_opt()
-    pipe(
-        f"{src.nomadrun()} tar -cf - {tar_c}",
-        f"{dst.nomadrun(stdin=1)} tar -{x}f - {tar_x}",
-    )
+    nomadpipe(src, dst, f"tar -cf - {tar_c}", f"tar -{x}f - {tar_x}")
 
 
 def copy_mode(src: Mypath, dst: Mypath):
@@ -482,13 +492,16 @@ def copy_mode(src: Mypath, dst: Mypath):
             # the destination is overwritten with the source file’s contents
             or dst.is_file()
         ):
-            # Tar the file.
+            # Copy one file.
             log.info(f"File {src} -> {dst}")
-            # --transform the file to the output filename.
-            tar_c = f"-C {src.quoteparent()} --transform s:.\\*:{dst.quotename()}: -- {src.quotename()}"
-            # Unpack the file at destination filename.
-            tar_x = f"-C {dst.quoteparent()} -- {dst.quotename()}"
-            tarpipe(src, dst, tar_c, tar_x)
+            nomadpipe(
+                src,
+                dst,
+                f"cat {src.quotepath()}",
+                f"sh -c 'cat >\"$1\"' -- {dst.quotepath()}"
+                if not args.dryrun
+                else f"true -- {dst.quotepath()}",
+            )
         else:
             exit(f"Not a file or directory: {dst}")
     # SRC_PATH specifies a directory
@@ -496,12 +509,15 @@ def copy_mode(src: Mypath, dst: Mypath):
         # DEST_PATH does not exist
         if not dst.exists():
             # DEST_PATH is created as a directory and the contents of the source directory are copied into this directory
-            log.info(f"New dir {src} -> {dst}")
-            # Use --transform to prepent all paths with destination directory name.
-            tar_c = f"-C {src.quotepath()} --transform s:^:{dst.quotename()}/: ."
+            log.info(f"New mkdir {src} -> {dst}")
+            if not args.dryrun:
+                log.debug(f"mkdir {dst}")
+                dst.mkdir()
+            tar_c = f"-C {src.quotepath()} ."
             # And unpack to parent directory.
-            tar_x = f"-C {dst.quoteparent()}"
-            tarpipe(src, dst, tar_c, tar_x)
+            components: int = str(src.path).count("/")
+            tar_x = f"-C {dst.quoteparent()} --strip-components={components}"
+            nomadtarpipe(src, dst, tar_c, tar_x)
         # DEST_PATH exists and is a file
         elif dst.is_file():
             exit("Error condition: cannot copy a directory to a file")
@@ -513,14 +529,14 @@ def copy_mode(src: Mypath, dst: Mypath):
                 log.info(f"New dir {src} -> {dst}/{src.name}")
                 tar_c = f"-C {src.quoteparent()} -- {src.quotename()}"
                 tar_x = f"-C {dst.quotepath()}"
-                tarpipe(src, dst, tar_c, tar_x)
+                nomadtarpipe(src, dst, tar_c, tar_x)
             # SRC_PATH does end with /. (that is: slash followed by dot)
             else:
                 # the content of the source directory is copied into this directory
                 log.info(f"Content of {src}/. -> {dst}/.")
                 tar_c = f"-C {src.quotepath()} ."
                 tar_x = f"-C {dst.quotepath()}"
-                tarpipe(src, dst, tar_c, tar_x)
+                nomadtarpipe(src, dst, tar_c, tar_x)
         else:
             exit(f"Not a file or directory: {dst}")
     else:
@@ -533,10 +549,10 @@ def stream_mode(src: Mypath, dst: Mypath):
         log.info(f"Stream stdin -> {dst}")
         assert dst.isstdin(), "Both operands are '-'"
         x = get_tar_x_opt()
-        run(f"{dst.nomadrun(stdin=1)} tar -{x}f - -C {dst.quotepath()}")
+        run(f"{dst.nomadcmd(stdin=1)} tar -{x}f - -C {dst.quotepath()}")
     elif dst.isstdin():
         log.info(f"Stream {src} -> stdout")
-        run(f"{src.nomadrun()} tar -cf - -C {src.quoteparent()} -- {src.quotename()}")
+        run(f"{src.nomadcmd()} tar -cf - -C {src.quoteparent()} -- {src.quotename()}")
     else:
         assert 0, "Internal error - neither source nor dest is equal to -"
 
@@ -608,13 +624,13 @@ Examples:
     nomad-cp -n :9190d781:/tmp ~/tmp
     nomad-cp -vn -Nservices promtail:/. ~/tmp
 """,
-    epilog=f"""
+    epilog="""
 Written by Kamil Cukrowski 2023. Licensed under GNU GPL version or later.
 """,
 )
 @click.option(
     "-n",
-    "--dry-run",
+    "--dryrun",
     is_flag=True,
     help="Do tar -vt for unpacking. Usefull for listing files for debugging.",
 )
