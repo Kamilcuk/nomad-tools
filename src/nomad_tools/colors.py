@@ -38,7 +38,7 @@ def init_ex() -> Colors:
     tputdict = dataclasses.asdict(Colors())
     tputscript = "\n".join(tputdict.values()).replace("\n", "\nlongname\nlongname\n")
     longname = subprocess.run(
-        f"tput longname".split(),
+        "tput longname".split(),
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,

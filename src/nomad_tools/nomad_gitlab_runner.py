@@ -87,7 +87,7 @@ class ServiceSpec(DataDict):
             self.alias = self.name.split("/")[-1].split(":")[0]
 
     @staticmethod
-    def get() -> List[ServiceSpec]:
+    def get_servicespecs() -> List[ServiceSpec]:
         """Read the Gitlab environment variable to extract the service"""
         CI_JOB_SERVICES = os.environ.get("CUSTOM_ENV_CI_JOB_SERVICES")
         data: List[Union[str, Dict[str, str]]] = (
@@ -138,7 +138,9 @@ class ConfigCustom(DataDict):
     """User to execute the task."""
 
     def apply(self, nomadjob: Job):
-        assert not ServiceSpec.get(), f"Services only handled in Docker mode"
+        assert (
+            not ServiceSpec.get_servicespecs()
+        ), "Services only handled in Docker mode"
         assert nomadjob
 
     def get_task_for_stage(self, stage: str) -> str:
@@ -149,17 +151,19 @@ class ConfigCustom(DataDict):
 class ConfigDocker(ConfigCustom):
     builds_dir: str = "/alloc/builds"
     cache_dir: str = "/alloc/cache"
-    builds_dir_is_shared: bool = False
+    builds_dir_is_shared: Optional[bool] = False
     image: str = "alpine:latest"
     """The image to run jobs with."""
     volumes: List[str] = []
-    """https://developer.hashicorp.com/nomad/docs/drivers/docker#volumes The default mounts /certs to ../alloc to have it available for docker dind sevice just like in gitlab-runner."""
+    """https://developer.hashicorp.com/nomad/docs/drivers/docker#volumes
+    The default mounts /certs to ../alloc to have it available for docker dind sevice just like in gitlab-runner."""
     wait_for_services_timeout: int = 30
     """How long to wait for Docker services. Set to -1 to disable. Default is 30."""
     privileged: bool = False
     """Make the container run in privileged mode. Insecure."""
     services_privileged: Optional[bool] = None
-    """Allow services to run in privileged mode. If unset (default) privileged value is used instead. Use with the Docker executor. Insecure."""
+    """Allow services to run in privileged mode. If unset (default) privileged value is used instead.
+    Use with the Docker executor. Insecure."""
     force_pull: bool = True
     """https://developer.hashicorp.com/nomad/docs/drivers/docker#force_pull"""
     waiter_image: str = "docker:24.0.6-cli"
@@ -278,7 +282,7 @@ class ConfigDocker(ConfigCustom):
         )
 
     def apply(self, nomadjob: Job):
-        services = ServiceSpec.get()
+        services = ServiceSpec.get_servicespecs()
         # Apply configuration to main task.
         assert len(nomadjob.TaskGroups) == 1
         taskgroup = nomadjob.TaskGroups[0]
@@ -347,7 +351,7 @@ class ConfigDocker(ConfigCustom):
 class ConfigExec(ConfigCustom):
     builds_dir: str = "/local/builds"
     cache_dir: str = "/local/cache"
-    builds_dir_is_shared: bool = False
+    builds_dir_is_shared: Optional[bool] = False
     user: str = "gitlab-runner"
     task: JobTask = JobTask(
         {
@@ -365,7 +369,7 @@ class ConfigExec(ConfigCustom):
 class ConfigRawExec(ConfigCustom):
     builds_dir: str = "/var/lib/gitlab-runner/builds"
     cache_dir: str = "/var/lib/gitlab-runner/cache"
-    builds_dir_is_shared: bool = True
+    builds_dir_is_shared: Optional[bool] = True
     user: str = "gitlab-runner"
     task: JobTask = JobTask(
         {
@@ -561,7 +565,7 @@ def purge_previous_nomad_job(jobname: str):
         return
     job = Job(jobdata["Job"])
     assert (
-        job.Stop == True or job.Status == "dead"
+        job.Stop is True or job.Status == "dead"
     ), f"Job {job.description()} already exists and is not stopped or not dead. Bailing out"
     run_nomad_watch(f"--purge -xn0 stop {quote(jobname)}")
 
@@ -591,13 +595,15 @@ class NotCustomEnvIsFine(defaultdict):
 
 
 class OnlyBracedCustomEnvTemplate(string.Template):
-    pattern: str = r"""
-            # match ${CUSTOM_ENV_*} only
-            \${(?P<braced>CUSTOM_ENV_[_A-Za-z0-9]*)} |
-            (?P<escaped>\x01)  |  # match nothing
-            (?P<named>\x01)    |  # match nothing
-            (?P<invalid>\x01)     # match nothing
-            """
+    pattern: str = str(  # pyright: ignore [reportIncompatibleVariableOverride]
+        r"""
+        # match ${CUSTOM_ENV_*} only
+        \${(?P<braced>CUSTOM_ENV_[_A-Za-z0-9]*)} |
+        (?P<escaped>\x01)  |  # match nothing
+        (?P<named>\x01)    |  # match nothing
+        (?P<invalid>\x01)     # match nothing
+        """
+    )
 
     @staticmethod
     def run(template: str) -> str:
@@ -618,7 +624,7 @@ class Jobenv:
         NOMAD_GITLAB_RUNNER_JOB = os.environ.get("NOMAD_GITLAB_RUNNER_JOB")
         assert (
             NOMAD_GITLAB_RUNNER_JOB is not None
-        ), f"Env variable set in config NOMAD_GITLAB_RUNNER_JOB is missing"
+        ), "Env variable set in config NOMAD_GITLAB_RUNNER_JOB is missing"
         jobjson = json.loads(NOMAD_GITLAB_RUNNER_JOB)
         self.job = Job(jobjson)
         self.assert_job(self.job)
@@ -929,7 +935,7 @@ def main(*args, **kvargs) -> int:
     try:
         cli.main(*args, **kvargs)
     except BuildFailure:
-        log.debug(f"build failure")
+        log.debug("build failure")
         return int(os.environ.get("BUILD_FAILURE_EXIT_CODE", BuildFailure.code))
     except Exception as e:
         log.exception(e)

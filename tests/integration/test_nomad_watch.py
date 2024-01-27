@@ -4,19 +4,12 @@ import time
 from typing import Dict, List
 
 from nomad_tools import nomadlib
-from tests.testlib import (
-    caller,
-    gen_job,
-    job_exists,
-    nomad_has_docker,
-    run,
-    run_nomad_watch,
-)
+from tests.testlib import caller, gen_job, job_exists, nomad_has_docker, run_nomad_watch
 
 
 def test_nomad_watch_run_0():
     """Watch a simple jow that outputs hello world"""
-    job = gen_job(script=f"echo hello world")
+    job = gen_job(script="echo hello world")
     run_nomad_watch(
         "--purge run -json -", input=json.dumps(job), output=["hello world"]
     )
@@ -132,14 +125,16 @@ def test_nomad_watch_run_multiple():
               }}
               """
             hastohave += [start, stop]
-        spec += f"""
-            }}
+        spec += """
+            }
             """
-    spec += f"""
-    }}
+    spec += """
+    }
     """
     print(spec)
-    output = run_nomad_watch("--shutdown-timeout 20 --purge run -", input=spec, stdout=1).stdout
+    output = run_nomad_watch(
+        "--shutdown-timeout 20 --purge run -", input=spec, stdout=1
+    ).stdout
     for i in hastohave:
         assert output.count(i) == 2
 

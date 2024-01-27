@@ -113,7 +113,7 @@ class NomadDbJob:
             finally:
                 log.debug("Nomad database thread exiting")
                 self.queue.put(None)
-        except requests.HTTPError as e:
+        except requests.HTTPError:
             log.exception("http request failed")
             exit(1)
 

@@ -26,12 +26,12 @@ def _init_value(classname: str, dstname: str, dsttype: Any, srcval: Any):
 
     try:
         if dstorigin == list:
-            assert type(srcval) == dstorigin, msg()
+            assert type(srcval) is dstorigin, msg()
             return [
                 _init_value(classname, dstname, dsttype.__args__[0], x) for x in srcval
             ]
         elif dstorigin == dict:
-            assert type(srcval) == dstorigin, msg()
+            assert type(srcval) is dstorigin, msg()
             return {
                 _init_value(classname, dstname, dsttype.__args__[0], k): _init_value(
                     classname, dstname, dsttype.__args__[1], v

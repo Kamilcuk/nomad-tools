@@ -15,6 +15,9 @@ vagrant_destroy:
 pyright:
 	pyright src/ tests/ $(ARGS)
 
+pylava:
+	pylava src/ tests/ $(ARGS)
+
 integration_tests:
 	./integration_tests.sh $(ARGS)
 

@@ -19,6 +19,7 @@ def test_common_cached_property():
     assert a.get == 200
     assert a.get == 200
 
+
 def test_andjoin():
     assert andjoin([]) == ""
     assert andjoin([1]) == "1"

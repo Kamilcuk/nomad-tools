@@ -145,7 +145,7 @@ def test_nomad_watch2_invalidconfig():
 def test_nomad_watch2_deploymulti():
     job = "test-deploymulti"
     try:
-        pp = run_nomad_watch(f"-x purge {job}")
+        run_nomad_watch(f"-x purge {job}")
         run_nomad_watch(
             f"start {testjobs[job]}",
             output=[

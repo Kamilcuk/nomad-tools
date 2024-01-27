@@ -1,7 +1,7 @@
 import datetime
 
-from .connection import *
-from .types import *
+from .connection import *  # noqa
+from .types import *  # noqa
 
 
 def escape(txt: str) -> str:

@@ -61,7 +61,7 @@ class GitlabState:
         )
 
     def stage_cleanup(self):
-        return self.nomad_gitlab_runner(f"cleanup", check=[0])
+        return self.nomad_gitlab_runner("cleanup", check=[0])
 
 
 def cycle(config: dict, script: str, env: Dict[str, str] = {}):

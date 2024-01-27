@@ -616,12 +616,16 @@ class NotifierWorker:
                 nomadlib.DeploymentStatus.failed,
             ]
         ):
-            """https://github.com/hashicorp/nomad/blob/e02dd2a331c778399fd271e85c75bff3e3783d80/ui/app/templates/components/job-deployment/deployment-metrics.hbs#L10"""
+            """
+            https://github.com/hashicorp/nomad/blob/e02dd2a331c778399fd271e85c75bff3e3783d80/ui/app/templates/components/job-deployment/deployment-metrics.hbs#L10
+            """
             for task, tg in deployment.TaskGroups.items():
                 Mylogger.log_deploy(
                     self.db,
                     deployment,
-                    f"{task} Canaries={len(tg.PlacedCanaries or [])}/{tg.DesiredCanaries} Placed={tg.PlacedAllocs} Desired={tg.DesiredTotal} Healthy={tg.HealthyAllocs} Unhealthy={tg.UnhealthyAllocs} {deployment.StatusDescription}",
+                    f"{task} Canaries={len(tg.PlacedCanaries or [])}/{tg.DesiredCanaries}"
+                    f" Placed={tg.PlacedAllocs} Desired={tg.DesiredTotal} Healthy={tg.HealthyAllocs}"
+                    f" Unhealthy={tg.UnhealthyAllocs} {deployment.StatusDescription}",
                 )
 
     def stop(self):
@@ -1056,7 +1060,7 @@ class NomadJobWatcher(ABC):
         Return True if the job is not starting anymore.
         self.started will be set to True, if the job was successfully started.
         """
-        # log.debug(f"has_active_deployments={self.has_active_deployments()} has_active_evaluations={self.has_active_evaluations()} allocations={len(self.db.allocations)}")
+        # log.debug(f"has_active_deployments={self.has_active_deployments()} has_active_evaluations={self.has_active_evaluations()} allocations={len(self.db.allocations)}")  # noqa
         if (
             not self.job
             or self.has_active_deployments()

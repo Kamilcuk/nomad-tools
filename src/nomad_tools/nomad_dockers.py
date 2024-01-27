@@ -14,7 +14,7 @@ def complete_job(
     if "job" in ctx.params:
         try:
             jobs = common.mynomad.get("jobs", params=dict(prefix=incomplete))
-        except:
+        except Exception:
             return []
         print(jobs, file=sys.stderr)
         return []
