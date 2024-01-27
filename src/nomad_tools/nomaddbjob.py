@@ -5,8 +5,8 @@ from typing import Callable, Dict, Iterable, List, Optional, TypeVar, Union
 
 import requests
 
-from . import nomadlib
-from .common import json_loads, mynomad
+from . import flagdebug, nomadlib
+from .common import eprint, json_loads, mynomad
 from .nomadlib import Event, EventTopic, EventType
 
 log = logging.getLogger(__name__)
@@ -22,8 +22,6 @@ class NomadDbJob:
         select_event_cb: Callable[[Event], bool],
         init_cb: Callable[[], List[Event]],
         force_polling: Optional[bool] = None,
-        debug_recv: int = 0,
-        debug_events: int = 0,
     ):
         """
         :param topic The topics to listen to, see Nomad event stream API documentation.
@@ -35,8 +33,6 @@ class NomadDbJob:
         self.select_event_cb: Callable[[Event], bool] = select_event_cb
         self.force_polling = force_polling
         self.queue: queue.Queue[Optional[List[Event]]] = queue.Queue()
-        self.debug_recv = debug_recv
-        self.debug_events = debug_events
         """Queue where database thread puts the received events"""
         self.job: Optional[nomadlib.Job] = None
         """Watched job. Is None if the job was deregistered."""
@@ -78,10 +74,12 @@ class NomadDbJob:
                         )
                         for event in data.get("Events", [])
                     ]
-                    if self.debug_recv == 1 and events:
-                        print(f"RECVEVENTS: {[str(e) for e in events]}")
-                    elif self.debug_recv == 2:
-                        print(f"RECVEVENTS: {events}")
+                    if flagdebug.debug("recv") == 1:
+                        for e in events:
+                            eprint(f"RECVEVENTS:{data['Index']} {e}")
+                    elif flagdebug.debug("recv") >= 2:
+                        for e in events:
+                            eprint(f"RECVEVENTS:{data['Index']} {e} {e.data}")
                     self.queue.put(events)
                 if self.stopevent.is_set():
                     break
@@ -184,16 +182,18 @@ class NomadDbJob:
         if self._select_new_event(e):
             if self.select_is_in_db(e) or self.select_event_cb(e):
                 actionstr = self._add_event_to_db(e)
-                if self.debug_events == 1:
-                    print(f"EVENT: {e} {actionstr}")
-                elif self.debug_events == 2:
-                    print(f"EVENT: {e} {e.data} {actionstr}")
+                if flagdebug.debug("events") == 1:
+                    eprint(f"EVENT: {e} {actionstr}")
+                if flagdebug.debug("events") >= 2:
+                    eprint(f"EVENT: {e} {e.data} {actionstr}")
                 return True
             else:
-                # log.debug(f"USER FILTERED: {e}")
+                if flagdebug.debug("db"):
+                    log.debug(f"EVENTFILTERED: {e}")
                 pass
         else:
-            # log.debug(f"OLD EVENT: {e}")
+            if flagdebug.debug("db"):
+                log.debug(f"OLDEVENT: {e}")
             pass
         return False
 

@@ -26,12 +26,13 @@ import requests
 
 from nomad_tools.common_nomad import NoJobFound
 
-from . import colors, exit_on_thread_exception, nomadlib
 from .common import (
     alias_option,
     andjoin,
     cached_property,
     common_options,
+from . import colors, exit_on_thread_exception, flagdebug, nomadlib
+from .common_base import andjoin, cached_property, composed, eprint
     complete_job,
     complete_set_namespace,
     completor,
@@ -749,8 +750,6 @@ class NomadJobWatcher(ABC):
             select_event_cb=self.__db_select_event_job,
             init_cb=self.__db_init_cb,
             force_polling=True if args.polling else None,
-            debug_events=args.debug_events,
-            debug_recv=args.debug_recv,
         )
         """Database listening to Nomad stream"""
         self.notifier = NotifierWorker(self.db)
@@ -933,6 +932,28 @@ class NomadJobWatcher(ABC):
         for events in self.db.events():
             for event in events:
                 self.__handle_event(event)
+            if flagdebug.debug("loop"):
+                info = dict(
+                    e=f"{events[0].topic.name}.{events[0].type.name}"
+                    if events
+                    else None,
+                    done=self.done.is_set(),
+                    eval=self.eval is None or not self.eval.is_pending_or_blocked(),
+                    finish_cb=self.finish_cb(),
+                    job_is_finished=self.job_is_finished(),
+                    jobDeregister=self.db.job_deregistered,
+                    seenJob=self.db.seen_job(),
+                    activeEvals=self.has_active_evaluations(),
+                    activeAllocs=self.has_active_allocations(),
+                    activeDeploys=self.has_active_deployments(),
+                    purgedReq=self.was_purgedreq(),
+                    jobDead=self.job.is_dead() if self.job else None,
+                )
+                infostr = " ".join(
+                    f"{k}={int(v) if v is True or v is False else v}"
+                    for k, v in info.items()
+                )
+                eprint(f"LOOP: {infostr}")
             if (
                 not self.done.is_set()
                 and not args.follow
@@ -1223,8 +1244,6 @@ class NomadAllocationWatcher:
                 )
             ],
             force_polling=True if args.polling else None,
-            debug_events=args.debug_events,
-            debug_recv=args.debug_recv,
         )
         self.allocworkers = NotifierWorker(self.db)
         self.finished = False
@@ -1360,9 +1379,7 @@ Examples:
 )
 @click.option("-v", "--verbose", count=True, help="Be more verbose.")
 @click.option("-q", "--quiet", count=True, help="Be less verbose.")
-@click.option("--debug-recv", count=True, hidden=True)
-@click.option("--debug-events", count=True, hidden=True)
-@click.option("--debug-loop", is_flag=True, hidden=True)
+@flagdebug.click_debug_option("NOMAD_WATCH_DEBUG")
 @click.option(
     "-A",
     "--attach",
