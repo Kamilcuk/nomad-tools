@@ -210,6 +210,7 @@ class Eval(DataDict):
     Status: str
     WaitUntil: str
     FailedTGAllocs: Dict[str, AllocationMetric]
+    TriggeredBy: Optional[str] = None
 
     def is_pending_or_blocked(self):
         return self.Status in [EvalStatus.pending, EvalStatus.blocked]
@@ -490,6 +491,18 @@ class Event:
         statusstr = " ".join(f"{k}={v}" for k, v in status.items() if v is not None)
         return f"Event({self.topic.name}.{self.type.name} {statusstr})"
 
+    def job(self) -> Job:
+        return Job(self.data)
+
+    def eval(self) -> Eval:
+        return Eval(self.data)
+
+    def alloc(self) -> Alloc:
+        return Alloc(self.data)
+
+    def deployment(self) -> Deploy:
+        return Deploy(self.data)
+
     def is_job(self):
         return self.topic == EventTopic.Job
 
@@ -501,18 +514,6 @@ class Event:
 
     def is_deployment(self):
         return self.topic == EventTopic.Deployment
-
-    def get_job(self) -> Optional[Job]:
-        return Job(self.data) if self.is_job() else None
-
-    def get_eval(self) -> Optional[Eval]:
-        return Eval(self.data) if self.is_eval() else None
-
-    def get_alloc(self) -> Optional[Alloc]:
-        return Alloc(self.data) if self.is_alloc() else None
-
-    def get_deployment(self) -> Optional[Deploy]:
-        return Deploy(self.data) if self.is_deployment() else None
 
     def apply(
         self,

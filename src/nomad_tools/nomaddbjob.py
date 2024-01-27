@@ -160,7 +160,15 @@ class NomadDbJob:
                 # self.job follows newest modify index.
                 self.job = job
         elif e.topic == EventTopic.Evaluation:
-            if e.type == EventType.JobDeregistered:
+            # Handle job deregister event by clearing self.job.
+            if e.eval().Status == "complete" and (
+                e.type == EventType.JobDeregistered
+                or (
+                    e.type == EventType.EvaluationUpdated
+                    and e.eval().TriggeredBy == "job-deregister"
+                )
+            ):
+                actionstr = "Removing job becaue eval"
                 self.job = None
             self.evaluations[e.data["ID"]] = nomadlib.Eval(e.data)
         elif e.topic == EventTopic.Allocation:
