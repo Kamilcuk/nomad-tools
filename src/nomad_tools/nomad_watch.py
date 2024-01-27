@@ -759,9 +759,9 @@ class NomadJobWatcher(ABC):
         """The thread that parses database events"""
         self.dbseenjob: bool = False
         """The job was found at least once."""
-        self.purged: bool = False
-        """If set, we are waiting until the job is there and it means that JobNotFound is not an error - the job was removed."""
-        self.purgedlock: threading.Lock = threading.Lock()
+        self.purgedreq: bool = False
+        """If set, we have sent a request to purge the job"""
+        self.purgedreq_lock: threading.Lock = threading.Lock()
         """A special lock to synchronize callback with changing finish conditions"""
         self.donemsg: Optional[str] = None
         """Message printed when done watching. It is not printed right away, because we might decide to wait for purging later."""
@@ -771,9 +771,10 @@ class NomadJobWatcher(ABC):
         self.db.start()
         self.thread.start()
 
-    def was_purged(self):
-        with self.purgedlock:
-            return self.purged
+    def was_purgedreq(self):
+        """Return true if we sent a request to purge the job"""
+        with self.purgedreq_lock:
+            return self.purgedreq
 
     def __db_init_cb(self) -> List[Event]:
         """Db initialization callback"""
@@ -785,7 +786,7 @@ class NomadJobWatcher(ABC):
             allocations: List[dict] = mynomad.get(f"job/{self.jobid}/allocations")
         except nomadlib.JobNotFound:
             # This is fine to fail if it was purged, potentially.
-            if self.was_purged() and self.job:
+            if self.was_purgedreq() and self.job:
                 # If the job was purged, generate one event so that listener can catch it.
                 return [
                     Event(EventTopic.Job, EventType.JobRegistered, self.job.asdict())
@@ -952,8 +953,8 @@ class NomadJobWatcher(ABC):
     def stop_job(self, purge: bool):
         self.db.initialized.wait()
         if purge:
-            with self.purgedlock:
-                self.purged = True
+            with self.purgedreq_lock:
+                self.purgedreq = True
                 self.done.clear()
         mynomad.stop_job(self.jobid, purge)
 
@@ -1013,7 +1014,7 @@ class NomadJobWatcher(ABC):
         ):
             # Depending on purge argument, we wait for the job to stop existing
             # or for the job to be dead.
-            if self.was_purged():
+            if self.was_purgedreq():
                 if self.db.job is None:
                     self.donemsg = f"Job {self.job.description()} removed with no active allocations, evaluations nor deployments. Exiting."
                     return True
