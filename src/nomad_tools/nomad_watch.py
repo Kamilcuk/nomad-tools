@@ -740,6 +740,8 @@ class NomadJobWatcher(ABC):
             select_event_cb=self.__db_select_event_job,
             init_cb=self.__db_init_cb,
             force_polling=True if args.polling else None,
+            debug_events=args.debug_events,
+            debug_recv=args.debug_recv,
         )
         """Database listening to Nomad stream"""
         self.notifier = NotifierWorker(self.db)
@@ -1217,6 +1219,8 @@ class NomadAllocationWatcher:
                 )
             ],
             force_polling=True if args.polling else None,
+            debug_events=args.debug_events,
+            debug_recv=args.debug_recv,
         )
         self.allocworkers = NotifierWorker(self.db)
         self.finished = False
@@ -1352,6 +1356,9 @@ Examples:
 )
 @click.option("-v", "--verbose", count=True, help="Be more verbose.")
 @click.option("-q", "--quiet", count=True, help="Be less verbose.")
+@click.option("--debug-recv", count=True, hidden=True)
+@click.option("--debug-events", count=True, hidden=True)
+@click.option("--debug-loop", is_flag=True, hidden=True)
 @click.option(
     "-A",
     "--attach",
