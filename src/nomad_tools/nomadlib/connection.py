@@ -25,15 +25,25 @@ def _default_session():
     return s
 
 
-class PermissionDenied(Exception):
+class APIException(requests.HTTPError):
+    def __init__(self, e: requests.HTTPError):
+        """Just construct from other requests.HTTPError"""
+        super().__init__(request=e.request, response=e.response)
+
+
+class PermissionDenied(APIException):
     pass
 
 
-class JobNotFound(Exception):
+class JobNotFound(APIException):
     pass
 
 
-class VariableNotFound(Exception):
+class VariableNotFound(APIException):
+    pass
+
+
+class LogNotFound(APIException):
     pass
 
 
@@ -124,7 +134,7 @@ class NomadConn(Requestor):
         params.setdefault(
             "namespace", self.namespace or os.environ.get("NOMAD_NAMESPACE", "*")
         )
-        ret = self.session.request(
+        req = self.session.request(
             method,
             os.environ.get("NOMAD_ADDR", "http://127.0.0.1:4646") + "/v1/" + url,
             *args,
@@ -151,19 +161,27 @@ class NomadConn(Requestor):
             **kvargs,
         )
         try:
-            ret.raise_for_status()
+            req.raise_for_status()
         except requests.HTTPError as e:
-            resp = (ret.status_code, ret.text.lower())
-            if resp == (500, "permission denied"):
-                raise PermissionDenied(str(e)) from e
-            elif resp == (404, "job not found"):
-                raise JobNotFound(str(e)) from e
-            elif resp == (404, "variable not found"):
-                raise VariableNotFound(str(e)) from e
-            elif ret.status_code == 500:
-                log.exception(resp)
+            code = req.status_code
+            text = req.text.lower()
+            url = req.url
+            if code == 500 and text == "permission denied":
+                raise PermissionDenied(e) from e
+            elif code == 404 and text == "job not found":
+                raise JobNotFound(e) from e
+            elif "/v1/var/" in url and code == 404 and text == "variable not found":
+                raise VariableNotFound(e) from e
+            elif (
+                "/v1/client/fs/logs/" in url
+                and code in (404, 500)
+                and "no such file or directory" in text
+            ):
+                raise LogNotFound(e) from e
+            else:
+                log.exception(f"{code} {text!r}")
             raise
-        return ret
+        return req
 
     def jobhcl2json(self, hcl: str):
         return self.post("jobs/parse", json={"JobHCL": hcl})

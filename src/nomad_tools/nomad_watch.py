@@ -416,14 +416,17 @@ class TaskLogger(threading.Thread):
         """Listen to Nomad log stream and print the logs"""
         try:
             self.__run_in()
-        except (requests.HTTPError, requests.exceptions.HTTPError) as e:
-            if e.response and e.response.status_code in (404, 500):
-                self.tk.log_alloc(
-                    datetime.datetime.now(),
-                    f"Error getting {self.__typestr()} logs: {e.response} {e.response.text!r}",
-                )
-            else:
-                raise
+        except nomadlib.LogNotFound as e:
+            # Gracefully handle missing logs errors from Nomad.
+            # Logs are removed by garbage collector and when purging the job.
+            code = e.response.status_code if e.response is not None else None
+            text = e.response.text if e.response is not None else None
+            self.tk.log_alloc(
+                datetime.datetime.now(),
+                f"Error getting {self.__typestr()} logs: {code} {text!r}",
+            )
+        except requests.HTTPError:
+            raise
 
     def stop(self):
         self.exitevent.set()
