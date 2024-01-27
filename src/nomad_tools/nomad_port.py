@@ -33,7 +33,8 @@ def gen_alloc(alloc: nomadlib.Alloc) -> List[str]:
             **{
                 k: v
                 for k, v in alloc.items()
-                if isinstance(v, str) and isinstance(k, str)
+                if isinstance(k, str)
+                and (v is None or isinstance(v, (float, int, str)))
             },
             label=label,
             host=port["HostIP"],
@@ -83,6 +84,17 @@ long_format = "{host} {port} {label} {Name} {ID}"
 Print dynamic ports allocated by Nomad for a specific job or allocation.
 If no ports are found, exit with 2 exit status.
 If label argument is given, outputs only redirects which label is equal to given label.
+
+\b
+The following variables are available for --format option:
+  host    IP address allocated by Nomad
+  port    port number allocated by Nomad
+  label   the port name used in Nomad job definition
+  ID      allocation ID that allocates this port
+  Name    the name of the allocation from Nomad API, composed of <job>.<group>[<index>]
+And any other key from Nomad allocation API definition which value is a string or a number.
+
+\b
 Exits with the following exit status:
   0  if at least one redirection was found,
   1  on python exception, missing job,
@@ -93,7 +105,7 @@ Exits with the following exit status:
     "-f",
     "--format",
     default=default_format,
-    help=f"The python .format() to print the output with. [default: {default_format!r}]",
+    help=f"The template used to format output. Templated with python .format() function. [default: {default_format!r}]",
 )
 @alias_option(
     "-l",
@@ -113,7 +125,7 @@ Exits with the following exit status:
 @click.option("--alloc", is_flag=True, help="The argument is an allocation, not job id")
 @click.option(
     "--all",
-    help="Show all allocation ports, not only running or pending allocations.",
+    help="Show ports of all allocations associated with the job, not only running or pending allocations.",
     is_flag=True,
 )
 @click.option(
