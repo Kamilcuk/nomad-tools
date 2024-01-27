@@ -985,14 +985,8 @@ class NomadJobWatcher(ABC):
         exit(self.get_exitcode())
 
     def has_active_deployments(self):
-        for deployments in self.db.deployments.values():
-            if deployments.Status in [
-                nomadlib.DeploymentStatus.initializing,
-                nomadlib.DeploymentStatus.running,
-                nomadlib.DeploymentStatus.pending,
-                nomadlib.DeploymentStatus.blocked,
-                nomadlib.DeploymentStatus.paused,
-            ]:
+        for deployment in self.db.deployments.values():
+            if not deployment.is_finished():
                 return True
         return False
 

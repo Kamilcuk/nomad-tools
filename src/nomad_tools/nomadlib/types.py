@@ -415,6 +415,13 @@ class Deploy(DataDict):
     StatusDescription: str
     TaskGroups: Dict[str, DeploymentTaskGroup]
 
+    def is_finished(self):
+        return self.Status in [
+            DeploymentStatus.cancelled,
+            DeploymentStatus.failed,
+            DeploymentStatus.successful,
+        ]
+
 
 class EventTopic(MyStrEnum):
     """Topic of an event from Nomad event stream"""
