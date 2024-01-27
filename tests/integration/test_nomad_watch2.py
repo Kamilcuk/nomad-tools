@@ -180,3 +180,46 @@ def test_nomad_watch2_deploymulti():
         )
     finally:
         run_nomad_watch(f"-x purge {job}")
+
+
+def test_nomad_watch2_onestays():
+    job = "test-onestays"
+    try:
+        run_nomad_watch(f"-x purge {job}")
+        run_nomad_watch(
+            f"start {testjobs[job]}",
+            output=[
+                re.compile(
+                    "deploy>.*>v0>.*1stays.*Canaries=0/0 Placed=1 Desired=1 Healthy=1 Unhealthy=0 Deployment completed successfully"
+                ),
+                re.compile(
+                    "deploy>.*>v0>.*2change.*Canaries=0/0 Placed=1 Desired=1 Healthy=1 Unhealthy=0 Deployment completed successfully"
+                ),
+                re.compile(
+                    "deploy>.*>v0>.*3change.*Canaries=0/0 Placed=1 Desired=1 Healthy=1 Unhealthy=0 Deployment completed successfully"
+                ),
+            ],
+        )
+        run_nomad_watch(
+            f"start {testjobs[job]}",
+            output=[],
+        )
+        run_nomad_watch(
+            f"start {testjobs[job]}",
+            output=[
+                # Version 1
+                re.compile(
+                    "deploy>.*>v1>.*1stays.*Canaries=0/0 Placed=1 Desired=1 Healthy=1 Unhealthy=0 Deployment completed successfully"
+                ),
+                # These have canaries=1/1, but the above does not.
+                re.compile(
+                    "deploy>.*>v1>.*2change.*Canaries=1/1 Placed=1 Desired=1 Healthy=1 Unhealthy=0 Deployment completed successfully"
+                ),
+                re.compile(
+                    "deploy>.*>v1>.*3change.*Canaries=1/1 Placed=1 Desired=1 Healthy=1 Unhealthy=0 Deployment completed successfully"
+                ),
+            ],
+        )
+        run_nomad_watch(f"purge {job}", check=False, timeout=20)
+    finally:
+        run_nomad_watch(f"-x purge {job}")
