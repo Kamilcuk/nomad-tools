@@ -14,9 +14,12 @@ import json
 import logging
 import re
 import shlex
+import signal
 import subprocess
+import sys
 import threading
 import time
+import traceback
 from abc import ABC, abstractmethod
 from http import client as http_client
 from typing import Dict, List, Optional, Pattern, Set, Tuple, TypeVar
@@ -60,6 +63,15 @@ def set_not_in_add(s: Set[T], value: T) -> bool:
         return False
     s.add(value)
     return True
+
+
+def print_all_threads_stacktrace(*args):
+    eprint("Received SIGUSR1")
+    for th in threading.enumerate():
+        eprint(th)
+        if th.ident:
+            traceback.print_stack(sys._current_frames()[th.ident], file=sys.stderr)
+        eprint()
 
 
 ###############################################################################
@@ -1453,6 +1465,7 @@ Examples:
 @click_log_options()
 @common_options()
 def cli(**kwargs):
+    signal.signal(signal.SIGUSR1, print_all_threads_stacktrace)
     exit_on_thread_exception.install()
     global args
     args = argparse.Namespace(**kwargs)
