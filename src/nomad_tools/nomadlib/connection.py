@@ -92,15 +92,16 @@ class VariableConn(_Conn):
         try:
             return types.Variable(
                 self.r.put(var_path, json={"Items": items}),
-                params={cas: cas} if cas else None,
+                params={cas: cas} if cas is not None else None,
             )
         except requests.HTTPError as e:
             if e.response and e.response.status_code == 409:
                 raise VariableConflict(types.Variable(e.response.json()))
             raise
 
-    def delete(self, var_path: str):
-        return self.r.delete(var_path)
+    def delete(self, var_path: str, cas: Optional[int] = None):
+        # request does not read DELETE response, so there is no JSON. Call requests, instead of wrapper above.
+        self.r.request("DELETE", var_path, params={cas: cas} if cas is not None else None)
 
 
 class NomadConn(Requestor):

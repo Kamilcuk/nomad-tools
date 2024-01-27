@@ -196,6 +196,7 @@ def run(
             rr.returncode != 0
         ), f"Command {rr} died with zero {rr.returncode}, which is wrong"
         check = None
+        print("+ all fine - command is expected to fail")
     if isinstance(check, int):
         check = [check]
     if isinstance(check, list):

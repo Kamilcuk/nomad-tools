@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 from shlex import split
-from typing import Callable, Dict, Iterable, List, Optional, Set, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Union
 
 import click
 from click.shell_completion import CompletionItem
@@ -116,30 +116,37 @@ class NomadVariable:
     path: str
 
     def put_cb(self, items: Dict[str, str], cas: Optional[int] = None):
-        return mynomad.variables.create(self.path, items, cas)
+        """Update variable with items"""
+        mynomad.variables.create(self.path, items, cas)
 
     def get_cb(self) -> Optional[nomadlib.Variable]:
+        """Get the variable content"""
         try:
             return mynomad.variables.read(self.path)
         except nomadlib.VariableNotFound:
             return None
 
+    def delete_cb(self, cas: Optional[int] = None):
+        """Delete the variable from Nomad"""
+        mynomad.variables.delete(self.path, cas)
+
     def put(self, items: Dict[str, str], cas: Optional[int] = None):
-        return self.put_cb(items, cas)
+        assert items
+        self.put_cb(items, cas)
 
     def get(self) -> Dict[str, str]:
         r = self.get_cb()
         return r.Items if r else {}
 
-    def get_select(self, paths: List[Path]) -> Dict[str, str]:
+    def delete(self, cas: Optional[int] = None):
+        self.delete_cb(cas)
+
+    def get_select(self, keys: Union[List[str], List[Path]]) -> Dict[str, str]:
+        """Get key:value from Nomad variable and select only given keys"""
         d = self.get()
-        if not paths:
+        if not keys:
             return d
-        r = {}
-        for path in paths:
-            n = str(path)
-            r[n] = d[n]
-        return r
+        return {str(key): d[str(key)] for key in keys}
 
     def desc(self):
         return f"{self.path}@{os.environ['NOMAD_NAMESPACE']}"
@@ -150,6 +157,10 @@ class NomadVariable:
         check_index: Optional[int],
         force: bool,
     ):
+        """
+        Retrieve the current Noamd variable value, run the callback,
+        and update the Nomad variable value with the returned data.
+        """
         assert sum([force, check_index is None]) <= 1, "either --force or --check-index"
         oldvar = self.get_cb()
         olditems = oldvar.Items if oldvar else {}
@@ -160,7 +171,6 @@ class NomadVariable:
         if newitems == olditems:
             log.info(f"No changes in {VAR.desc()}")
         else:
-            log.info(f"Putting var {VAR.desc()} with keys: {dict_keys_str(newitems)}")
             cas: Optional[int] = (
                 check_index
                 if check_index is not None
@@ -170,12 +180,19 @@ class NomadVariable:
                 if oldvar
                 else 0
             )
-            try:
-                VAR.put(newitems, cas)
-            except VariableConflict as e:
-                raise Exception(
-                    f"Variable update conflict. Pass --check-index={e.variable.ModifyIndex}"
-                ) from e
+            if newitems:
+                log.info(
+                    f"Putting var {VAR.desc()} with keys: {dict_keys_str(newitems)}"
+                )
+                try:
+                    VAR.put(newitems, cas)
+                except VariableConflict as e:
+                    raise Exception(
+                        f"Variable update conflict. Pass --check-index={e.variable.ModifyIndex}"
+                    ) from e
+            else:
+                log.info(f"Removing empty var {VAR.desc()}")
+                VAR.delete(cas)
 
 
 @dataclasses.dataclass
@@ -204,6 +221,7 @@ class MockNomadVariable(NomadVariable):
 
     @override
     def put_cb(self, items: Dict[str, str], cas: Optional[int] = None):
+        assert items
         data = self.__load()
         data[self.path] = items
         self.__save(data)
@@ -213,6 +231,12 @@ class MockNomadVariable(NomadVariable):
         return nomadlib.Variable(
             dict(Items=self.__load().get(self.path, {}), ModifyIndex=1)
         )
+
+    @override
+    def delete_cb(self, cas: Optional[int] = None):
+        data = self.__load()
+        del data[self.path]
+        self.__save(data)
 
 
 @dataclasses.dataclass
@@ -238,15 +262,18 @@ class MakeNomadVariable:
         return (MockNomadVariable if self.test else NomadVariable)(path)
 
 
-def create_tree(dir: Path, items: Dict[str, str]):
+def create_tree(dir: Path, items: Dict[str, str], dryrun: bool = False):
     """Create files with paths as keys from data and content as values from data in directory dir"""
-    dir.mkdir(parents=True, exist_ok=True)
+    dryrunstr = "DRY RUN: " if dryrun else ""
+    if not dryrun:
+        dir.mkdir(parents=True, exist_ok=True)
     for k, v in items.items():
         p = dir / k
-        log.info(f"Creating {p} with {len(v)} bytes")
-        p.parent.mkdir(parents=True, exist_ok=True)
-        with p.open("w+") as f:
-            f.write(v)
+        log.info(f"{dryrunstr}Creating {p} with {len(v)} bytes")
+        if not dryrun:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            with p.open("w+") as f:
+                f.write(v)
 
 
 def recurse_directories(paths: Iterable[Path]) -> List[Path]:
@@ -332,18 +359,20 @@ def complete_vardir_paths(
     return [k for k in d.keys()]
 
 
-def click_vardir_paths():
+def click_vardir_keys(required: bool = False, name: str = "keys", type: Any = str):
     return click.argument(
-        "paths",
-        type=click.Path(path_type=Path, exists=False),
+        name,
         nargs=-1,
         shell_complete=complete_vardir_paths,
+        type=type,
+        required=required,
     )
 
 
-def paths_notempty(paths: List[Path]):
-    if not paths:
-        raise Exception("no PATHS given")
+def click_vardir_paths(required: bool = False):
+    return click_vardir_keys(
+        required=required, name="paths", type=click.Path(path_type=Path, exists=False)
+    )
 
 
 @click.group(
@@ -426,7 +455,7 @@ def cli(
     **kwargs,
 ):
     logging.basicConfig(
-        format="%(module)s: %(message)s",
+        format="%(levelname)s %(module)s:%(filename)s:%(lineno)s: %(message)s",
         level=logging.DEBUG if verbose else logging.INFO,
     )
     global ARGS
@@ -436,56 +465,78 @@ def cli(
 
 
 @cli.command("ls")
-@click_vardir_paths()
-def mode_ls(paths: List[Path]):
-    d = VAR.get_select(paths)
-    if not d:
+@click.option("-1", "--one", is_flag=True, help="List keys one per line")
+@click_vardir_keys()
+def mode_ls(keys: List[str], one: bool):
+    kv = VAR.get_select(keys)
+    if not kv:
+        log.error(f"Nomad variable not found at {VAR.desc()}")
         return
-    w = [
-        max(len(k) for k in d.keys()),
-        max(len(v) for v in d.values()),
-    ]
+    if one:
+        for k in kv.keys():
+            print(k)
+        return
+    log.info(f"Listing Nomad variable at {VAR.desc()}")
+    # Convert to key: length(value).
+    kv = {k: str(len(v)) for k, v in kv.items()}
+    # Calculate column widths.
+    w = [max(len(k) for k in kv.keys()), max(len(v) for v in kv.values())]
+    # Output.
     print(f"{'key':{w[0]}} {'size':{w[1]}}")
-    for k, v in d.items():
-        print(f"{k:{w[0]}} {str(len(v)):{w[1]}}")
+    for k, v in kv.items():
+        print(f"{k:{w[0]}} {v:{w[1]}}")
 
 
 @cli.command("cat")
-@click_vardir_paths()
-def mode_cat(paths: List[Path]):
-    paths_notempty(paths)
-    for v in VAR.get_select(paths).values():
+@click_vardir_keys(required=True)
+def mode_cat(keys: List[str]):
+    for v in VAR.get_select(keys).values():
         print(v)
 
 
 @cli.command(
     "get",
-    help="Get files stored in Nomad variables and store them",
+    help="Get keys stored in Nomad variable and save them as files",
 )
-@click_vardir_paths()
-def mode_get(paths: List[Path]):
-    paths_notempty(paths)
-    create_tree(ARGS.relative, VAR.get_select(paths))
+@click.option("-n", "--dryrun", is_flag=True)
+@click_vardir_paths(required=True)
+def mode_get(paths: List[Path], dryrun: bool):
+    create_tree(ARGS.relative, VAR.get_select(paths), dryrun)
 
 
-@cli.command("diff", help="Show diff between directory and Nomad variable")
-@click_vardir_paths()
+@cli.command(
+    "diff",
+    help="Given files, show diff between the file content and keys values stored in Nomad variable",
+)
+@click_vardir_paths(required=True)
 def mode_diff(paths: List[Path]):
-    d = VAR.get_select(paths)
+    d = VAR.get()
     paths = paths if paths else [Path(x) for x in d.keys()]
     exit(2 * show_diff(d, load_directory(paths)))
 
 
-@cli.command("rm")
+@cli.command("rm", help="Remove keys from Nomad variable")
 @click.option("--force", is_flag=True, help="Like nomad var put -force")
 @click.option("--check-index", type=int, help="Like nomad var put -check-index")
-@click_vardir_paths()
-def mode_rm(paths: List[Path], check_index: Optional[int], force: bool):
+@click.option(
+    "-c",
+    "--continue",
+    "continue_",
+    is_flag=True,
+    help="Do not error on inexisting keys",
+)
+@click_vardir_keys()
+def mode_rm(keys: List[str], check_index: Optional[int], force: bool, continue_: bool):
     def mode_rm_gen_newitems(newitems: Dict[str, str]) -> Dict[str, str]:
-        for path in paths:
-            n = str(path)
-            del newitems[n]
-            log.info(f"Removing {n}")
+        for key in keys:
+            if key in newitems:
+                log.info(f"Removing {key}")
+            if not continue_ or key in newitems:
+                try:
+                    del newitems[key]
+                except KeyError:
+                    raise Exception(f"Key not found: {key}")
+
         return newitems
 
     VAR.updater(mode_rm_gen_newitems, check_index, force)
@@ -494,7 +545,7 @@ def mode_rm(paths: List[Path], check_index: Optional[int], force: bool):
 @cli.command(
     "put",
     help="""
-    Put files in given PATHS and upload filenames as keys and files contents as values to nomad variable store.
+    For each file, set key as the name of the file and value to the file content.
     """,
 )
 @click.option("-r", "--recursive", is_flag=True)
@@ -511,6 +562,7 @@ def mode_rm(paths: List[Path], check_index: Optional[int], force: bool):
     "paths",
     type=click.Path(path_type=Path, exists=True),
     nargs=-1,
+    required=True,
 )
 def mode_put(
     recursive: bool,
@@ -520,8 +572,6 @@ def mode_put(
     define: List[str],
     paths: List[Path],
 ):
-    assert paths or define, "Either --define or PATHS have to be given"
-
     def mode_put_gen_newitems(newitems: Dict[str, str]) -> Dict[str, str]:
         if clear:
             newitems = {}
@@ -534,6 +584,27 @@ def mode_put(
         return newitems
 
     VAR.updater(mode_put_gen_newitems, check_index, force)
+
+
+@cli.command(
+    "set",
+    help="Set key to the value at given path",
+)
+@click.option("--force", is_flag=True, help="Like nomad var put -force")
+@click.option("--check-index", type=int, help="Like nomad var put -check-index")
+@click.argument("key")
+@click.argument("value")
+def mode_set(
+    force: bool,
+    check_index: Optional[int],
+    key: str,
+    value: str,
+):
+    def mode_set_key(newitems: Dict[str, str]) -> Dict[str, str]:
+        newitems[key] = value
+        return newitems
+
+    VAR.updater(mode_set_key, check_index, force)
 
 
 ###############################################################################
