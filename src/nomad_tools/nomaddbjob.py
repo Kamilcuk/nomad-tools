@@ -22,6 +22,8 @@ class NomadDbJob:
         select_event_cb: Callable[[Event], bool],
         init_cb: Callable[[], List[Event]],
         force_polling: Optional[bool] = None,
+        debug_recv: int = 0,
+        debug_events: int = 0,
     ):
         """
         :param topic The topics to listen to, see Nomad event stream API documentation.
@@ -33,6 +35,8 @@ class NomadDbJob:
         self.select_event_cb: Callable[[Event], bool] = select_event_cb
         self.force_polling = force_polling
         self.queue: queue.Queue[Optional[List[Event]]] = queue.Queue()
+        self.debug_recv = debug_recv
+        self.debug_events = debug_events
         """Queue where database thread puts the received events"""
         self.job: Optional[nomadlib.Job] = None
         """Watched job. Is None if the job was deregistered."""
@@ -74,7 +78,10 @@ class NomadDbJob:
                         )
                         for event in data.get("Events", [])
                     ]
-                    # log.debug(f"RECV EVENTS: {events}")
+                    if self.debug_recv == 1 and events:
+                        print(f"RECVEVENTS: {[str(e) for e in events]}")
+                    elif self.debug_recv == 2:
+                        print(f"RECVEVENTS: {events}")
                     self.queue.put(events)
                 if self.stopevent.is_set():
                     break
@@ -142,10 +149,12 @@ class NomadDbJob:
 
     def _add_event_to_db(self, e: Event):
         """Update database state to reflect received event"""
+        actionstr = ""
         if e.topic == EventTopic.Job:
             job = nomadlib.Job(e.data)
             self.jobversions[job.get("Version")] = job
             if e.type == EventType.JobDeregistered:
+                actionstr = "Removing job becaue eval"
                 self.job = None
             elif self.job is None or job.ModifyIndex >= self.job.ModifyIndex:
                 # self.job follows newest modify index.
@@ -161,13 +170,16 @@ class NomadDbJob:
             )
         elif e.topic == EventTopic.Deployment:
             self.deployments[e.data["ID"]] = nomadlib.Deploy(e.data)
+        return actionstr
 
     def handle_event(self, e: Event) -> bool:
         if self._select_new_event(e):
             if self.select_is_in_db(e) or self.select_event_cb(e):
-                # log.debug(f"EVENT: {e}")
-                # log.debug(f"EVENT: {e} {e.data}")
-                self._add_event_to_db(e)
+                actionstr = self._add_event_to_db(e)
+                if self.debug_events == 1:
+                    print(f"EVENT: {e} {actionstr}")
+                elif self.debug_events == 2:
+                    print(f"EVENT: {e} {e.data} {actionstr}")
                 return True
             else:
                 # log.debug(f"USER FILTERED: {e}")
