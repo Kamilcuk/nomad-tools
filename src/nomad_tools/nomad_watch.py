@@ -120,7 +120,7 @@ class LOGFORMAT:
         hello world
     """
     LOGGING = (
-        COLORS.blue
+        COLORS.brightblue
         + "{'%(asctime)s>' if args.log_time else ''}"
         + "{'nomad-watch' if args.verbose <= 0 else '%(module)s'}>"
         + "%(lineno)03d>"
