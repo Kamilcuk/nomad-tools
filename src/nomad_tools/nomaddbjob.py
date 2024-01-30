@@ -329,4 +329,9 @@ class NomadDbJob:
         return ret.Version if ret else None
 
     def seen_job(self) -> bool:
+        """Check if the job event type has been received at least once from the event stream"""
         return self.job is not None
+
+    def add_empty_event(self):
+        """Send an empty event to trigger the loop if needed by the user"""
+        self.queue.put([])
