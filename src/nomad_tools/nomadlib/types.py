@@ -13,11 +13,12 @@ from .datadict import DataDict
 log = logging.getLogger(__name__)
 
 
-def strdict(**kvargs):
+def strdict(__map: Dict[str, Any] = {}, **kvargs):
     """Dictionary to var=val space separated elements"""
+    __map.update(kvargs)
     return " ".join(
         f"{k}={int(v) if v is True or v is False else v}"
-        for k, v in kvargs.items()
+        for k, v in __map.items()
         if v is not None
     )
 
