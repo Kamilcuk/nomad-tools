@@ -20,7 +20,7 @@ class Flagdebug(Counter[str]):
     def __call__(self, name: str) -> int:
         if "all" in self:
             return 100
-        return self[name]
+        return self[name.lower()]
 
 
 debug = Flagdebug()
