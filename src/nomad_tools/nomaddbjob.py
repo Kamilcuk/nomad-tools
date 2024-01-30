@@ -73,10 +73,10 @@ class NomadDbJob:
                     data = json_loads(line)
                     events: List[Event] = [
                         Event(
+                            data["Index"],
                             EventTopic[event["Topic"]],
                             EventType[event["Type"]],
                             event["Payload"][event["Topic"]],
-                            stream=True,
                         )
                         for event in data.get("Events", [])
                     ]

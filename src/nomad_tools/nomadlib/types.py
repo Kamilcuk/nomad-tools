@@ -490,11 +490,10 @@ R = TypeVar("R")
 class Event:
     """Parsed Event from Nomad event stream"""
 
+    index: int
     topic: EventTopic
     type: EventType
     data: dict
-    stream: bool = False
-    """Is the event coming from a stream?"""
 
     def __str__(self):
         status = dict(
@@ -506,11 +505,10 @@ class Event:
             ModifyIndex=self.data.get("ModifyIndex"),
             Status=self.data.get("Status"),
             ClientStatus=self.data.get("ClientStatus"),
-            stream=1 if self.stream else 0,
             TriggeredBy=self.data.get("TriggeredBy"),
         )
         statusstr = " ".join(f"{k}={v}" for k, v in status.items() if v is not None)
-        return f"Event({self.topic.name}.{self.type.name} {statusstr})"
+        return f"Event({self.index} {self.topic.name}.{self.type.name} {statusstr})"
 
     def job(self) -> Job:
         return Job(self.data)

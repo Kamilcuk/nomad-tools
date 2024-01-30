@@ -801,7 +801,9 @@ class NomadJobWatcher(ABC):
             if self.was_purgedreq() and self.job:
                 # If the job was purged, generate one event so that listener can catch it.
                 return [
-                    Event(EventTopic.Job, EventType.JobRegistered, self.job.asdict())
+                    Event(
+                        -1, EventTopic.Job, EventType.JobRegistered, self.job.asdict()
+                    )
                 ]
             raise
         # Set the job if not set for the first time.
@@ -812,25 +814,27 @@ class NomadJobWatcher(ABC):
                 f" with {len(allocations)} allocations"
             )
         # Finally output the events for database to pick up.
-        return [
-            Event(EventTopic.Job, EventType.JobRegistered, job),
+        events: List[Event] = [
+            Event(-2, EventTopic.Job, EventType.JobRegistered, job),
             *[
-                Event(EventTopic.Job, EventType.JobRegistered, job)
+                Event(-3, EventTopic.Job, EventType.JobRegistered, job)
                 for job in jobversions
             ],
             *[
-                Event(EventTopic.Deployment, EventType.DeploymentStatusUpdate, d)
+                Event(-4, EventTopic.Deployment, EventType.DeploymentStatusUpdate, d)
                 for d in deployments
             ],
             *[
-                Event(EventTopic.Evaluation, EventType.EvaluationUpdated, e)
+                Event(-5, EventTopic.Evaluation, EventType.EvaluationUpdated, e)
                 for e in evaluations
             ],
             *[
-                Event(EventTopic.Allocation, EventType.AllocationUpdated, a)
+                Event(-6, EventTopic.Allocation, EventType.AllocationUpdated, a)
                 for a in allocations
             ],
         ]
+        events.sort(key=lambda event: event.data["ModifyIndex"])
+        return events
 
     def __db_select_event_job_id(self, e: Event):
         """Select only events about observed job ID. Ignore all events about other jobs."""
