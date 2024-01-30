@@ -251,6 +251,7 @@ class NomadDbJob:
         log.debug("Stopping listen Nomad stream")
         self.initialized.set()
         self.stopevent.set()
+        self.queue.put(None)
 
     def join(self):
         # Not joining - neither requests nor stream API allow for timeouts.
