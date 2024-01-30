@@ -100,26 +100,25 @@ class NomadDbJob:
     def __thread_entry(self):
         """Database thread entry"""
         try:
-            try:
-                if self.force_polling is True:
-                    self.__thread_poll()
-                else:
-                    try:
-                        self.__thread_run_stream()
-                    except nomadlib.PermissionDenied as e:
-                        if self.force_polling is False:
-                            raise
-                        else:
-                            log.warning(
-                                f"Falling to polling method because stream API returned permission denied: {e}"
-                            )
-                    self.__thread_poll()
-            finally:
-                log.debug("Nomad database thread exiting")
-                self.queue.put(None)
+            if self.force_polling is True:
+                self.__thread_poll()
+            else:
+                try:
+                    self.__thread_run_stream()
+                except nomadlib.PermissionDenied as e:
+                    if self.force_polling is False:
+                        raise
+                    else:
+                        log.warning(
+                            f"Falling to polling method because stream API returned permission denied: {e}"
+                        )
+                self.__thread_poll()
         except requests.HTTPError:
             log.exception("http request failed")
             exit(1)
+        finally:
+            log.debug("Nomad database thread exiting")
+            self.queue.put(None)
 
     ###############################################################################
 
@@ -267,12 +266,7 @@ class NomadDbJob:
             self.initialized.set()
             yield events
         log.debug("Starting getting events from thread")
-        while not self.queue.empty() or (
-            self.thread.is_alive() and not self.stopevent.is_set()
-        ):
-            events = self.queue.get()
-            if events is None:
-                break
+        for events in iter(self.queue.get, None):
             yield self.handle_events(events)
         log.debug("db exiting")
 
