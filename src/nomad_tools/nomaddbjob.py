@@ -264,8 +264,8 @@ class NomadDbJob:
         if not self.initialized.is_set():
             events = self.init_cb()
             events = self.handle_events(events)
-            yield events
             self.initialized.set()
+            yield events
         log.debug("Starting getting events from thread")
         while not self.queue.empty() or (
             self.thread.is_alive() and not self.stopevent.is_set()
