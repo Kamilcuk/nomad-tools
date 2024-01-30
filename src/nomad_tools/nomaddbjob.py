@@ -32,9 +32,10 @@ class NomadDbJob:
         self.init_cb: Callable[[], List[Event]] = init_cb
         self.select_event_cb: Callable[[Event], bool] = select_event_cb
         self.force_polling = force_polling
+        #
         self.queue: queue.Queue[Optional[List[Event]]] = queue.Queue()
         """Queue where database thread puts the received events"""
-        self.job_deregistered: bool = False
+        self.job_deregistered_ModifyIndex: int = -1
         """Is set to true if received job deregistration event"""
         self.job: Optional[nomadlib.Job] = None
         """Watched job definition. Is not None means the job was at least once received."""
@@ -160,16 +161,13 @@ class NomadDbJob:
                 # self.job follows newest modify index.
                 self.job = job
                 if e.type == EventType.JobDeregistered:
-                    if not self.job_deregistered:
-                        self.job_deregistered = True
-                        actionstr = "JobDeregistered because job"
-                else:
-                    if self.job_deregistered:
-                        self.job_deregistered = False
-                        actionstr = "JobRegister"
+                    if self.job_deregistered_ModifyIndex < job.ModifyIndex:
+                        pass
+                        # self.job_deregistered_ModifyIndex = job.ModifyIndex
+                        # actionstr = "JobDeregistered because job"
         elif e.topic == EventTopic.Evaluation:
-            # Handle job deregister event by clearing self.job.
             eval = e.eval()
+            # Handle evaluation which results in job deregistration.
             if (
                 self.job
                 and eval.Status == "complete"
@@ -180,9 +178,12 @@ class NomadDbJob:
                         and eval.TriggeredBy == "job-deregister"
                     )
                 )
+                and self.job_deregistered_ModifyIndex < eval.ModifyIndex
+                and not eval.DeploymentID
             ):
-                actionstr = "JobDeregister because eval"
-                self.job_deregistered = True
+                self.job_deregistered_ModifyIndex = eval.ModifyIndex
+                actionstr = "JobDeregister because eval "
+            actionstr += f"{eval}"
             self.evaluations[e.data["ID"]] = eval
         elif e.topic == EventTopic.Allocation:
             # Events from event stream are missing JobVersion. Try to preserve it here by preserving keys.

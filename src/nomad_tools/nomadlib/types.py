@@ -338,6 +338,7 @@ class Alloc(DataDict):
     JobID: str
     EvalID: str
     ClientStatus: str
+    DesiredStatus: str
     CreateTime: int
     Namespace: str
     ModifyIndex: int
