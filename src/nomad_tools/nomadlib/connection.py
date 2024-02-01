@@ -7,6 +7,7 @@ from typing import Dict, Optional
 import requests.adapters
 import requests.auth
 
+from ..common_base import cached_property
 from . import types
 
 log = logging.getLogger(__name__)
@@ -110,7 +111,9 @@ class VariableConn(_Conn):
 
     def delete(self, var_path: str, cas: Optional[int] = None):
         # request does not read DELETE response, so there is no JSON. Call requests, instead of wrapper above.
-        self.r.request("DELETE", var_path, params={cas: cas} if cas is not None else None)
+        self.r.request(
+            "DELETE", var_path, params={cas: cas} if cas is not None else None
+        )
 
 
 class NomadConn(Requestor):
@@ -120,6 +123,17 @@ class NomadConn(Requestor):
         self.namespace = namespace
         self.session: requests.Session = session or _default_session()
         self.variables = VariableConn(self, "var")
+
+    @cached_property
+    def nomad_version(self) -> str:
+        agent = self.get("agent/self")
+        version = agent["config"]["Version"]
+        if isinstance(version, str):
+            return version
+        return version["Version"]
+
+    def addr(self) -> str:
+        return os.environ.get("NOMAD_ADDR", "http://127.0.0.1:4646")
 
     def request(
         self,
@@ -135,7 +149,7 @@ class NomadConn(Requestor):
         )
         req = self.session.request(
             method,
-            os.environ.get("NOMAD_ADDR", "http://127.0.0.1:4646") + "/v1/" + url,
+            self.addr() + "/v1/" + url,
             *args,
             auth=(
                 requests.auth.HTTPBasicAuth(*os.environ["NOMAD_HTTP_AUTH"].split(":"))
