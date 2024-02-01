@@ -9,6 +9,11 @@ client {
   enabled                  = true
   gc_disk_usage_threshold  = 100
   gc_inode_usage_threshold = 100
+  drain_on_shutdown {
+    deadline           = "1m"
+    force              = true
+    ignore_system_jobs = false
+  }
 }
 plugin "raw_exec" {
   config {
@@ -25,4 +30,8 @@ plugin "docker" {
       enabled = true
     }
   }
+}
+consul {
+  client_auto_join = false
+  server_auto_join = false
 }
