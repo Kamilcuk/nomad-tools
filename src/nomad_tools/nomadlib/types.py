@@ -63,7 +63,7 @@ class JobTaskLifecycle(DataDict):
         return self.get("Sidecar", False)
 
 
-class JobTaskTemplates(DataDict):
+class JobTaskTemplate(DataDict):
     EmbeddedTmpl: str
     LeftDelim: str
     RightDelim: str
@@ -77,7 +77,7 @@ class JobTask(DataDict):
     Lifecycle: Optional[JobTaskLifecycle] = None
     Env: Optional[Dict[str, str]]
     Services: Optional[List[Any]]
-    Templates: Optional[List[JobTaskTemplates]] = None
+    Templates: Optional[List[JobTaskTemplate]] = None
 
 
 class JobTaskGroup(DataDict):
@@ -318,8 +318,11 @@ class AllocTaskState(DataDict):
         """Find event in TaskStates task Events. Return empty dict if not found"""
         return next((e for e in self.Events or [] if e.Type == type_), None)
 
-    def was_started(self):
+    def was_started(self) -> bool:
         return self.find_event(AllocTaskStateEventType.TaskStarted) is not None
+
+    def get_task_started_event(self) -> Optional[AllocTaskStateEvent]:
+        return self.find_event(AllocTaskStateEventType.TaskStarted)
 
 
 class AllocClientStatus(MyStrEnum):
@@ -356,6 +359,9 @@ class Alloc(DataDict):
     def get_taskstates(self) -> Dict[str, AllocTaskState]:
         """The same as TaskStates but returns an empty dict in case the field is None"""
         return self.get("TaskStates") or {}
+
+    def get_taskstate(self, task: str) -> Optional[AllocTaskState]:
+        return self.get_taskstates()[task]
 
     def get_tasknames(self) -> List[str]:
         return list(self.get_taskstates().keys())
