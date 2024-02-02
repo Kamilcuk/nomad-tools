@@ -5,6 +5,8 @@ from typing import Callable, Dict, Iterable, List, Optional, TypeVar, Union
 
 import requests
 
+from nomad_tools.nomadlib.types import JobStatus
+
 from . import flagdebug, nomadlib
 from .common import eprint, json_loads, mynomad
 from .nomadlib import Event, EventTopic, EventType
@@ -36,7 +38,7 @@ class NomadDbJob:
         self.queue: queue.Queue[Optional[List[Event]]] = queue.Queue()
         """Queue where database thread puts the received events"""
         self.job_deregistered_ModifyIndex: int = -1
-        """Is set to true if received job deregistration event"""
+        """Is set to the ModifyIndex of last job deregistration evaluation"""
         self.job: Optional[nomadlib.Job] = None
         """Watched job definition. Is not None means the job was at least once received."""
         self.jobversions: Dict[int, nomadlib.Job] = {}
@@ -179,7 +181,8 @@ class NomadDbJob:
                     )
                 )
                 and self.job_deregistered_ModifyIndex < eval.ModifyIndex
-                and not eval.DeploymentID
+                and self.job.Status == JobStatus.dead
+                # and not eval.DeploymentID
             ):
                 self.job_deregistered_ModifyIndex = eval.ModifyIndex
                 actionstr = "JobDeregister because eval "
