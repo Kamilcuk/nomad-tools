@@ -1,4 +1,5 @@
 import dataclasses
+import os
 import subprocess
 import sys
 
@@ -33,15 +34,17 @@ empty = Colors(**{f.name: "" for f in dataclasses.fields(Colors)})
 
 def init_ex() -> Colors:
     """Return Colors with ANSI escape sequences extracted from tput"""
-    if not sys.stdout.isatty() or not sys.stderr.isatty():
+    if not sys.stdout.isatty() or not sys.stderr.isatty() or os.environ.get("NO_COLOR"):
         return empty
     tputdict = dataclasses.asdict(Colors())
-    tputscript = "\n".join(tputdict.values()).replace("\n", "\nlongname\nlongname\n")
+    tputscript = "\nlongname\nlongname\n".join(tputdict.values())
     longname = subprocess.run(
         "tput longname".split(),
         text=True,
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
+        check=True,
     ).stdout
     # Protect against empty longname.
     if not longname:
@@ -52,11 +55,12 @@ def init_ex() -> Colors:
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
+        check=True,
     ).stdout
-    retarr = ret.split(f"{longname}{longname}")
+    retarr = ret.split(longname + longname)
     if len(tputdict.keys()) != len(retarr):
         return empty
-    return Colors(**{k: v for k, v in zip(tputdict.keys(), retarr)})
+    return Colors(*retarr)
 
 
 def init() -> Colors:
