@@ -323,7 +323,14 @@ class Mylogger:
         except KeyError:
             log.exception(f"fmt={ARGS.log_format!r} params={ARGS}")
             raise
-        print(out, flush=True)
+        try:
+            print(out, flush=True)
+        except BrokenPipeError:
+            # Python flushes standard streams on exit; redirect remaining output
+            # to devnull to avoid another BrokenPipeError at shutdown
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, sys.stdout.fileno())
+            sys.exit(1)  # Python exits with error code 1 on EPIPE
 
     @classmethod
     def log_eval(cls, db: NomadDbJob, eval: nomadlib.Eval, message: str):
