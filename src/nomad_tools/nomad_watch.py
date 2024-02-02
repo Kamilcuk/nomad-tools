@@ -1226,10 +1226,10 @@ class NomadJobWatcherUntilStarted(NomadJobWatcher):
 
     @override
     def _loop_end_cb(self) -> bool:
+        if self.job_has_finished_starting():
+            return True
         if self.job_is_finished():
             log.info(self.job_dead_message())
-            return True
-        if self.job_has_finished_starting():
             return True
         return False
 
