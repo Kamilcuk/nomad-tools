@@ -1,29 +1,33 @@
 import os
 import tempfile
 import time
-from dataclasses import dataclass
 from pathlib import Path
+from shlex import split
 from typing import List
 
+from nomad_tools import taskexec
 from nomad_tools.common import mynomad
 from nomad_tools.nomad_cp import NomadOrHostMyPath
 from tests.testlib import get_templatejob, run, run_nomad_cp, run_nomad_watch
 
-alloc_exec = "nomad alloc exec -i=false -t=false -job"
 
-
-@dataclass
 class NomadTempdir:
-    jobid: str
+    def __init__(self, jobid: str):
+        self.jobid = jobid
+        self.allocid, self.task = taskexec.find_job(self.jobid)
 
     def __enter__(self):
-        return run(
-            f"{alloc_exec} {self.jobid} sh -xeuc 'echo $NOMAD_TASK_DIR'",
-            stdout=1,
-        ).stdout.strip()
+        return taskexec.check_output(
+            self.allocid,
+            self.task,
+            split("sh -xeuc 'echo $NOMAD_TASK_DIR'"),
+            text=True,
+        ).strip()
 
     def __exit__(self, type, value, traceback):
-        return run(f"{alloc_exec} {self.jobid} sh -xeuc 'rm -rv $NOMAD_TASK_DIR'")
+        return taskexec.run(
+            self.allocid, self.task, split("sh -xeuc 'rm -rv $NOMAD_TASK_DIR'")
+        )
 
 
 def run_temp_job():
@@ -73,8 +77,9 @@ def test_nomad_cp_complete():
 
 def test_nomad_cp_dir():
     for jobname, nomaddir, hostdir in run_temp_job():
-        run(
-            f"{alloc_exec} {jobname} sh -xeuc 'cd {nomaddir} && mkdir -p dir && touch dir/1 dir/2'"
+        taskexec.run(
+            *taskexec.find_job(jobname),
+            split(f"sh -xeuc 'cd {nomaddir} && mkdir -p dir && touch dir/1 dir/2'"),
         )
         run_nomad_cp(f"{jobname}:{nomaddir}/dir {hostdir}/dir")
         run_nomad_cp(f"{hostdir}/dir {jobname}:{nomaddir}/dir2")
