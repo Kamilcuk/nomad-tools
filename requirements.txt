@@ -4,3 +4,4 @@ setuptools
 pyyaml
 python-dateutil
 typing-extensions
+websocket-client
