@@ -1216,7 +1216,7 @@ class NomadJobWatcherUntilFinished(NomadJobWatcher):
         exitcode: int = (
             ExitCode.success if ARGS.no_preserve_status else self.notifier.exitcode()
         )
-        log.debug(f"exitcode={exitcode}")
+        log.debug(f"exitcode={exitcode} no_preserve_status={ARGS.no_preserve_status}")
         return exitcode
 
 
