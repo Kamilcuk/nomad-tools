@@ -20,16 +20,26 @@ def test_nomad_watch2_start():
             f"stop {job}",
             f"stopped {job}",
             f"--no-follow job {job}",
-            f"--no-follow -o out job {job}",
-            f"--no-follow -o err job {job}",
-            f"--no-follow -o out -o err job {job}",
+            f"--no-follow -o stdout job {job}",
+            f"--no-follow -o stderr job {job}",
+            f"--no-follow -o stdout,stderr job {job}",
             f"--no-follow -o all job {job}",
         ]
         for cmd in cmds:
             run_nomad_watch(cmd, check=exitstatus, output=[mark])
     finally:
-        run_nomad_watch(f"stop {job}", check=exitstatus)
+        run_nomad_watch(f"-o none stop {job}", check=exitstatus)
     run_nomad_watch(f"--purge stop {job}", check=exitstatus)
+
+
+def test_nomad_watch2_okpurge():
+    job = "test-listen"
+    try:
+        # Run nice deployment.
+        run_nomad_watch(f"start -var ok=true {testjobs[job]}")
+        run_nomad_watch(f"-x stop {job}")
+    finally:
+        run_nomad_watch(f"--debug events -x purge {job}")
 
 
 def test_nomad_watch2_canary():
@@ -179,7 +189,7 @@ def test_nomad_watch2_deploymulti():
             check=False,
         )
     finally:
-        run_nomad_watch(f"-x purge {job}")
+        run_nomad_watch(f" -o none -x purge {job}")
 
 
 def test_nomad_watch2_onestays():
@@ -222,4 +232,4 @@ def test_nomad_watch2_onestays():
         )
         run_nomad_watch(f"purge {job}", check=False, timeout=20)
     finally:
-        run_nomad_watch(f"-x purge {job}")
+        run_nomad_watch(f"-o none -x purge {job}")

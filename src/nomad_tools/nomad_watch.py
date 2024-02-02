@@ -12,6 +12,7 @@ import inspect
 import itertools
 import json
 import logging
+import os
 import re
 import shlex
 import signal
@@ -22,10 +23,11 @@ import time
 import traceback
 from abc import ABC, abstractmethod
 from http import client as http_client
-from typing import ClassVar, Dict, List, Optional, Pattern, Set, Tuple, TypeVar
+from typing import Any, ClassVar, Dict, List, Optional, Pattern, Set, Tuple, TypeVar
 
 import click
 import requests
+from click.shell_completion import CompletionItem
 from typing_extensions import override
 
 from . import colors, exit_on_thread_exception, flagdebug, nomaddbjob, nomadlib
@@ -68,12 +70,51 @@ def set_not_in_add(s: Set[T], value: T) -> bool:
 
 
 def print_all_threads_stacktrace(*args):
-    eprint("Received SIGUSR1")
+    text: List[str] = []
+    text.append("Received SIGUSR1")
     for th in threading.enumerate():
-        eprint(th)
+        text.append(str(th))
         if th.ident:
-            traceback.print_stack(sys._current_frames()[th.ident], file=sys.stderr)
-        eprint()
+            text += traceback.format_stack(sys._current_frames()[th.ident])
+        text.append("")
+    eprint("\n".join(text))
+
+
+class CommaList(click.ParamType):
+    """A click option to pass a comma separated list to the option"""
+
+    name = "CommaList"
+
+    def __init__(self, values: List[Any], separator: str = ",", **kvargs):
+        super().__init__(**kvargs)
+        self.separator = separator
+        self.values = values
+
+    def get_metavar(self, param: click.Parameter) -> Optional[str]:
+        return self.separator.join(self.values)
+
+    def convert(
+        self, value: Any, param: Optional[click.Parameter], ctx: Optional[click.Context]
+    ) -> Any:
+        if isinstance(value, str):
+            arr = value.split(",")
+            bad = [a for a in arr if a not in self.values]
+            if bad:
+                badstr = self.separator.join(bad)
+                valuesstr = self.separator.join(self.values)
+                self.fail(f"{badstr} must be one of {valuesstr}")
+            return arr
+        return value
+
+    def shell_complete(
+        self, ctx: click.Context, param: click.Parameter, incomplete: str
+    ) -> List[CompletionItem]:
+        arr = incomplete.split(self.separator)
+        start = [v for v in self.values if v not in arr and v.startswith(arr[-1])]
+        ret = [CompletionItem(self.separator.join([*arr[: -1], x])) for x in start]
+        if arr[-1] in self.values:
+            ret += [CompletionItem(self.separator.join(arr) + self.separator)]
+        return ret
 
 
 ###############################################################################
@@ -1438,17 +1479,6 @@ Examples:
     "--all",
     is_flag=True,
     help="Print logs from all allocations, including previous versions of the job.",
-)
-@click.option(
-    "-o",
-    "--out",
-    type=click.Choice(
-        "all alloc A stdout out O 1 stderr err E 2 evaluation eval e deployment deploy d none".split()
-    ),
-    default=["all"],
-    multiple=True,
-    show_default=True,
-    help="Choose which stream of messages to print - evaluation, allocation, stdout, stderr. This option is cumulative.",
 )
 @click.option("-v", "--verbose", count=True, help="Be more verbose.")
 @click.option("-q", "--quiet", count=True, help="Be less verbose.")

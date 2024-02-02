@@ -34,7 +34,7 @@ def test_nomad_watch_run():
 def test_nomad_watch_start():
     mark = "7bc8413c-8619-48bf-a46d-f42727724632"
     exitstatus = 234
-    job = gen_job(script=f"sleep 1; echo {mark} ; exit {exitstatus}")
+    job = gen_job(script=f"sleep 2; echo {mark} ; exit {exitstatus}")
     jobid = job["Job"]["ID"]
     try:
         run_nomad_watch("start -json -", input=json.dumps(job))
@@ -43,16 +43,16 @@ def test_nomad_watch_start():
             f"stop {jobid}",
             f"stopped {jobid}",
             f"--no-follow job {jobid}",
-            f"--no-follow -o out job {jobid}",
-            f"--no-follow -o err job {jobid}",
-            f"--no-follow -o out -o err job {jobid}",
+            f"--no-follow -o stdout job {jobid}",
+            f"--no-follow -o stderr job {jobid}",
+            f"--no-follow -o stdout,stderr job {jobid}",
             f"--no-follow -o all job {jobid}",
         ]
         for cmd in cmds:
             assert mark in run_nomad_watch(cmd, check=exitstatus, stdout=1).stdout
     finally:
-        run_nomad_watch(f"stop {jobid}", check=exitstatus)
-    run_nomad_watch(f"--purge stop {jobid}", check=exitstatus)
+        run_nomad_watch(f"-o none stop {jobid}", check=exitstatus)
+    run_nomad_watch(f"-o none --purge stop {jobid}", check=exitstatus)
 
 
 def test_nomad_watch_run_short():
@@ -242,7 +242,7 @@ def test_nomad_watch_starting_with_preinit_tasks():
     allocs.sort(key=lambda x: x.ModifyIndex, reverse=True)
     lastalloc: nomadlib.Alloc = allocs[0]
     states: Dict[str, nomadlib.AllocTaskState] = lastalloc.get_taskstates()
-    assert all([s.FinishedAt for s in states.values()]), f"{states}"
+    assert all([s.FinishedAt for s in states.values()]), f"{states} | {[s.FinishedAt for s in states.values()]}"
     #
     run_nomad_watch(f"-xn0 --purge stop {jobid}")
     assert not job_exists(jobid)
