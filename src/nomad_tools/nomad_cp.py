@@ -8,19 +8,21 @@ import logging
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import textwrap
 from abc import ABC
 from dataclasses import dataclass
 from pathlib import Path
-from shlex import quote
-from typing import Any, List, Optional, Union
+from shlex import quote, split
+from typing import Any, List, Optional
 
 import click
 from click.shell_completion import BashComplete, CompletionItem
+from typing_extensions import override
 
-from . import nomadlib
+from . import nomadlib, taskexec
 from .common import (
     cached_property,
     common_options,
@@ -28,12 +30,9 @@ from .common import (
     namespace_option,
     nomad_find_job,
 )
+from .common_base import quotearr
 
 log = logging.getLogger(Path(__file__).name)
-
-
-def arrquote(list: List[str]):
-    return " ".join(quote(x) for x in list)
 
 
 ###############################################################################
@@ -49,22 +48,33 @@ class Mypath(ABC):
     This has to be a string to properly handle /. suffixes in strings given by user.
     """
 
-    def isstdin(self):
-        return str(self.path) == "-"
+    def run(self, cmd: str):
+        log.debug(f"+ {cmd}")
+        subprocess.run(split(cmd), check=True)
 
-    def nomadcmd(self, stdin: Union[bool, int] = False) -> str:
-        return ""
+    def check_output(self, cmd: str) -> str:
+        log.debug(f"+ {cmd}")
+        return subprocess.check_output(split(cmd), text=True)
+
+    def popen(
+        self, cmd: str, stdout: Optional[int] = None, stdin: Optional[int] = None
+    ) -> Any:
+        log.debug(f"+ {cmd}")
+        return subprocess.Popen(split(cmd), stdout=stdout, stdin=stdin)
+
+    def isstdin(self) -> bool:
+        return str(self.path) == "-"
 
     def isnomad(self) -> bool:
         return False
 
-    def exists(self):
+    def exists(self) -> bool:
         return os.path.exists(self.path)
 
-    def is_file(self):
+    def is_file(self) -> bool:
         return os.path.isfile(self.path)
 
-    def is_dir(self):
+    def is_dir(self) -> bool:
         return os.path.isdir(self.path)
 
     def mkdir(self):
@@ -104,27 +114,43 @@ class NomadMypath(Mypath):
     allocation: str
     task: str
 
-    def isstdin(self):
+    @override
+    def run(self, cmd: str):
+        log.debug(f"+ {self.allocation} {self.task} {cmd}")
+        taskexec.run(self.allocation, self.task, split(cmd))
+
+    @override
+    def check_output(self, cmd: str) -> str:
+        log.debug(f"+ {self.allocation} {self.task} {cmd}")
+        return taskexec.check_output(self.allocation, self.task, split(cmd), text=True)
+
+    @override
+    def popen(
+        self, cmd: str, stdout: Optional[int] = None, stdin: Optional[int] = None
+    ) -> Any:
+        log.debug(f"+ {self.allocation} {self.task} {cmd}")
+        return taskexec.NomadPopen(
+            self.allocation, self.task, split(cmd), stdout=stdout, stdin=stdin
+        )
+
+    @override
+    def isstdin(self) -> bool:
         return False
 
-    def isnomad(self):
+    @override
+    def isnomad(self) -> bool:
         return True
-
-    def nomadcmd(self, stdin: Union[bool, int] = False) -> str:
-        """Return a properly escaped command line that allows to execute a command in the container."""
-        i = str(bool(stdin)).lower()
-        return f"nomad alloc exec -t=false -i={i} -task={quote(self.task)} {quote(self.allocation)}"
 
     def _nomadrunsh(self, script: str, *args: str) -> str:
         cmd = [
-            *shlex.split(self.nomadcmd()),
             "sh",
             "-c",
             script,
             *args,
         ]
-        log.debug(f"+ {arrquote(cmd)}")
-        return subprocess.check_output(cmd, text=True).strip()
+        cmdstr = quotearr(cmd)
+        log.debug(f"+ {cmdstr}")
+        return self.check_output(cmdstr).strip()
 
     @cached_property
     def _nomadstat(self) -> FileType:
@@ -135,15 +161,19 @@ class NomadMypath(Mypath):
         log.debug(f"stat = {stat}")
         return FileType[stat]
 
-    def exists(self):
+    @override
+    def exists(self) -> bool:
         return self._nomadstat != FileType.none
 
-    def is_file(self):
+    @override
+    def is_file(self) -> bool:
         return self._nomadstat == FileType.file
 
-    def is_dir(self):
+    @override
+    def is_dir(self) -> bool:
         return self._nomadstat == FileType.dir
 
+    @override
     def mkdir(self):
         v = "v" if args.verbose else ""
         self._nomadrunsh(f"mkdir -{v}p {quote(self.path)}")
@@ -153,6 +183,7 @@ class NomadMypath(Mypath):
         """Replaces single colon by esacped for printing"""
         return arg.replace(":", r"\:")
 
+    @override
     def __str__(self):
         return f":{self.__colon(self.allocation)}:{self.__colon(self.task)}:{quote(self.__colon(str(self.path)))}"
 
@@ -292,7 +323,6 @@ class NomadOrHostMyPath(click.ParamType):
             .replace(r"[", r"\[")  # ]]
         )
         cmd = [
-            *shlex.split(mypath.nomadcmd()),
             "sh",
             "-c",
             textwrap.dedent(
@@ -306,9 +336,10 @@ class NomadOrHostMyPath(click.ParamType):
             searchdir,
             searchnamenoglob,
         ]
-        cls.debug(f"+ {arrquote(cmd)}")
+        cmdstr = quotearr(cmd)
+        cls.debug(f"+ {cmdstr}")
         try:
-            output = subprocess.check_output(cmd, text=True)
+            output = mypath.check_output(cmdstr)
         except subprocess.CalledProcessError:
             return []
         # In case of noslash is given, the initial part is going to be './'. Strip it.
@@ -438,7 +469,7 @@ def pipe(cmda: str, cmdb: str):
     """Run a pipe of cmda | cmdb"""
     arra = shlex.split(cmda)
     arrb = shlex.split(cmdb)
-    log.debug(f"+ {arrquote(arra)} | {arrquote(arrb)}")
+    log.debug(f"+ {quotearr(arra)} | {quotearr(arrb)}")
     with subprocess.Popen(arrb, stdin=subprocess.PIPE) as ps:
         subprocess.check_call(arra, stdin=subprocess.PIPE, stdout=ps.stdin)
     if ps.returncode:
@@ -452,7 +483,13 @@ def run(cmd: str):
 
 
 def nomadpipe(src: Mypath, dst: Mypath, srccmd: str, dstcmd: str):
-    pipe(f"{src.nomadcmd()} {srccmd}", f"{dst.nomadcmd(stdin=1)} {dstcmd}")
+    pipe(f"{srccmd}", f"{dstcmd}")
+    with src.popen(srccmd, stdout=subprocess.PIPE) as srcp:
+        with dst.popen(dstcmd, stdin=subprocess.PIPE) as dstp:
+            shutil.copyfileobj(srcp.stdout, dstp.stdin)
+    for p in [srcp, dstp]:
+        if p.returncode:
+            raise subprocess.CalledProcessError(p.returncode, p.cmd)
 
 
 def get_tar_x_opt():
@@ -549,10 +586,10 @@ def stream_mode(src: Mypath, dst: Mypath):
         log.info(f"Stream stdin -> {dst}")
         assert dst.isstdin(), "Both operands are '-'"
         x = get_tar_x_opt()
-        run(f"{dst.nomadcmd(stdin=1)} tar -{x}f - -C {dst.quotepath()}")
+        dst.run(f"tar -{x}f - -C {dst.quotepath()}")
     elif dst.isstdin():
         log.info(f"Stream {src} -> stdout")
-        run(f"{src.nomadcmd()} tar -cf - -C {src.quoteparent()} -- {src.quotename()}")
+        src.run(f"tar -cf - -C {src.quoteparent()} -- {src.quotename()}")
     else:
         assert 0, "Internal error - neither source nor dest is equal to -"
 
