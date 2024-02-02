@@ -31,24 +31,12 @@ from .common import (
 )
 from .nomadlib.datadict import DataDict
 from .nomadlib.types import Job, JobTask, JobTaskConfig
+from . import taskexec
 
 ###############################################################################
 
 NAME = "nomad-gitlab-runner"
 log = logging.getLogger(NAME)
-
-
-def run(cmdstr: str, *args, check=True, quiet=False, **kvargs):
-    cmd = split(cmdstr)
-    msg = f"+ {quotearr(cmd)}"
-    if quiet:
-        log.debug(msg)
-    else:
-        log.info(msg)
-    try:
-        return subprocess.run(cmd, *args, check=check, text=True, **kvargs)
-    except subprocess.CalledProcessError as e:
-        exit(e.returncode)
 
 
 def get_gitlab_runner_package_script(file: str):
@@ -878,12 +866,17 @@ def mode_run(script: str, stage: str):
     set_x = "-x" if config.verbose > 1 else ""
     # Execute all except step_ and build_ in that special gitlab docker container.
     taskname = config.get_driverconfig.get_task_for_stage(stage)
-    rr = run(
-        f"nomad alloc exec -t=false -task {quote(taskname)} -job {quote(je.jobname)}"
-        f" sh -c {quote(config.script)} gitlabrunner {set_x} -- {quote(stage)}",
-        stdin=open(script),
-        quiet=True,
+    # Find our running allocation.
+    allocid = taskexec.find_job_alloc(je.jobname, taskname)
+    with open(script) as f:
+        scriptcontent = f.read()
+    rr = taskexec.run(
+        allocid,
+        taskname,
+        split(f"""sh -c '${{NOMAD_TASK_DIR}}/script.sh "$@"' sh gitlabrunner {set_x} -- {quote(stage)}"""),
+        input=scriptcontent,
         check=False,
+        text=True,
     )
     if rr.returncode == BuildFailure.code:
         raise BuildFailure()
