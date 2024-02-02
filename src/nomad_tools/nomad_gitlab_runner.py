@@ -30,8 +30,8 @@ from .common import (
     quotearr,
 )
 from .nomadlib.datadict import DataDict
-from .nomadlib.types import Job, JobTask, JobTaskConfig
 from . import taskexec
+from .nomadlib.types import Job, JobTask, JobTaskConfig, JobTaskTemplate
 
 ###############################################################################
 
@@ -486,7 +486,17 @@ class Config(DataDict):
             }
         }
 
-    def _gen_main_task(self) -> JobTask:
+    def __main_task_script(self) -> JobTaskTemplate:
+        return JobTaskTemplate(
+            EmbeddedTmpl=self.script,
+            LeftDelim="{{{{",
+            RightDelim="}}}}",
+            Perms="777",
+            DestPath="local/script.sh",
+            ChangeMode="noop",
+        )
+
+    def __gen_main_task(self) -> JobTask:
         """Get the task to run, apply transformations and configuration as needed"""
         task: JobTask = self.get_driverconfig.task
         assert task, f"is invalid: {task}"
@@ -502,6 +512,10 @@ class Config(DataDict):
                 **self.override.task,
             }
         )
+        # Add script.sh template.
+        if not task.Templates:
+            task.Templates = []
+        task.Templates.append(self.__main_task_script())
         # Apply override on config
         task.Config = JobTaskConfig({**task.Config, **self.override.task_config})
         return task
@@ -516,7 +530,7 @@ class Config(DataDict):
                         "Name": "R",
                         "ReschedulePolicy": {"Attempts": 0},
                         "RestartPolicy": {"Attempts": 0},
-                        "Tasks": [self._gen_main_task()],
+                        "Tasks": [self.__gen_main_task()],
                     }
                 ],
                 # Apply overrides
