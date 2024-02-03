@@ -42,7 +42,6 @@ from click.shell_completion import CompletionItem
 from typing_extensions import override
 
 from . import colors, exit_on_thread_exception, flagdebug, nomaddbjob, nomadlib
-from .common import json_loads
 from .common_base import andjoin, cached_property, composed, eprint
 from .common_click import alias_option, common_options, complete_set_namespace
 from .common_nomad import (
@@ -129,14 +128,17 @@ class CommaList(click.ParamType):
 
     name = "CommaList"
 
+    @override
     def __init__(self, values: List[Any], separator: str = ",", **kvargs):
         super().__init__(**kvargs)
         self.separator = separator
         self.values = values
 
+    @override
     def get_metavar(self, param: click.Parameter) -> Optional[str]:
         return self.separator.join(self.values)
 
+    @override
     def convert(
         self, value: Any, param: Optional[click.Parameter], ctx: Optional[click.Context]
     ) -> Any:
@@ -150,6 +152,7 @@ class CommaList(click.ParamType):
             return arr
         return value
 
+    @override
     def shell_complete(
         self, ctx: click.Context, param: click.Parameter, incomplete: str
     ) -> List[CompletionItem]:
@@ -482,7 +485,7 @@ class TaskLogger(threading.Thread):
                 # Nomad happens to be consistent, the jsons are flat.
                 if c == "}":
                     try:
-                        ret = json_loads(txt)
+                        ret = json.loads(txt)
                         # log.debug(f"RECV: {ret}")
                         yield ret
                     except json.JSONDecodeError as e:

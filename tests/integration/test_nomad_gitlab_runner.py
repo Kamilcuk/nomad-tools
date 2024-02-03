@@ -84,7 +84,7 @@ def cycle(config: dict, script: str, env: Dict[str, str] = {}):
 
 raw_exec_config = {"default": {"mode": "raw_exec", "raw_exec": {"user": ""}}}
 docker_config = {
-    "default": {"mode": "docker", "docker": {"image": "docker", "privileged": True}}
+    "default": {"mode": "docker", "docker": {"image": "docker:stable", "privileged": True}}
 }
 
 

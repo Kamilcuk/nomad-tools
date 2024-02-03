@@ -8,7 +8,6 @@ import logging
 import os
 import socket
 import string
-import subprocess
 import sys
 import tempfile
 from collections import defaultdict
@@ -20,7 +19,7 @@ from typing import Dict, List, Optional, Union
 import click
 import yaml
 
-from . import nomad_watch, nomadlib
+from . import nomad_watch, nomadlib, taskexec
 from .common import (
     cached_property,
     common_options,
@@ -30,7 +29,6 @@ from .common import (
     quotearr,
 )
 from .nomadlib.datadict import DataDict
-from . import taskexec
 from .nomadlib.types import Job, JobTask, JobTaskConfig, JobTaskTemplate
 
 ###############################################################################
@@ -254,9 +252,11 @@ class ConfigDocker(ConfigCustom):
                     **({"entrypoint": s.entrypoint} if s.entrypoint else {}),
                     **({"args": s.command} if s.command else {}),
                     "network_aliases": [s.alias],
-                    "privileged": self.services_privileged
-                    if self.services_privileged is not None
-                    else self.privileged,
+                    "privileged": (
+                        self.services_privileged
+                        if self.services_privileged is not None
+                        else self.privileged
+                    ),
                 },
                 "Env": get_CUSTOM_ENV(),
                 "RestartPolicy": {"Attempts": 0},
@@ -414,7 +414,9 @@ class Config(DataDict):
     """Should the job be purged after we are done?"""
     purge_successful: bool = True
     """Should the successful Nomad jobs be purged after we are done? Only relevant when purge=none."""
-    jobname: str = "gitlabrunner.${CUSTOM_ENV_CI_RUNNER_ID}.${CUSTOM_ENV_CI_PROJECT_PATH_SLUG}.${CUSTOM_ENV_CI_JOB_ID}"
+    jobname: str = (
+        "gitlabrunner.${CUSTOM_ENV_CI_RUNNER_ID}.${CUSTOM_ENV_CI_PROJECT_PATH_SLUG}.${CUSTOM_ENV_CI_JOB_ID}"
+    )
     """The job name"""
     CPU: Optional[int] = None
     """The default job constraints."""
@@ -887,7 +889,9 @@ def mode_run(script: str, stage: str):
     rr = taskexec.run(
         allocid,
         taskname,
-        split(f"""sh -c '${{NOMAD_TASK_DIR}}/script.sh "$@"' sh gitlabrunner {set_x} -- {quote(stage)}"""),
+        split(
+            f"""sh -c '${{NOMAD_TASK_DIR}}/script.sh "$@"' sh gitlabrunner {set_x} -- {quote(stage)}"""
+        ),
         input=scriptcontent,
         check=False,
         text=True,

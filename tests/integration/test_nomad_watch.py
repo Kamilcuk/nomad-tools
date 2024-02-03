@@ -242,7 +242,9 @@ def test_nomad_watch_starting_with_preinit_tasks():
     allocs.sort(key=lambda x: x.ModifyIndex, reverse=True)
     lastalloc: nomadlib.Alloc = allocs[0]
     states: Dict[str, nomadlib.AllocTaskState] = lastalloc.get_taskstates()
-    assert all([s.FinishedAt for s in states.values()]), f"{states} | {[s.FinishedAt for s in states.values()]}"
+    #
+    tmp = [f"name={n} finishedat={s.FinishedAt}" for n, s in states.items()]
+    assert all([s.FinishedAt for s in states.values()]), f"{states} | {tmp}"
     #
     run_nomad_watch(f"-xn0 --purge stop {jobid}")
     assert not job_exists(jobid)

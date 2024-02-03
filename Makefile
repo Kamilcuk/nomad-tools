@@ -12,6 +12,8 @@ vagrant_test:
 vagrant_destroy:
 	vagrant destroy -f
 
+lint: pyright pylava
+
 pyright:
 	pyright src/ tests/ $(ARGS)
 
