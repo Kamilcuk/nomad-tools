@@ -537,10 +537,9 @@ class TaskLogger(threading.Thread):
                         self.taskout(lines)
                 else:
                     # Nomad json stream periodically sends empty {}.
-                    # No idea why, but I can implement timeout.
                     self.taskout([])
-                    if self.exitevent.is_set():
-                        break
+                if self.exitevent.is_set():
+                    break
 
     def run(self):
         """Listen to Nomad log stream and print the logs"""
