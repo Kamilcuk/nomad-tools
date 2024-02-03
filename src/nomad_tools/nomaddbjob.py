@@ -71,25 +71,29 @@ class NomadDbJob:
                 if line == "event dropped from buffer":
                     # https://github.com/hashicorp/nomad/blob/main/nomad/stream/event_buffer.go#L273
                     log.error(line)
-                    continue
-                if line:
+                elif line:
                     data = json_loads(line)
-                    events: List[Event] = [
-                        Event(
-                            data["Index"],
-                            EventTopic[event["Topic"]],
-                            EventType[event["Type"]],
-                            event["Payload"][event["Topic"]],
-                        )
-                        for event in data.get("Events", [])
-                    ]
-                    if flagdebug.debug("recv") == 1:
-                        for e in events:
-                            eprint(f"RECVEVENTS:{data['Index']} {e}")
-                    elif flagdebug.debug("recv") >= 2:
-                        for e in events:
-                            eprint(f"RECVEVENTS:{data['Index']} {e} {e.data}")
-                    self.queue.put(events)
+                    if data:
+                        events: List[Event] = [
+                            Event(
+                                data["Index"],
+                                EventTopic[event["Topic"]],
+                                EventType[event["Type"]],
+                                event["Payload"][event["Topic"]],
+                            )
+                            for event in data.get("Events", [])
+                        ]
+                        if flagdebug.debug("recv") == 1:
+                            for e in events:
+                                eprint(f"RECVEVENTS:{data['Index']} {e}")
+                        elif flagdebug.debug("recv") >= 2:
+                            for e in events:
+                                eprint(f"RECVEVENTS:{data['Index']} {e} {e.data}")
+                        self.queue.put(events)
+                    else:
+                        self.queue.put([])
+                else:
+                    self.queue.put([])
                 if self.stopevent.is_set():
                     break
 
