@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import base64
-import dataclasses
 import datetime
 import enum
 import inspect
@@ -22,8 +21,20 @@ import threading
 import time
 import traceback
 from abc import ABC, abstractmethod
+from dataclasses import asdict, dataclass, field
 from http import client as http_client
-from typing import Any, ClassVar, Dict, List, Optional, Pattern, Set, Tuple, TypeVar
+from typing import (
+    Any,
+    ClassVar,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Pattern,
+    Set,
+    Tuple,
+    TypeVar,
+)
 
 import click
 import requests
@@ -58,6 +69,9 @@ START_NS: int = 0
 
 COLORS = colors.init()
 
+DB: NomadDbJob
+"""Database listening to Nomad stream"""
+
 T = TypeVar("T")
 
 
@@ -69,7 +83,7 @@ def set_not_in_add(s: Set[T], value: T) -> bool:
     return True
 
 
-def print_all_threads_stacktrace(*args):
+def print_all_threads_stacktrace(*_):
     text: List[str] = []
     text.append("Received SIGUSR1")
     for th in threading.enumerate():
@@ -77,7 +91,37 @@ def print_all_threads_stacktrace(*args):
         if th.ident:
             text += traceback.format_stack(sys._current_frames()[th.ident])
         text.append("")
-    eprint("\n".join(text))
+    out = "\n".join(x for x in "\n".join(text).splitlines() if x)
+    eprint("\n\n" + out + "\n\n")
+
+
+###############################################################################
+
+
+class InterruptTwice:
+    """Exit on the second time after sending a signal"""
+
+    received: int = 0
+    """The number of last signal received"""
+
+    @classmethod
+    def install(cls):
+        # Installed after DB initialization.
+        signal.signal(signal.SIGINT, cls.__handler)
+        signal.signal(signal.SIGTERM, cls.__handler)
+
+    @classmethod
+    def __handler(cls, signum: int, frame):
+        log.error(f"Interrupted with {signal.Signals(signum).name}")
+        if cls.received:
+            exit(ExitCode.interrupted)
+        else:
+            cls.received = signum
+            # Initialized in NomadWatch object.
+            DB.send_empty_event()
+
+
+###############################################################################
 
 
 class CommaList(click.ParamType):
@@ -111,7 +155,7 @@ class CommaList(click.ParamType):
     ) -> List[CompletionItem]:
         arr = incomplete.split(self.separator)
         start = [v for v in self.values if v not in arr and v.startswith(arr[-1])]
-        ret = [CompletionItem(self.separator.join([*arr[: -1], x])) for x in start]
+        ret = [CompletionItem(self.separator.join([*arr[:-1], x])) for x in start]
         if arr[-1] in self.values:
             ret += [CompletionItem(self.separator.join(arr) + self.separator)]
         return ret
@@ -277,23 +321,23 @@ def init_logging():
         level=(
             logging.DEBUG
             if ARGS.verbose > 0
-            else logging.INFO
-            if ARGS.verbose == 0
-            else logging.WARN
-            if ARGS.verbose == 1
-            else logging.ERROR
+            else (
+                logging.INFO
+                if ARGS.verbose == 0
+                else logging.WARN if ARGS.verbose == 1 else logging.ERROR
+            )
         ),
     )
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass(frozen=True)
 class Mylogger:
     """Used to log from the various streams we want to log from"""
 
     id: str
     message: str
     what: str
-    now: datetime.datetime = dataclasses.field(default_factory=datetime.datetime.now)
+    now: datetime.datetime = field(default_factory=datetime.datetime.now)
     nodename: Optional[str] = None
     jobversion: Optional[str] = None
     group: Optional[str] = None
@@ -308,7 +352,7 @@ class Mylogger:
         reset: str = COLORS.reset if color else ""
         return LOGFORMAT.render(
             ARGS.log_format,
-            **dataclasses.asdict(self),
+            **asdict(self),
             mark=mark,
             color=color,
             reset=reset,
@@ -333,18 +377,18 @@ class Mylogger:
             sys.exit(1)  # Python exits with error code 1 on EPIPE
 
     @classmethod
-    def log_eval(cls, db: NomadDbJob, eval: nomadlib.Eval, message: str):
+    def log_eval(cls, eval: nomadlib.Eval, message: str):
         return cls.__log(
             LogWhat.eval,
             id=eval.ID,
-            jobversion=db.find_jobversion_from_modifyindex(eval.ModifyIndex),
+            jobversion=DB.find_jobversion_from_modifyindex(eval.ModifyIndex),
             now=ns2dt(eval.ModifyTime),
             message=message,
         )
 
     @classmethod
-    def log_deploy(cls, db: NomadDbJob, deploy: nomadlib.Deploy, message: str):
-        job = db.jobversions.get(deploy.JobVersion)
+    def log_deploy(cls, deploy: nomadlib.Deploy, message: str):
+        job = DB.jobversions.get(deploy.JobVersion)
         return cls.__log(
             LogWhat.deploy,
             id=deploy.ID,
@@ -364,7 +408,7 @@ class Mylogger:
         )
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass(frozen=True)
 class TaskKey:
     """Represent data to unique identify a task"""
 
@@ -378,7 +422,7 @@ class TaskKey:
         return f"{self.allocid:.6}:v{self.jobversion}:{self.group}:{self.task}"
 
     def asdict(self):
-        return dataclasses.asdict(self)
+        return asdict(self)
 
     def log_alloc(self, now: datetime.datetime, message: str):
         Mylogger.log_alloc(now=now, message=message, **self.asdict())
@@ -399,17 +443,31 @@ class TaskLogger(threading.Thread):
     """Represents a single logging stream from Nomad. Such stream is created separately for stdout and stderr."""
 
     def __init__(self, tk: TaskKey, stderr: bool):
-        super().__init__(name=f"{tk}{1 + int(stderr)}")
+        super().__init__(name=f"{tk}:{'stderr' if stderr else 'stdout'}")
         self.tk = tk
+        """task key"""
         self.stderr: bool = stderr
+        """is this stderr or stdout logger"""
+        #
+        self.startevent = threading.Event()
+        """This is an event which is sent after --shutdown-timeout time after log listening starts"""
+        self.starttimer = threading.Timer(ARGS.shutdown_timeout, self.__starttimer_do)
+        """A timer that will set startevent"""
         self.exitevent = threading.Event()
+        """User should set this event to stop logging the task logs"""
         self.ignoredlines: List[str] = []
-        self.first_line = True
-        # Ignore input lines if printing only trailing lines.
-        self.ignoretime_ns = START_NS + int(ARGS.lines_timeout * 1e9)
-        # If ignore time is in the past, it is no longer relevant anyway.
+        """In the case of --lines argument, this is a buffer of spare lines to output"""
+        self.first_line: bool = True
+        """Ignore input lines if printing only trailing lines."""
+        self.ignoretime_ns: int = START_NS + int(ARGS.lines_timeout * 1e9)
+        """If ignore time is in the past, it is no longer relevant anyway."""
+        #
         if ARGS.lines < 0 or self.ignoretime_ns < time.time_ns():
             self.ignoretime_ns = 0
+
+    def __starttimer_do(self):
+        self.startevent.set()
+        DB.send_empty_event()
 
     @staticmethod
     def read_json_stream(stream: requests.Response):
@@ -467,6 +525,7 @@ class TaskLogger(threading.Thread):
                 "offset": 50000 if self.ignoretime_ns else 0,
             },
         ) as stream:
+            self.starttimer.start()
             for event in self.read_json_stream(stream):
                 if event:
                     line64: Optional[str] = event.get("Data")
@@ -495,18 +554,22 @@ class TaskLogger(threading.Thread):
             )
         except requests.HTTPError:
             raise
+        finally:
+            self.startevent.set()
 
     def stop(self):
         self.exitevent.set()
+        self.startevent.set()
+        self.starttimer.cancel()
 
 
-@dataclasses.dataclass
+@dataclass
 class TaskHandler:
     """A handler for one task. Creates loggers, writes out task events, handle exit conditions"""
 
     loggers: Optional[List[TaskLogger]] = None
     """Array of loggers that log allocation logs."""
-    messages: Set[int] = dataclasses.field(default_factory=set)
+    messages: Set[int] = field(default_factory=set)
     """A set of message timestamp to know what has been printed."""
     exitcode: Optional[int] = None
     stoptimer: Optional[threading.Timer] = None
@@ -555,7 +618,7 @@ class TaskHandler:
         if self.exitcode is None and taskstate.State == "dead":
             terminatedevent = taskstate.find_event("Terminated")
             if terminatedevent:
-                self.exitcode = terminatedevent["ExitCode"]
+                self.exitcode = terminatedevent.ExitCode
 
     def stop(self):
         if self.stoptimer:
@@ -564,12 +627,11 @@ class TaskHandler:
             ll.stop()
 
 
-@dataclasses.dataclass
+@dataclass
 class AllocWorker:
     """Represents a worker that prints out and manages state related to one allocation"""
 
-    db: NomadDbJob
-    taskhandlers: Dict[TaskKey, TaskHandler] = dataclasses.field(default_factory=dict)
+    taskhandlers: Dict[TaskKey, TaskHandler] = field(default_factory=dict)
 
     def notify(self, alloc: nomadlib.Alloc):
         """Update the state with alloc"""
@@ -578,7 +640,7 @@ class AllocWorker:
                 continue
             tk = TaskKey(
                 alloc.ID,
-                str(self.db.get_allocation_jobversion(alloc, "?")),
+                str(DB.get_allocation_jobversion(alloc, "?")),
                 alloc.NodeName,
                 alloc.TaskGroup,
                 taskname,
@@ -599,21 +661,19 @@ class ExitCode:
     no_allocations = 127
 
 
-@dataclasses.dataclass
+@dataclass
 class ExitcodeRet:
     code: int
     reason: str
 
 
-@dataclasses.dataclass
+@dataclass
 class NotifierWorker:
     """An containers for storing a map of allocation workers"""
 
-    db: NomadDbJob
-    """Link to database"""
-    workers: Dict[str, AllocWorker] = dataclasses.field(default_factory=dict)
+    workers: Dict[str, AllocWorker] = field(default_factory=dict)
     """Allocation ID to allocation worker of this allocation"""
-    messages: Set[Tuple[int, str]] = dataclasses.field(default_factory=set)
+    messages: Set[Tuple[int, str]] = field(default_factory=set)
     """A set of evaluation ModifyIndex to know what has been printed."""
 
     def lineno_key_not_printed(self, key: str) -> bool:
@@ -632,25 +692,22 @@ class NotifierWorker:
             return
         #
         if LOGENABLED.eval:
-            evaluation = self.db.evaluations.get(alloc.EvalID)
+            evaluation = DB.evaluations.get(alloc.EvalID)
             if evaluation and self.lineno_key_not_printed(f"{alloc.ID} {alloc.EvalID}"):
                 Mylogger.log_eval(
-                    self.db,
                     evaluation,
                     f"Allocation {alloc.ID} started on {alloc.NodeName}",
                 )
         #
-        self.workers.setdefault(alloc.ID, AllocWorker(self.db)).notify(alloc)
+        self.workers.setdefault(alloc.ID, AllocWorker()).notify(alloc)
         #
         if LOGENABLED.eval and alloc.is_finished():
-            evaluation = self.db.evaluations.get(alloc.EvalID)
+            evaluation = DB.evaluations.get(alloc.EvalID)
             if evaluation and self.lineno_key_not_printed(f"{alloc.ID} {alloc.EvalID}"):
-                Mylogger.log_eval(
-                    self.db, evaluation, f"Allocation {alloc.ID} finished"
-                )
+                Mylogger.log_eval(evaluation, f"Allocation {alloc.ID} finished")
         #
         if LOGENABLED.eval and alloc.FollowupEvalID:
-            followupeval = self.db.evaluations.get(alloc.FollowupEvalID)
+            followupeval = DB.evaluations.get(alloc.FollowupEvalID)
             if followupeval:
                 waituntil = followupeval.getWaitUntil()
                 if waituntil and self.lineno_key_not_printed(followupeval.ID):
@@ -658,7 +715,6 @@ class NotifierWorker:
                     delay = waituntil - utcnow
                     if delay > datetime.timedelta(0):
                         Mylogger.log_eval(
-                            self.db,
                             followupeval,
                             f"Nomad will attempt to reschedule in {delay} seconds",
                         )
@@ -671,19 +727,18 @@ class NotifierWorker:
             and self.lineno_key_not_printed(evaluation.ID)
         ):
             Mylogger.log_eval(
-                self.db,
                 evaluation,
                 f"{evaluation.JobID}: Placement Failures: {len(evaluation.FailedTGAllocs)} unplaced",
             )
             for task, metric in evaluation.FailedTGAllocs.items():
                 for msg in metric.format(True, f"{task}: ").splitlines():
-                    Mylogger.log_eval(self.db, evaluation, msg)
+                    Mylogger.log_eval(evaluation, msg)
 
     def notify_deploy(self, deployment: nomadlib.Deploy):
         # If the job has any service defined.
         if (
             LOGENABLED.eval
-            and self.db.job
+            and DB.job
             and deployment.Status
             in [
                 nomadlib.DeploymentStatus.successful,
@@ -695,7 +750,6 @@ class NotifierWorker:
             """
             for task, tg in deployment.TaskGroups.items():
                 Mylogger.log_deploy(
-                    self.db,
                     deployment,
                     f"{task} Canaries={len(tg.PlacedCanaries or [])}/{tg.DesiredCanaries}"
                     f" Placed={tg.PlacedAllocs} Desired={tg.DesiredTotal} Healthy={tg.HealthyAllocs}"
@@ -707,27 +761,31 @@ class NotifierWorker:
             for th in w.taskhandlers.values():
                 th.stop()
 
-    def join(self):
-        # Logs stream outputs empty {} which allows to handle timeouts.
-        threads: List[Tuple[str, threading.Thread]] = [
-            (f"{tk.task}[{i}]", logger)
+    def get_threads(self) -> List[TaskLogger]:
+        return [
+            logger
             for w in self.workers.values()
-            for tk, th in w.taskhandlers.items()
-            for i, logger in enumerate(th.loggers or [])
+            for th in w.taskhandlers.values()
+            for logger in th.loggers or []
         ]
+
+    def join(self):
+        threads = self.get_threads()
+        # Logs stream outputs empty {} which allows to handle timeouts.
         thcnt = sum(len(w.taskhandlers) for w in self.workers.values())
         log.debug(
             f"Joining {len(self.workers)} allocations with {thcnt} taskhandlers and {len(threads)} loggers"
         )
         timeend = time.time() + ARGS.shutdown_timeout
-        for desc, thread in threads:
+        timeout = None
+        for thread in threads:
             timeout = timeend - time.time()
             if timeout > 0:
-                log.debug(f"joining worker {desc} timeout={timeout}")
-                thread.join(timeout=timeout)
+                log.debug(f"joining worker {thread.name} timeout={timeout}")
+                thread.startevent.wait(timeout)
             else:
-                log.debug("timeout passed for joining workers")
                 break
+        log.debug(f"{len(threads)} threads joined with {timeout} timeout to spare")
 
     def __exitcode(self) -> ExitcodeRet:
         tasks_exitcodes: List[Optional[int]] = [
@@ -832,7 +890,8 @@ class _NomadJobWatcherDetail(ABC):
         assert self.jobid
         self.job: Optional[nomadlib.Job] = None
         """Last valid job with matching watched job ID"""
-        self.db = NomadDbJob(
+        global DB
+        DB = NomadDbJob(
             topics=[
                 f"Job:{self.jobid}",
                 f"Evaluation:{self.jobid}",
@@ -843,24 +902,13 @@ class _NomadJobWatcherDetail(ABC):
             init_cb=self.__db_init_cb,
             force_polling=True if ARGS.polling else None,
         )
-        """Database listening to Nomad stream"""
-        self.notifier = NotifierWorker(self.db)
+        self.notifier = NotifierWorker()
         """Notification worker dispatching Nomad stream events"""
-        self.thread = threading.Thread(
-            target=self.__thread_run,
-            name=f"{self.__class__.__name__}({self.jobid})",
-            daemon=True,
-        )
-        """The thread that parses database events"""
-        self.sent_purged_req = threading.Event()
-        """Return true if we sent a request to purge the job"""
-        self.sent_stopped_req = threading.Event()
-        """Return true if we sent a request to stop the job"""
-        self.done = threading.Event()
-        """Set to true if the loop is done"""
+        self.no_follow_timeend: float = time.time() + ARGS.no_follow_timeout
+        """If in --no-follow mode, exit after this time"""
         #
-        self.db.start()
-        self.thread.start()
+        DB.start()
+        InterruptTwice.install()
 
     def __db_init_cb(self) -> List[Event]:
         """Db initialization callback"""
@@ -872,11 +920,11 @@ class _NomadJobWatcherDetail(ABC):
             allocations: List[dict] = mynomad.get(f"job/{self.jobid}/allocations")
         except nomadlib.JobNotFound:
             # This is fine to fail if it was purged, potentially.
-            if self.sent_purged_req.is_set() and self.job:
+            if DB.seen_job() and self.job:
                 # If the job was purged, generate one event so that listener can catch it.
                 return [
                     Event(
-                        -1, EventTopic.Job, EventType.JobRegistered, self.job.asdict()
+                        -1, EventTopic.Job, EventType.JobDeregistered, self.job.asdict()
                     )
                 ]
             raise
@@ -912,7 +960,7 @@ class _NomadJobWatcherDetail(ABC):
 
     def __db_select_event_job_id(self, e: Event):
         """Select only events about observed job ID. Ignore all events about other jobs."""
-        return self.db.apply_selects(
+        return DB.apply_selects(
             e,
             lambda job: job.ID == self.jobid,
             lambda eval: eval.JobID == self.jobid,
@@ -938,15 +986,15 @@ class _NomadJobWatcherDetail(ABC):
         # also start watching them by lowering JobModfyIndex threashold.
         min_active_allocation_jobmodifyindex: int = min(
             (
-                self.db.get_allocation_jobmodifyindex(alloc, jobmodifyindex)
-                for alloc in self.db.allocations.values()
+                DB.get_allocation_jobmodifyindex(alloc, jobmodifyindex)
+                for alloc in DB.allocations.values()
                 if nomadlib.Alloc(alloc).is_pending_or_running()
             ),
             default=jobmodifyindex,
         )
         jobmodifyindex = min(jobmodifyindex, min_active_allocation_jobmodifyindex)
         # Set the JobModifyIndex to the last still running Job version.
-        not_stopped_jobs = [job for job in self.db.jobversions.values() if not job.Stop]
+        not_stopped_jobs = [job for job in DB.jobversions.values() if not job.Stop]
         if not_stopped_jobs:
             last_not_stopped_job = sorted(
                 not_stopped_jobs, key=lambda job: job.ModifyIndex
@@ -961,7 +1009,7 @@ class _NomadJobWatcherDetail(ABC):
             if (
                 ARGS.all
                 or self.notifier.alloc_notified(allocation)
-                or self.db.get_allocation_jobmodifyindex(allocation, -1)
+                or DB.get_allocation_jobmodifyindex(allocation, -1)
                 >= self.minjobmodifyindex
             ):
                 self.notifier.notify_alloc(allocation)
@@ -984,61 +1032,57 @@ class _NomadJobWatcherDetail(ABC):
             if ARGS.all or deployment.JobModifyIndex >= self.minjobmodifyindex:
                 self.notifier.notify_deploy(deployment)
         elif event.topic == EventTopic.Job:
-            if (
-                self.job
-                and self.db.job
-                and self.job.ModifyIndex < self.db.job.ModifyIndex
-            ):
+            if self.job and DB.job and self.job.ModifyIndex < DB.job.ModifyIndex:
                 # self.job follows newest job definition.
-                self.job = self.db.job
+                self.job = DB.job
 
-    def loop_debug(self, events: List[nomaddbjob.Event]):
+    def __loop_debug(self, events: List[nomaddbjob.Event]):
         if flagdebug.debug("loop"):
             info = dict(
                 e=f"{events[0].topic.name}.{events[0].type.name}" if events else None,
                 minModifyIndex=self.minjobmodifyindex,
                 evalDone=self.eval is None or not self.eval.is_pending_or_blocked(),
-                jobDeregister=self.db.job_deregistered_ModifyIndex,
-                seenJob=self.job and self.db.seen_job(),
+                jobDeregister=DB.job_deregistered_ModifyIndex,
+                seenJob=self.job and DB.seen_job(),
                 activeEvals=self.has_active_evaluations(),
                 activeAllocs=self.has_active_allocations(),
                 activeDeploys=self.has_active_deployments(),
-                purgedReq=self.sent_purged_req.is_set(),
-                stoppedReq=self.sent_stopped_req.is_set(),
-                isPurged=self.job_is_purged(),
+                isPurged=DB.job_purged(),
                 jobDead=self.job.is_dead() if self.job else None,
+                notifiers=[
+                    f"{th.name}={int(th.startevent.is_set())}"
+                    for th in self.notifier.get_threads()
+                ],
             )
             eprint(f"LOOP: {strdict(info)}")
 
-    @abstractmethod
-    def _loop_end_cb(self) -> bool:
-        raise NotImplementedError()
-
-    def __thread_run(self):
+    def loop(self) -> Iterator[None]:
         """Thread entrypoint that handles events from Nomad event stream database"""
         untilstr = (
             "forever"
             if ARGS.all
-            else f"for {ARGS.shutdown_timeout} seconds"
-            if ARGS.no_follow
-            else f"until it is {self.endstatusstr}"
+            else (
+                f"for {ARGS.no_follow_timeout} seconds"
+                if ARGS.no_follow
+                else f"until it is {self.endstatusstr}"
+            )
         )
         log.info(f"Watching job {self.jobid}@{mynomad.namespace} {untilstr}")
-        no_follow_timeend: float = time.time() + ARGS.shutdown_timeout
-        for events in self.db.events():
+        for events in DB.events():
             for event in events:
                 self.__handle_event(event)
-            self.loop_debug(events)
+            self.__loop_debug(events)
             if (
                 # --follow means never exit.
                 not ARGS.follow
                 # If we started with an evaluation, it has to be finished.
                 # Otherwise the events may be related to a previous job version.
                 and (self.eval is None or not self.eval.is_pending_or_blocked())
+                # Make sure all the threads have finished outputting logs.
+                and all(th.startevent.is_set() for th in self.notifier.get_threads())
             ):
-                if self._loop_end_cb():
-                    break
-                if self.job_is_purged():
+                yield
+                if self.job and DB.job_purged():
                     assert self.job
                     if self.has_no_active_allocations_nor_evaluations_nor_deployments():
                         log.info(
@@ -1047,20 +1091,12 @@ class _NomadJobWatcherDetail(ABC):
                     else:
                         log.info(f"Job {self.job.description()} purged. Exiting.")
                     break
-                if ARGS.no_follow and time.time() > no_follow_timeend:
-                    break
-        self.done.set()
+            if ARGS.no_follow and time.time() > self.no_follow_timeend:
+                break
         log.debug(f"Watching job {self.jobid}@{mynomad.namespace} exiting")
 
-    def job_is_purged(self):
-        return (
-            self.db.seen_job()
-            and self.job
-            and self.db.job_deregistered_ModifyIndex >= self.minjobmodifyindex
-        )
-
     def has_active_deployments(self):
-        for deployment in self.db.deployments.values():
+        for deployment in DB.deployments.values():
             if not deployment.is_finished():
                 if flagdebug.debug("active"):
                     eprint(f"ACTIVE: {deployment}")
@@ -1068,7 +1104,7 @@ class _NomadJobWatcherDetail(ABC):
         return False
 
     def has_active_evaluations(self):
-        for evaluation in self.db.evaluations.values():
+        for evaluation in DB.evaluations.values():
             if evaluation.is_pending_or_blocked():
                 if flagdebug.debug("active"):
                     eprint(f"ACTIVE: {evaluation}")
@@ -1076,7 +1112,7 @@ class _NomadJobWatcherDetail(ABC):
         return False
 
     def has_active_allocations(self):
-        for alloc in self.db.allocations.values():
+        for alloc in DB.allocations.values():
             if alloc.is_pending_or_running():
                 if flagdebug.debug("active"):
                     eprint(
@@ -1095,55 +1131,73 @@ class _NomadJobWatcherDetail(ABC):
 
 
 class NomadJobWatcher(_NomadJobWatcherDetail):
+    @override
+    def __init__(self, jobid: Optional[str], eval: Optional[nomadlib.Eval] = None):
+        super().__init__(jobid, eval)
+        self.sent_purged_req = False
+        """Return true if we sent a request to purge the job"""
+        self.sent_stopped_req = False
+        """Return true if we sent a request to stop the job"""
+
     @abstractmethod
     def _get_exitcode_cb(self) -> int:
         raise NotImplementedError()
 
+    @abstractmethod
+    def _loop_end_cb(self):
+        raise NotImplementedError()
+
     def stop_job(self, purge: bool = False):
-        self.db.initialized.wait()
+        assert DB.initialized.is_set()
         if purge:
-            self.sent_purged_req.set()
+            if self.sent_purged_req:
+                return
+            log.info(f"Purging job {self.jobid}")
+            self.sent_stopped_req = True
+            self.sent_purged_req = True
         else:
-            self.sent_stopped_req.set()
+            if self.sent_stopped_req:
+                return
+            log.info(f"Stopping job {self.jobid}")
+            self.sent_stopped_req = True
         mynomad.stop_job(self.jobid, purge)
 
     def stop_threads(self):
         log.debug(f"stopping {self.__class__.__name__}")
         self.notifier.stop()
-        self.db.stop()
+        DB.stop()
         self.notifier.join()
-        self.db.join()
+        DB.join()
         mynomad.session.close()
 
     def get_exitcode(self) -> int:
-        assert self.db.stopevent.is_set(), f"{self.stop_threads.__name__} not called"
-        assert self.done.is_set(), f"{self.stop_threads.__name__} not called"
+        assert DB.stopevent.is_set(), f"{self.stop_threads.__name__} not called"
+        if InterruptTwice.received:
+            return ExitCode.interrupted
         return self._get_exitcode_cb()
 
-    def run_and_exit(self):
+    def run_and_exit(self, stopit: bool = False):
         try:
-            self.done.wait()
-        except KeyboardInterrupt:
-            try:
-                log.error("Interrupted.")
-                if ARGS.attach or ARGS.purge or ARGS.purge_successful:
-                    purge: bool = ARGS.purge or (
-                        ARGS.purge_successful and self.job_finished_successfully()
-                    )
-                    if (purge and not self.sent_purged_req.is_set()) or (
-                        not purge and not self.sent_stopped_req.is_set()
-                    ):
+            for _ in self.loop():
+                if stopit:
+                    self.stop_job()
+                if InterruptTwice.received:
+                    if ARGS.attach or ARGS.purge or ARGS.purge_successful:
+                        purge: bool = ARGS.purge or (
+                            ARGS.purge_successful and self.job_finished_successfully()
+                        )
                         self.stop_job(purge)
-                        self.done.wait()
-            finally:
-                exit(ExitCode.interrupted)
+                    else:
+                        break
+                if self._loop_end_cb():
+                    break
         finally:
             self.stop_threads()
         exit(self.get_exitcode())
 
     def job_is_finished(self):
         return (
-            self.db.seen_job()
+            DB.seen_job()
             and self.job
             and self.job.is_dead()
             and self.has_no_active_allocations_nor_evaluations_nor_deployments()
@@ -1157,7 +1211,7 @@ class NomadJobWatcher(_NomadJobWatcherDetail):
         return s
 
     def job_finished_successfully(self):
-        self.db.initialized.wait()
+        DB.initialized.wait()
         assert self.job
         if self.job.Status != "dead":
             return False
@@ -1172,7 +1226,7 @@ class NomadJobWatcher(_NomadJobWatcherDetail):
         )
 
     def job_running_successfully(self):
-        self.db.initialized.wait()
+        DB.initialized.wait()
         assert self.job
         if self.job.is_dead():
             return self.job_finished_successfully()
@@ -1198,15 +1252,14 @@ class NomadJobWatcherUntilFinished(NomadJobWatcher):
     @override
     def _loop_end_cb(self) -> bool:
         if self.job_is_finished():
-            if not self.sent_purged_req.is_set():
-                if ARGS.purge or (
-                    ARGS.purge_successful and self.job_running_successfully()
-                ):
-                    self.stop_job(True)
-        if self.sent_purged_req.is_set():
-            # Wait for beeing purged.
-            return False
-        if self.job_is_finished():
+            if not self.sent_purged_req and (
+                ARGS.purge
+                or (ARGS.purge_successful and self.job_running_successfully())
+            ):
+                self.stop_job(True)
+            if self.sent_purged_req:
+                # Wait for beeing purged.
+                return False
             log.info(self.job_dead_message())
             return True
         return False
@@ -1273,7 +1326,7 @@ class NomadJobWatcherUntilStarted(NomadJobWatcher):
         Return True if the job is not starting anymore.
         self.started will be set to True, if the job was successfully started.
         """
-        # log.debug(f"has_active_deployments={self.has_active_deployments()} has_active_evaluations={self.has_active_evaluations()} allocations={len(self.db.allocations)}")  # noqa
+        # log.debug(f"has_active_deployments={self.has_active_deployments()} has_active_evaluations={self.has_active_evaluations()} allocations={len(DB.allocations)}")  # noqa
         if (
             not self.job
             or self.has_active_deployments()
@@ -1281,7 +1334,7 @@ class NomadJobWatcherUntilStarted(NomadJobWatcher):
         ):
             # The job is still doing something. Wait for it.
             return False
-        allocations = self.db.allocations.values()
+        allocations = DB.allocations.values()
         if (
             not allocations
             or any(alloc.is_pending() for alloc in allocations)
@@ -1296,9 +1349,9 @@ class NomadJobWatcherUntilStarted(NomadJobWatcher):
                 alloc
                 for alloc in allocations
                 if alloc.TaskGroup == group.Name
-                and self.db.get_allocation_jobmodifyindex(alloc, -1)
+                and DB.get_allocation_jobmodifyindex(alloc, -1)
                 >= self.minjobmodifyindex
-                and self.db.get_allocation_jobversion(alloc, -1) == self.job.Version
+                and DB.get_allocation_jobversion(alloc, -1) == self.job.Version
             ]
             # There have to be at exactly group.Count allocations of this group for it to be deployed.
             # The allocation not necessarily have to be running - they may have finished.
@@ -1306,8 +1359,8 @@ class NomadJobWatcherUntilStarted(NomadJobWatcher):
                 # This group has no active evaluation and deployments (checked above).
                 log.debug(
                     f"groupallocs={[x.ID for x in groupallocs]}"
-                    f" {[self.db.get_allocation_jobmodifyindex(alloc, -1) for alloc in groupallocs]}"
-                    f" {[self.db.get_allocation_jobversion(alloc, -1) for alloc in groupallocs]}"
+                    f" {[DB.get_allocation_jobmodifyindex(alloc, -1) for alloc in groupallocs]}"
+                    f" {[DB.get_allocation_jobversion(alloc, -1) for alloc in groupallocs]}"
                 )
                 log.error(
                     f"Job {self.job.description()} group {group.Name!r} started"
@@ -1347,34 +1400,37 @@ class NomadJobWatcherUntilStarted(NomadJobWatcher):
 ###############################################################################
 
 
+@dataclass
 class NomadAllocationWatcher:
     """Watch an allocation until it is finished"""
 
-    def __init__(self, alloc: nomadlib.Alloc):
-        self.alloc = alloc
-        self.db = NomadDbJob(
-            topics=[f"Allocation:{alloc.ID}"],
+    alloc: nomadlib.Alloc
+    allocworkers: NotifierWorker = field(default_factory=NotifierWorker)
+    finished: bool = False
+
+    def __post_init__(self):
+        global DB
+        DB = NomadDbJob(
+            topics=[f"Allocation:{self.alloc.ID}"],
             select_event_cb=lambda e: e.topic == EventTopic.Allocation
-            and e.data["ID"] == alloc.ID,
+            and e.data["ID"] == self.alloc.ID,
             init_cb=lambda: [
                 Event(
                     -1,
                     EventTopic.Allocation,
                     EventType.AllocationUpdated,
-                    mynomad.get(f"allocation/{alloc.ID}"),
+                    mynomad.get(f"allocation/{self.alloc.ID}"),
                 )
             ],
             force_polling=True if ARGS.polling else None,
         )
-        self.allocworkers = NotifierWorker(self.db)
-        self.finished = False
         #
-        log.info(f"Watching allocation {alloc.ID}")
-        self.db.start()
+        log.info(f"Watching allocation {self.alloc.ID}")
+        DB.start()
 
     def run_and_exit(self):
         try:
-            for events in self.db.events():
+            for events in DB.events():
                 for event in events:
                     if event.topic == EventTopic.Allocation:
                         alloc = nomadlib.Alloc(event.data)
@@ -1391,9 +1447,9 @@ class NomadAllocationWatcher:
                 if ARGS.no_follow or self.finished:
                     break
         finally:
-            self.db.stop()
+            DB.stop()
             self.allocworkers.stop()
-            self.db.join()
+            DB.join()
             self.allocworkers.join()
         exit(self.allocworkers.exitcode())
 
@@ -1494,7 +1550,10 @@ Examples:
     "-A",
     "--attach",
     is_flag=True,
-    help="Stop the job on interrupt and after it has finished.",
+    help="""
+        Stop the job on receiving an SIGINT or SIGTERM signal.
+        Exit immidately after receiving a signal the second time.
+        """,
 )
 @click.option(
     "--purge-successful",
@@ -1535,7 +1594,7 @@ Examples:
 @click.option(
     "--shutdown-timeout",
     "shutdown_timeout",
-    default=2,
+    default=1,
     show_default=True,
     type=float,
     help="The time to wait to make sure task loggers received all logs when exiting.",
@@ -1551,6 +1610,14 @@ Examples:
     "no_follow",
     is_flag=True,
     help="Just run once, get the logs in a best-effort style and exit.",
+)
+@click.option(
+    "--no-follow-timeout",
+    "no_follow_timeout",
+    default=3,
+    show_default=True,
+    type=float,
+    help="The time to run in --no-follow mode.",
 )
 @click.option(
     "-t",
@@ -1741,12 +1808,6 @@ def mode_started(jobid: str):
     NomadJobWatcherUntilStarted(jobid).run_and_exit()
 
 
-def mode_stop_in(jobid: str):
-    do = NomadJobWatcherUntilFinished(jobid)
-    do.stop_job()
-    do.run_and_exit()
-
-
 @cli.command(
     "stop",
     help="Stop a Nomad job and then act like stopped command.",
@@ -1754,7 +1815,7 @@ def mode_stop_in(jobid: str):
 @cli_jobid
 def mode_stop(jobid: str):
     jobid = nomad_find_job(jobid)
-    mode_stop_in(jobid)
+    NomadJobWatcherUntilFinished(jobid).run_and_exit(True)
 
 
 @cli.command(
@@ -1776,7 +1837,7 @@ def mode_purge(jobid: str):
             return
         else:
             raise
-    mode_stop_in(jobid)
+    NomadJobWatcherUntilFinished(jobid).run_and_exit(True)
 
 
 @cli.command(

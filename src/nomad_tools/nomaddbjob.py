@@ -181,7 +181,7 @@ class NomadDbJob:
                     )
                 )
                 and self.job_deregistered_ModifyIndex < eval.ModifyIndex
-                and self.job.Status == JobStatus.dead
+                and self.job.Status in [JobStatus.dead, JobStatus.pending]
                 # and not eval.DeploymentID
             ):
                 self.job_deregistered_ModifyIndex = eval.ModifyIndex
@@ -331,6 +331,20 @@ class NomadDbJob:
         """Check if the job event type has been received at least once from the event stream"""
         return self.job is not None
 
-    def add_empty_event(self):
+    def job_purged(self) -> bool:
+        """Return True if the job was purged"""
+        # When a job is _stopped_, then within the same events array are received:
+        # - Evaluation.EvaluationUpdated TriggeredBy="job-deregister"
+        # - and Job.EvaluationUpdated Status=dead
+        # In contrast, when a job is _purged_,
+        # then only Evaluation.EvaluationUpdated is received.
+        # For a job to be purged, the modify index of evaluation job deregister
+        # has to be not equal to job modify index.
+        return (
+            self.job is not None
+            and self.job_deregistered_ModifyIndex > self.job.ModifyIndex
+        )
+
+    def send_empty_event(self):
         """Send an empty event to trigger the loop if needed by the user"""
         self.queue.put([])

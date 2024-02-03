@@ -303,6 +303,13 @@ class AllocTaskStateEvent(DataDict):
     DisplayMessage: str
     Time: int
     Type: str
+    ExitCode: Optional[int] = None
+
+
+class AllocTaskStateType(MyStrEnum):
+    pending = "pending"  # The task is waiting to be run.
+    running = "running"  # The task is currently running.
+    dead = "dead"  # Terminal state of task.
 
 
 class AllocTaskState(DataDict):
@@ -314,7 +321,9 @@ class AllocTaskState(DataDict):
     Restarts: int
     StartedAt: Optional[str]
 
-    def find_event(self, type_: str) -> Optional[AllocTaskStateEvent]:
+    def find_event(
+        self, type_: Union[str, AllocTaskStateEventType]
+    ) -> Optional[AllocTaskStateEvent]:
         """Find event in TaskStates task Events. Return empty dict if not found"""
         return next((e for e in self.Events or [] if e.Type == type_), None)
 
@@ -499,6 +508,7 @@ class Event:
     """Parsed Event from Nomad event stream"""
 
     index: int
+    """The index received with the event"""
     topic: EventTopic
     type: EventType
     data: dict

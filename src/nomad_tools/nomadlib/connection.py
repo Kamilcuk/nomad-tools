@@ -204,10 +204,6 @@ class NomadConn(Requestor):
 
     def stop_job(self, jobid: str, purge: bool = False):
         assert self.namespace
-        if purge:
-            log.info(f"Purging job {jobid}")
-        else:
-            log.info(f"Stopping job {jobid}")
         resp: dict = self.delete(f"job/{jobid}", params={"purge": purge})
         assert resp["EvalID"], f"Stopping {jobid} did not trigger evaluation: {resp}"
         return resp
