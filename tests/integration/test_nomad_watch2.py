@@ -8,6 +8,18 @@ from tests.testlib import get_testjobs, run, run_nomad_watch
 testjobs = get_testjobs()
 
 
+def test_nomad_watch2_run0():
+    """Watch a simple jow that outputs hello world"""
+    job = "test-run0"
+    run_nomad_watch(
+        f"--purge run {testjobs[job]}",
+        output=[
+            "> hello world",
+            "> + echo hello world",
+        ],
+    )
+
+
 def test_nomad_watch2_start():
     job = "test-start"
     mark = "7bc8413c-8619-48bf-a46d-f42727724632"
