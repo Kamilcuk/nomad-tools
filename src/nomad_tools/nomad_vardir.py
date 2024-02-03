@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import dataclasses
-import distutils.spawn
 import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -174,11 +174,7 @@ class NomadVariable:
             cas: Optional[int] = (
                 check_index
                 if check_index is not None
-                else None
-                if force
-                else oldvar.ModifyIndex
-                if oldvar
-                else 0
+                else None if force else oldvar.ModifyIndex if oldvar else 0
             )
             if newitems:
                 log.info(
@@ -304,7 +300,7 @@ def load_directory(paths: Iterable[Path]) -> Dict[str, str]:
 
 
 def show_diff(olditems: Dict[str, str], newitems: Dict[str, str]) -> bool:
-    if distutils.spawn.find_executable("diff"):
+    if shutil.which("diff"):
         with tempfile.TemporaryDirectory(prefix="nomad-var-dir_") as tmpd:
             tmpd = Path(tmpd)
             create_tree(tmpd / "nomad", olditems)
