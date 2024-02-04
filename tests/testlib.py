@@ -283,3 +283,4 @@ def nomad_vardir_test():
                     f"--test {shlex.quote(testf.name)} {shlex.quote(testf.name)}"
                 )
                 yield t
+
