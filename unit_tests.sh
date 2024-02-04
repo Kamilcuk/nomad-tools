@@ -49,9 +49,9 @@ integration_tests() {
 	r pytest -sxv tests/unit tests/integration "$@"
 }
 integration_tests_trap_exit() {
-	r nomad status || :
-	r docker ps || :
 	logs_errors || :
+	nomad status || :
+	docker ps || :
 }
 be_nice() {
 	if [[ -v CI ]]; then
