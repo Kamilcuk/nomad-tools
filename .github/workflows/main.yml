@@ -33,13 +33,13 @@ jobs:
       - name: run pyright
         uses: jakebailey/pyright-action@v1
       - name: run unit tests
-        run: pytest -sxv tests/unit
+        run: ./unit_tests.sh --durations=10 -n auto
       - name: install nomad server
         run: bash ./tests/provision.sh nomad_install ${{ matrix.nomad }}
       - name: run nomad server
         run: bash ./tests/provision.sh nomad_start
       - name: run integration tests
-        run: ./integration_tests.sh --durations=10 --cov=nomad_tools -n 4
+        run: ./integration_tests.sh --durations=10 --cov=nomad_tools -n auto
 
 
   pypi-publish:
