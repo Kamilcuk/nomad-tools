@@ -45,7 +45,7 @@ def test_nomad_watch2_start():
 
 
 def test_nomad_watch2_okpurge():
-    job = "test-listen"
+    job = "test-okpurge"
     try:
         # Run nice deployment.
         run_nomad_watch(f"start -var ok=true {testjobs[job]}")
