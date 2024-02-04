@@ -292,8 +292,7 @@ class NomadPopen(Generic[T]):
         assert self.ws
         msg = json.dumps({"stdin": {"data": base64.b64encode(s).decode()}})
         log.debug(f"W stdin:data:{s!r}")
-        self.ws.send(msg)
-        return len(s)
+        return self.ws.send(msg)
 
     def read(self, size: int = -1) -> bytes:
         acc: bytearray = bytearray()
@@ -308,6 +307,10 @@ class NomadPopen(Generic[T]):
     @dataclasses.dataclass
     class Stdin(BinaryIO):
         p: NomadPopen
+
+        @override
+        def fileno(self) -> int:
+            return -1
 
         @override
         def writable(self) -> bool:
@@ -325,6 +328,10 @@ class NomadPopen(Generic[T]):
     @dataclasses.dataclass
     class Stdout(BinaryIO):
         p: NomadPopen
+
+        @override
+        def fileno(self) -> int:
+            return -1
 
         @override
         def readable(self) -> bool:
