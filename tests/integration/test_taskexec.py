@@ -20,6 +20,24 @@ def run_temp_job():
         run_nomad_watch(f"-q -o none -x purge {jobid}")
 
 
+def test_taskexec_noutf():
+    with run_temp_job() as jobid:
+        alloc, task = taskexec.find_job(jobid)
+        buf = taskexec.check_output(
+            alloc,
+            task,
+            [
+                "sh",
+                "-xc",
+                r"""
+                printf "stdout 0xc0 byte: \xc0\n"
+                printf "stderr 0xc0 byte: \xc0\n" >&2
+                """,
+            ],
+        )
+        assert buf == b"stdout 0xc0 byte: \xc0\n"
+
+
 def test_taskexec_1():
     with run_temp_job() as jobid:
         alloc, task = taskexec.find_job(jobid)

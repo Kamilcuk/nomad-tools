@@ -44,14 +44,6 @@ _StrAny = Union[bytes, str]
 _InputString = Optional[_StrAny]
 
 
-def str_to_b64(txt: str) -> str:
-    return base64.b64encode(txt.encode()).decode()
-
-
-def b64_to_str(txt: str) -> str:
-    return base64.b64decode(txt.encode()).decode()
-
-
 def find_alloc_task(
     allocid: Optional[str], task: Optional[str] = None, job: Optional[str] = None
 ) -> Tuple[str, str]:
@@ -222,7 +214,8 @@ class NomadPopen(Generic[T]):
             if fstderr:
                 data: Optional[str] = fstderr.get("data")
                 if data:
-                    eprint(b64_to_str(data).rstrip())
+                    txt: str = base64.b64decode(data.encode()).decode(errors="replace")
+                    eprint(txt, end="")
             fstdout: Optional[dict] = frame.get("stdout")
             if fstdout:
                 data: Optional[str] = fstdout.get("data")
