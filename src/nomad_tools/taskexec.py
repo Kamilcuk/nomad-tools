@@ -27,6 +27,7 @@ from typing import (
 import websocket
 from typing_extensions import Literal, override
 
+from . import nomadlib
 from .common_base import eprint
 from .common_nomad import mynomad, nomad_find_job
 from .nomadlib.types import Alloc
@@ -39,7 +40,8 @@ PIPE = subprocess.PIPE
 CompletedProcess = subprocess.CompletedProcess
 _DESTFILE = Union[int, IO[Any]]
 _FILE = Optional[_DESTFILE]
-_InputString = Optional[Union[bytes, str]]
+_StrAny = Union[bytes, str]
+_InputString = Optional[_StrAny]
 
 
 def str_to_b64(txt: str) -> str:
@@ -168,14 +170,13 @@ class NomadPopen(Generic[T]):
         self._reader = self.__readergen()
         self.text = text
         # Connect to the remote side.
-        addr = mynomad.addr()
-        if addr.startswith("http"):
-            addr = "ws" + addr[4:]
-        url = f"{addr}/v1/client/allocation/{allocid}/exec?" + urllib.parse.urlencode(
+        path = f"v1/client/allocation/{allocid}/exec?" + urllib.parse.urlencode(
             dict(task=task, command=json.dumps(args))
         )
-        log.debug(f"CONNECT {url!r} text={text}")
-        self.ws: Optional[websocket.WebSocket] = websocket.create_connection(url)
+        log.debug(f"CONNECT {path!r} text={text}")
+        self.ws: Optional[websocket.WebSocket] = nomadlib.create_websocket_connection(
+            path
+        )
         # Initialize self.stdin
         self.stdin: Optional[IO[T]] = None
         if self.__stdin_arg == DEVNULL:
@@ -255,7 +256,9 @@ class NomadPopen(Generic[T]):
 
     @property
     def returncode(self):
-        assert self.__returncode is not None, "not finished"
+        assert (
+            self.__returncode is not None
+        ), f"nomad alloc exec {self.cmd} not finished"
         return self.__returncode
 
     def wait(self):
@@ -264,7 +267,10 @@ class NomadPopen(Generic[T]):
         for _ in self._reader:
             pass
         if self.__returncode is None:
-            raise Exception("did not receive returncode from nomad")
+            raise Exception(
+                f"when executing nomad alloc exec {self.cmd}"
+                "the websocket was closed by Nomad server without sending the exit code of the process."
+            )
         log.debug("closing")
         self.ws.close()
         self.ws = None
@@ -358,11 +364,12 @@ def run(
     allocid: str,
     task: str,
     cmd: List[str],
+    *,
+    stdin: _FILE = ...,
     input: Optional[bytes] = ...,
-    stdin: Optional[int] = ...,
-    stdout: Optional[Union[int, IO]] = ...,
+    stdout: _FILE = ...,
     check: bool = ...,
-    text: Literal[False] = ...,
+    text: Literal[False] = False,
 ) -> CompletedProcess[bytes]:
     ...
 
@@ -372,11 +379,12 @@ def run(
     allocid: str,
     task: str,
     cmd: List[str],
-    input: Optional[str] = ...,
-    stdin: Optional[int] = ...,
-    stdout: Optional[Union[int, IO]] = ...,
+    *,
+    text: Literal[True],
+    stdin: _FILE = ...,
+    input: str = ...,
+    stdout: _FILE = ...,
     check: bool = ...,
-    text: Literal[True] = ...,
 ) -> CompletedProcess[str]:
     ...
 
@@ -386,12 +394,13 @@ def run(
     allocid: str,
     task: str,
     cmd: List[str],
-    input: Optional[T] = None,
-    stdin: Optional[int] = None,
-    stdout: Optional[Union[int, IO]] = None,
-    check: bool = False,
-    text: bool = False,
-) -> CompletedProcess[T]:
+    *,
+    text: bool,
+    input: Optional[Union[bytes, str]] = ...,
+    stdin: _FILE = ...,
+    stdout: _FILE = ...,
+    check: bool = ...,
+) -> CompletedProcess[Any]:
     ...
 
 
@@ -399,9 +408,10 @@ def run(
     allocid: str,
     task: str,
     cmd: List[str],
+    *,
+    stdin: _FILE = None,
     input: Optional[Union[bytes, str]] = None,
-    stdin: Optional[int] = None,
-    stdout: Optional[Union[int, IO]] = None,
+    stdout: _FILE = None,
     check: bool = False,
     text: bool = False,
 ) -> CompletedProcess[Any]:
@@ -409,7 +419,7 @@ def run(
         allocid,
         task,
         cmd,
-        stdin=PIPE if input else None,
+        stdin=PIPE if input else stdin,
         stdout=stdout,
         text=text,
     ) as p:
@@ -427,7 +437,8 @@ def check_output(
     allocid: str,
     task: str,
     cmd: List[str],
-    input: Optional[bytes] = None,
+    *,
+    input: Optional[bytes] = ...,
     text: Literal[False] = False,
 ) -> bytes:
     ...
@@ -438,8 +449,9 @@ def check_output(
     allocid: str,
     task: str,
     cmd: List[str],
-    input: Optional[str] = None,
-    text: Literal[True] = True,
+    *,
+    text: Literal[True],
+    input: Optional[str] = ...,
 ) -> str:
     ...
 
@@ -449,8 +461,20 @@ def check_output(
     allocid: str,
     task: str,
     cmd: List[str],
-    input: Optional[Union[str, bytes]] = None,
-    text: bool = False,
+    *,
+    input: T,
+    text: bool,
+) -> T:
+    ...
+
+
+@overload
+def check_output(
+    allocid: str,
+    task: str,
+    cmd: List[str],
+    *,
+    text: bool,
 ) -> Union[str, bytes]:
     ...
 
@@ -459,10 +483,13 @@ def check_output(
     allocid: str,
     task: str,
     cmd: List[str],
+    *,
     input: Optional[Union[str, bytes]] = None,
     text: bool = False,
 ) -> Union[str, bytes]:
-    return run(allocid, task, cmd, input, stdout=PIPE, text=text, check=True).stdout
+    return run(
+        allocid, task, cmd, input=input, stdout=PIPE, text=text, check=True
+    ).stdout
 
 
 ###############################################################################
@@ -476,6 +503,11 @@ if __name__ == "__main__":
     parser.add_argument("--trace", action="store_true")
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--text", action="store_false")
+    parser.add_argument(
+        "--mode",
+        choices="check_output run".split(),
+        default="check_output",
+    )
     parser.add_argument("job")
     parser.add_argument("task")
     parser.add_argument("cmd", nargs="+")
@@ -487,10 +519,13 @@ if __name__ == "__main__":
     print(args)
     job = nomad_find_job(args.job)
     allocid = find_job_alloc(args.job, args.task)
-    output = ""
-    try:
-        output = check_output(
-            allocid, args.task, args.cmd, args.input, text=args.text
-        ).strip()
-    finally:
-        print(output)
+    if args.mode == "check_output":
+        output = ""
+        try:
+            output = check_output(
+                allocid, args.task, args.cmd, input=args.input, text=args.text
+            ).strip()
+        finally:
+            print(output)
+    elif args.mode == "run":
+        run(allocid, args.task, args.cmd, input=args.input, text=args.text)

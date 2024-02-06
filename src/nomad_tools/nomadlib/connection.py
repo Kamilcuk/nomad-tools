@@ -1,11 +1,14 @@
+import base64
 import dataclasses
 import logging
 import os
+import ssl
 from abc import ABC, abstractmethod
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 import requests.adapters
 import requests.auth
+import websocket
 
 from ..common_base import cached_property
 from . import types
@@ -132,7 +135,8 @@ class NomadConn(Requestor):
             return version
         return version["Version"]
 
-    def addr(self) -> str:
+    @staticmethod
+    def addr() -> str:
         return os.environ.get("NOMAD_ADDR", "http://127.0.0.1:4646")
 
     def request(
@@ -219,3 +223,35 @@ class NomadConn(Requestor):
                 notstopedjobs.sort(key=lambda job: -job["ModifyIndex"])
                 return notstopedjobs[0]
         return jobinit
+
+
+def create_websocket_connection(path: str) -> websocket.WebSocket:
+    # Replace http in address to ws
+    addr: str = NomadConn.addr()
+    if addr.startswith("http"):
+        addr = "ws" + addr[4:]
+    url: str = f"{addr}/{path}"
+    # Build headers with authorization and token.
+    headers: Dict[str, str] = {}
+    token = os.environ.get("NOMAD_TOKEN")
+    if token:
+        headers["X-Nomad-Token"] = token
+    auth = os.environ.get("NOMAD_HTTP_AUTH")
+    if auth:
+        headers["Authorization"] = "Basic " + base64.b64encode(auth.encode()).decode()
+    # Build SSL options from environment variables.
+    sslopt: Dict[str, Any] = {}
+    skip_verify = os.environ.get("NOMAD_SKIP_VERIFY")
+    if skip_verify:
+        sslopt["cert_reqs"] = ssl.CERT_NONE
+        sslopt["check_hostname"] = False
+    cacert = os.environ.get("NOMAD_CACERT")
+    if cacert:
+        sslopt["ca_cert_path"] = cacert
+    cert = os.environ.get("NOMAD_CLIENT_CERT")
+    key = os.environ.get("NOMAD_CLIENT_KEY")
+    if cert and key:
+        sslopt["certfile"] = cert
+        sslopt["keyfile"] = key
+    # Make the connection.
+    return websocket.create_connection(url, header=headers, sslopt=sslopt)
