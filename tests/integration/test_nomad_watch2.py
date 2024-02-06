@@ -20,6 +20,17 @@ def test_nomad_watch2_run0():
     )
 
 
+def test_nomad_watch2_noutf():
+    """Watch a simple jow that outputs hello world"""
+    job = "test-noutf"
+    run_nomad_watch(
+        f"--purge run {testjobs[job]}",
+        output=[
+            "0xc0 byte: ",
+        ],
+    )
+
+
 def test_nomad_watch2_start():
     job = "test-start"
     mark = "7bc8413c-8619-48bf-a46d-f42727724632"

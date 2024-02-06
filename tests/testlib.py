@@ -12,7 +12,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import IO, Dict, List, Optional, Union
+from typing import IO, Any, Dict, List, Optional, Union
 
 from nomad_tools import nomadlib
 from nomad_tools.common import quotearr
@@ -177,13 +177,13 @@ def run(
             assert pp.stdin
             pp.stdin.write(input)
             pp.stdin.close()
-        captured_stdout = None
+        captured_stdout: Optional[Union[bytes, str]] = None
         if stdout:
-            captured_stdout = ""
+            captured_stdout = "" if text else b""
             assert pp.stdout
             for line in pp.stdout:
-                line = line.rstrip()
-                captured_stdout += line + "\n"
+                line: Any = line.rstrip()
+                captured_stdout += line + ("\n" if text else b"\n")
                 print(line)
     rr = subprocess.CompletedProcess(cmda, pp.returncode, captured_stdout, None)
     #
@@ -208,6 +208,7 @@ def run(
         assert rr.stdout is not None
         for pat in output:
             if isinstance(pat, str):
+                assert isinstance(rr.stdout, str)
                 assert pat in rr.stdout, f"String not found: {pat!r}"
             elif isinstance(pat, re.Pattern):
                 assert pat.findall(rr.stdout.strip()), f"Pattern not found: {pat}"

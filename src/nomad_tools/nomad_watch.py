@@ -533,7 +533,11 @@ class TaskLogger(threading.Thread):
                 if event:
                     line64: Optional[str] = event.get("Data")
                     if line64:
-                        lines = base64.b64decode(line64.encode()).decode().splitlines()
+                        lines = (
+                            base64.b64decode(line64.encode())
+                            .decode(errors="replace")
+                            .splitlines()
+                        )
                         self.taskout(lines)
                 else:
                     # Nomad json stream periodically sends empty {}.
