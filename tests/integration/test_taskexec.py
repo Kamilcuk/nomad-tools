@@ -29,13 +29,13 @@ def test_taskexec_noutf():
             [
                 "sh",
                 "-xc",
-                r"""
-                printf "stdout 0xc0 byte: \xc0\n"
-                printf "stderr 0xc0 byte: \xc0\n" >&2
+                """
+                printf "stdout 0xc0 byte: \\300\\n"
+                printf "stderr 0xc0 byte: \\300\\n" >&2
                 """,
             ],
         )
-        assert buf == b"stdout 0xc0 byte: \xc0\n"
+        assert buf == b"stdout 0xc0 byte: \300\n"
 
 
 def test_taskexec_1():

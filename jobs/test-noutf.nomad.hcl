@@ -11,8 +11,8 @@ job "test-noutf" {
       config {
         command = "sh"
         args = ["-xc", <<EOF
-          printf "stdout 0xc0 byte: \xc0\n"
-          printf "stderr 0xc0 byte: \xc0\n" >&2
+          printf "stdout 0xc0 byte: \\300\n"
+          printf "stderr 0xc0 byte: \\300\n" >&2
           EOF
         ]
       }
