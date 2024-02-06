@@ -29,7 +29,7 @@ from .common import (
     quotearr,
 )
 from .nomadlib.datadict import DataDict
-from .nomadlib.types import Job, JobTask, JobTaskConfig, JobTaskTemplate
+from .nomadlib.types import Job, JobTask, JobTaskConfig
 
 ###############################################################################
 
@@ -414,9 +414,7 @@ class Config(DataDict):
     """Should the job be purged after we are done?"""
     purge_successful: bool = True
     """Should the successful Nomad jobs be purged after we are done? Only relevant when purge=none."""
-    jobname: str = (
-        "gitlabrunner.${CUSTOM_ENV_CI_RUNNER_ID}.${CUSTOM_ENV_CI_PROJECT_PATH_SLUG}.${CUSTOM_ENV_CI_JOB_ID}"
-    )
+    jobname: str = "gitlabrunner.${CUSTOM_ENV_CI_RUNNER_ID}.${CUSTOM_ENV_CI_PROJECT_PATH_SLUG}.${CUSTOM_ENV_CI_JOB_ID}"
     """The job name"""
     CPU: Optional[int] = None
     """The default job constraints."""
@@ -476,6 +474,7 @@ class Config(DataDict):
                 "CI_RUNUSER": dc.user,
                 "CI_OOM_SCORE_ADJUST": str(self.oom_score_adjust),
                 "CI_CPUSET_CPUS": str(self.cpuset_cpus),
+                "CI_EXIT_FAILURE": str(BuildFailure.code),
             }
         )
 
@@ -487,16 +486,6 @@ class Config(DataDict):
                 "MemoryMaxMB": self.MemoryMaxMB,
             }
         }
-
-    def __main_task_script(self) -> JobTaskTemplate:
-        return JobTaskTemplate(
-            EmbeddedTmpl=self.script,
-            LeftDelim="{{{{",
-            RightDelim="}}}}",
-            Perms="777",
-            DestPath="local/script.sh",
-            ChangeMode="noop",
-        )
 
     def __gen_main_task(self) -> JobTask:
         """Get the task to run, apply transformations and configuration as needed"""
@@ -514,10 +503,6 @@ class Config(DataDict):
                 **self.override.task,
             }
         )
-        # Add script.sh template.
-        if not task.Templates:
-            task.Templates = []
-        task.Templates.append(self.__main_task_script())
         # Apply override on config
         task.Config = JobTaskConfig({**task.Config, **self.override.task_config})
         return task
@@ -664,132 +649,14 @@ class Jobenv:
 
 
 class BuildFailure(Exception):
+    """Raising this exception makes the code exit with BUILD_FAILURE_EXIT_CODE"""
+
     code: int = 76
-    """Quite a special exit status returned by script.sh when the build script has failed."""
+    """Special chosen exit status returned by script.sh that the build script has failed."""
 
 
 @click.group(
-    help="""
-Custom gitlab-runner executor to run gitlab-ci jobs in Nomad. The
-script runs a background Nomad job for the whole duration of gitlab-cicd
-task. There are 3 modes available that you can specify in configuration
-file: `raw_exec`, `exec` and `docker` mode.
-
-In `raw_exec` and `exec` modes, the Nomad job has one task. It is
-not supported to specify services in gitlab-ci.yml. On each stage of
-gitlab-runner executor is executed with `nomad alloc exec` inside the task
-spawned in Nomad with a provided entrypoint script. This script adjusts
-niceness levels, adjusts OOM killer, sets taskset -s and switches user
-with runuser -u and runs bash shell if available with falling back to
-sh shell.
-
-In `docker` mode, the Nomad job has multiple tasks, similar to
-gitlab-runner docker executor spawning multiple images. One task
-is used to clone the repository and manage artifacts, exactly like in
-https://docs.gitlab.com/runner/executors/docker.html#docker-executor-workflow
-in gitlab-runner docker executor. The other task is the main task of the
-job. It does not run the job image entrypoint. All commands are executed
-with `nomad alloc exec` with the custom entrypoint wrapper. In this case
-the wrapper does not use taskset nor runuser, as these parameters are
-set with docker configuration.
-
-Specifying services: in .gitlab-ci.yml in `docker` mode is supported.
-Each service is a separate task in Nomad job. The Nomad job runs the
-task group in bridge mode docker networking, so that all tasks
-share the same network stack. One additional waiter task is created that
-runs prestart to wait for the services to respond. This works similar to
-https://docs.gitlab.com/runner/executors/docker.html#how-gitlab-runner-performs-the-services-health-check
-in gitlab-runner docker executor.
-
-In order for services: to work, it is hard coded that the
-waiter helper image starts with /var/run/docker.sock mounted
-inside to connect to docker. Additionally, Nomad has to support
-'bridge' docker network driver for Nomad to start the job. See
-https://developer.hashicorp.com/nomad/docs/networking#bridge-networking .
-
-\b
-Below is an example /etc/gitlab-runner/config.toml configuration file:
-    [[runners]]
-      id = 27898742
-      executor = "custom"
-      [runners.custom]
-        config_exec = "nomad-gitlab-runner"
-        config_args = ["config"]
-        prepare_exec = "nomad-gitlab-runner"
-        prepare_args = ["prepare"]
-        run_exec = "nomad-gitlab-runner"
-        run_args = ["run"]
-        cleanup_exec = "nomad-gitlab-runner"
-        cleanup_args = ["cleanup"]
-
-\b
-Below is an example /etc/gitlab-runner/nomad.yaml configuration file:
-    # Execute `nomad-gitlab-runner showconfig` for all configuration options.
-    ---
-    default:
-        # You can use NOMAD_* variables here
-        NOMAD_TOKEN: "1234567"
-        NOMAD_ADDR: "http://127.0.0.1:4646"
-        # The default namespace is set to "gitlabrunner"
-        NOMAD_NAMESPACE: "gitlabrunner"
-    # Id of the runner from config.yaml file allows overriding the values for a specific runner.
-    27898742:
-      # Mode to use - "raw_exec", "exec", "docker" or "custom".
-      mode: "docker"
-      CPU: 2048
-      MemoryMB: 2048
-      MemoryMaxMB: 2048
-      docker:
-        image: "alpine:latest"
-        # Set to true to be able to run dind service.
-        services_privileged: true
-      # It is possible to override custom things in job specifications.
-      override:
-        task_config:
-          cpuset_cpus: "2-8"
-
-\b
-Below is an example of .gitlab-ci.yml with docker-in-docker service:
-    ---
-    default:
-      image: docker:24.0.5
-      services:
-        - docker:24.0.5-dind
-
-    docker_dind_auto:
-      variables:
-        # When the configuration option auto_fix_docker_dind is set to true, then:
-        DOCKER_TLS_CERTDIR: "/certs"
-      script;
-        - docker info
-        - docker run -ti --rm alpine echo hello world
-
-    docker_dind_alloc:
-      variables:
-        # Otherwise, you should set them all as this is similar to
-        # kubernetes executor. You can use /alloc directory to share
-        # the certificates, as all services and tasks are run inside
-        # same taskgroup.
-        DOCKER_CERT_PATH: "/alloc/client"
-        DOCKER_HOST: tcp://docker:2376
-        DOCKER_TLS_CERTDIR: "/alloc"
-        DOCKER_TLS_VERIFY: 1
-      script;
-        - docker info
-        - docker run -ti --rm alpine echo hello world
-
-\b
-Example Nomad ACL policy:
-    namespace "gitlabrunner" {
-        # For creating jobs.
-        policy = "write"
-        # To alloc 'raw_exec' to execute anything.
-        capabilities = ["alloc-node-exec"]
-    }
-
-
-
-        """,
+    help=""" Custom gitlab-runner executor to run gitlab-ci jobs in Nomad. """,
     epilog="Written by Kamil Cukrowski 2023. Licensed under GNU GPL version or later.",
 )
 @click.option("-v", "--verbose", count=True)
@@ -798,7 +665,7 @@ Example Nomad ACL policy:
     "--config",
     "configpath",
     type=click.Path(dir_okay=False, exists=True, path_type=Path),
-    default=Path("/etc/gitlab-runner/nomad.yaml"),
+    default=Path("/etc/gitlab-runner/nomad-gitlab-runner.yml"),
     help="""Path to configuration file.""",
     show_default=True,
 )
@@ -886,15 +753,15 @@ def mode_run(script: str, stage: str):
     allocid = taskexec.find_job_alloc(je.jobname, taskname)
     with open(script) as f:
         scriptcontent = f.read()
+    # Run our script with positional arguments with the gitlab script passed as first argument.
+    shcmd: str = f'set -- {quote(scriptcontent)} "$@"' + "\n" + config.script
     rr = taskexec.run(
         allocid,
         taskname,
-        split(
-            f"""sh -c '${{NOMAD_TASK_DIR}}/script.sh "$@"' sh gitlabrunner {set_x} -- {quote(stage)}"""
-        ),
-        input=scriptcontent,
-        check=False,
-        text=True,
+        # stage will be visible in Nomad logs.
+        split(f"sh {set_x} -s {quote(stage)}"),
+        # Pass the script on stdin.
+        input=shcmd.encode(),
     )
     if rr.returncode == BuildFailure.code:
         raise BuildFailure()

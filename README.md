@@ -182,15 +182,159 @@ context to or from the local host using stdout and stdin forwarded by
 
 ## nomad-gitlab-runner
 
-An implementation of custom gitlab executor driver that runs gitlab CI/CD jobs
+An implementation of custom Gitlab executor driver that runs Gitlab CI/CD jobs
 using Nomad.
 
-Allows running _not_ the gitlab-runner itself in Nomad. Rather, the
-gitlab-runner is running on (any) one host. That gitlab-runner will the
-schedule Nomad job to execute. These jobs will execute the CI/CD from gitlab.
+Allows running _not_ the `gitlab-runner` itself in Nomad. Rather, the
+`gitlab-runner` is running on (any) one host. That `gitlab-runner` will the
+schedule Nomad job to execute. These jobs will execute the CI/CD from Gitlab.
 
-See `nomad-gitlab-runner --help` for installation instruction and further
-documentation.
+The `nomad-gitlab-runner` script runs a background Nomad job for the
+whole duration of Gitlab CI/CD task. There are 3 modes available that you
+can specify in configuration file: `raw_exec`, `exec` and `docker` mode.
+
+In `raw_exec` and `exec` modes, the Nomad job has one task. It is
+not supported to specify services in `gitlab-ci.yml`. On each stage of
+`gitlab-runner` executor is executed with `nomad alloc exec` inside the task
+spawned in Nomad with a provided entrypoint script. This script adjusts
+niceness levels, adjusts OOM killer, sets `taskset -s` and switches user
+with `runuser -u` and runs bash shell if available with falling back to
+sh shell.
+
+In `docker` mode, the Nomad job has multiple tasks, similar to
+`gitlab-runner` docker executor spawning multiple images. One task
+is used to clone the repository and manage artifacts, exactly like in
+https://docs.gitlab.com/runner/executors/docker.html#docker-executor-workflow
+in gitlab-runner docker executor. The other task is the main task of the
+job. It does not run the job image entrypoint. All commands are executed
+with `nomad alloc exec` with the custom entrypoint wrapper. In this case
+the wrapper does not use `taskset` nor `runuser`, as these parameters are
+set with docker configuration.
+
+Specifying services in `.gitlab-ci.yml` in `docker` mode
+is supported.  Each service is a separate task in the group
+in the Nomad job. The Nomad job runs the task group in
+bridge mode docker networking, so that all tasks share the
+same network stack. One additional "waiter" task is created that
+runs `prestart` to wait for the services to respond. This is meant to mimic 
+the default `gitlab-runner` docker executor behavior described in
+https://docs.gitlab.com/runner/executors/docker.html#how-gitlab-runner-performs-the-services-health-check .
+
+In order for services to work, it is hard coded that the
+waiter helper image starts with `/var/run/docker.sock` mounted
+inside to connect to docker. Additionally, Nomad has to support
+'bridge' docker network driver for Nomad to start the job. See
+https://developer.hashicorp.com/nomad/docs/networking#bridge-networking .
+
+Below is an example `/etc/gitlab-runner/config.toml` configuration file
+to work with `nomad-gitlab-runner`. Just execute it on each stage and pass
+the argument with the stage name.
+
+    # /etc/gitlab-runner/runner.toml
+    [[runners]]
+      id = 27898742
+      executor = "custom"
+      [runners.custom]
+        config_exec = "nomad-gitlab-runner"
+        config_args = ["config"]
+        prepare_exec = "nomad-gitlab-runner"
+        prepare_args = ["prepare"]
+        run_exec = "nomad-gitlab-runner"
+        run_args = ["run"]
+        cleanup_exec = "nomad-gitlab-runner"
+        cleanup_args = ["cleanup"]
+
+`nomad-gitlab-runner` uses configuration stores in `/etc/gitlab-runner/nomad-gitlab-runner.yml` file.
+Execute `nomad-gitlab-runner showconfig` to print current program
+configuration. The example shortest sensible needed configuration file is presented below.
+
+    # /etc/gitlab-runner/nomad-gitlab-runner.yml
+    ---
+    default:
+      NOMAD_TOKEN: "1234567"
+      CPU: 2048
+      MemoryMB: 2048
+      docker:
+        services_privileged: true
+
+    27898742:
+      mode: docker
+
+This is another longer example of configuration file with some comments:
+
+    # /etc/gitlab-runner/nomad-gitlab-runner.yml
+    ---
+    default:
+      # You can use NOMAD_* variables here.
+      NOMAD_TOKEN: "12345"
+      NOMAD_NAMESPACE: gitlabrunner
+    27898742
+      mode: docker
+      CPU: 2048
+      MemoryMB: 2048
+      MemoryMBMax: 2048
+      docker:
+        # Default docker image.
+        image: "alpine:latest"
+        # Set to true to be able to run dind service.
+        services_privileged: true
+      override:
+        task_config:
+          cpuset_cpus: "2-8"
+
+The configuration file has a default section that applies to all
+configurations. Then, each key is the runner ID as specified in `config.toml`
+of `gitlab-runner` configuration. Each key has a separate configuration.
+
+The Nomad job by default makes available the standard Nomad directories. The
+`alloc` directory is shared between all the tasks, including "waiter" task,
+cloning task and services specified in `.gitlab-ci.yml`.
+
+To use `docker:dind` you can use the standard configuration if you use
+`auto_fix_docker_dind` configuration option. `auto_fix_docker_dind` is by
+default true and if `DOCKER_TLS_CERTDIR` is specified in the variables, then
+`nomad-gitlab-runner` mounts allocation at `/certs` and sets other needed
+`DOCKER_*` variables by itself.
+
+    # .gitlab-ci.yml
+    ---
+    docker_dind_auto:
+      image: docker:24.0.5
+      services:
+        - docker:24.0.5-dind
+      variables:
+        # When the configuration option auto_fix_docker_dind is set to true, then:
+        DOCKER_TLS_CERTDIR: "/certs"
+      script:
+        - docker info
+        - docker run -ti --rm alpine echo hello world
+
+If `auto_fix_docker_dind` is false, you need to set `DOCKER_*` variables
+yourself just like for Kubernetes executor. Use `/alloc` directory to share
+the certificates between client and server.
+
+    # .gitlab-ci.yml
+    ---
+    docker_dind_alloc:
+      variables:
+        DOCKER_CERT_PATH: "/alloc/client"
+        DOCKER_HOST: tcp://docker:2376
+        DOCKER_TLS_CERTDIR: "/alloc"
+        DOCKER_TLS_VERIFY: 1
+      script:
+        - docker info
+        - docker run -ti --rm alpine echo hello world
+
+`nomad-gitlab-runner` requires to be able to `nomad alloc exec` in Nomad
+policy. I recommend `gitlabrunner` namespace name. The policy might look
+like the following:
+
+    namespace "gitlabrunner" {
+        # For creating jobs.
+        policy = "write"
+        # To alloc 'raw_exec' to execute anything.
+        capabilities = ["alloc-node-exec"]
+    }
 
 ## nomad-dockers
 
