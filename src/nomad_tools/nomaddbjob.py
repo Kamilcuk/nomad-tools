@@ -237,19 +237,28 @@ class NomadDbJob:
 
     def _select_new_event(self, e: Event):
         """Select events which are newer than those in the database"""
-        job_select: Callable[[nomadlib.Job], bool] = lambda _: True
-        eval_select: Callable[[nomadlib.Eval], bool] = (
-            lambda eval: eval.ID not in self.evaluations
-            or eval.ModifyIndex > self.evaluations[eval.ID].ModifyIndex
-        )
-        alloc_select: Callable[[nomadlib.Alloc], bool] = (
-            lambda alloc: alloc.ID not in self.allocations
-            or alloc.ModifyIndex > self.allocations[alloc.ID].ModifyIndex
-        )
-        deploy_select: Callable[[nomadlib.Deploy], bool] = (
-            lambda deploy: deploy.ID not in self.deployments
-            or deploy.ModifyIndex > self.deployments[deploy.ID].ModifyIndex
-        )
+
+        def job_select(_: nomadlib.Job) -> bool:
+            return True
+
+        def eval_select(eval: nomadlib.Eval) -> bool:
+            return (
+                eval.ID not in self.evaluations
+                or eval.ModifyIndex > self.evaluations[eval.ID].ModifyIndex
+            )
+
+        def alloc_select(alloc: nomadlib.Alloc) -> bool:
+            return (
+                alloc.ID not in self.allocations
+                or alloc.ModifyIndex > self.allocations[alloc.ID].ModifyIndex
+            )
+
+        def deploy_select(deploy: nomadlib.Deploy) -> bool:
+            return (
+                deploy.ID not in self.deployments
+                or deploy.ModifyIndex > self.deployments[deploy.ID].ModifyIndex
+            )
+
         return e.data["Namespace"] == mynomad.namespace and self.apply_selects(
             e, job_select, eval_select, alloc_select, deploy_select
         )

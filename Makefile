@@ -12,13 +12,16 @@ vagrant_test:
 vagrant_destroy:
 	vagrant destroy -f
 
-lint: pyright pylava
+lint: pyright pylava ruff
 
 pyright:
 	pyright src/ tests/ $(ARGS)
 
 pylava:
 	pylava src/ tests/ $(ARGS)
+
+ruff:
+	ruff src/ tests/ $(ARGS)
 
 integration_tests:
 	./integration_tests.sh $(ARGS)
