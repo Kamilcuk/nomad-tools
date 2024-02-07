@@ -327,7 +327,9 @@ def init_logging():
             else (
                 logging.INFO
                 if ARGS.verbose == 0
-                else logging.WARN if ARGS.verbose == 1 else logging.ERROR
+                else logging.WARN
+                if ARGS.verbose == 1
+                else logging.ERROR
             )
         ),
     )
@@ -1081,16 +1083,14 @@ class _NomadJobWatcherDetail(ABC):
                 self.__handle_event(event)
             self.__loop_debug(events)
             if (
-                # --follow means never exit.
-                not ARGS.follow
                 # If we started with an evaluation, it has to be finished.
                 # Otherwise the events may be related to a previous job version.
-                and (self.eval is None or not self.eval.is_pending_or_blocked())
+                (self.eval is None or not self.eval.is_pending_or_blocked())
                 # Make sure all the threads have finished outputting logs.
                 and all(th.startevent.is_set() for th in self.notifier.get_threads())
             ):
                 yield
-                if self.job and DB.job_purged():
+                if not ARGS.follow and DB.job_purged():
                     assert self.job
                     if self.has_no_active_allocations_nor_evaluations_nor_deployments():
                         log.info(
@@ -1190,14 +1190,11 @@ class NomadJobWatcher(_NomadJobWatcherDetail):
                 if stopit:
                     self.stop_job()
                 if InterruptTwice.received:
-                    if ARGS.attach or ARGS.purge or ARGS.purge_successful:
-                        purge: bool = ARGS.purge or (
-                            ARGS.purge_successful and self.job_finished_successfully()
-                        )
-                        self.stop_job(purge)
+                    if ARGS.attach:
+                        self.stop_job()
                     else:
-                        break
-                if self._loop_end_cb():
+                        exit(ExitCode.interrupted)
+                if not ARGS.follow and self._loop_end_cb():
                     break
         finally:
             self.stop_threads()
@@ -1219,30 +1216,12 @@ class NomadJobWatcher(_NomadJobWatcherDetail):
         return s
 
     def job_finished_successfully(self):
-        DB.initialized.wait()
-        assert self.job
-        if self.job.Status != "dead":
-            return False
         s = self.job_get_summary()
         return (
             s.Queued == 0
             and s.Complete != 0
             and s.Failed == 0
             and s.Running == 0
-            and s.Starting == 0
-            and s.Lost == 0
-        )
-
-    def job_running_successfully(self):
-        DB.initialized.wait()
-        assert self.job
-        if self.job.is_dead():
-            return self.job_finished_successfully()
-        s = self.job_get_summary()
-        return (
-            s.Queued == 0
-            and s.Failed == 0
-            and s.Running != 0
             and s.Starting == 0
             and s.Lost == 0
         )
@@ -1259,17 +1238,18 @@ class NomadJobWatcherUntilFinished(NomadJobWatcher):
 
     @override
     def _loop_end_cb(self) -> bool:
+        if self.sent_purged_req:
+            # Wait for beeing purged in the main loop.
+            return False
         if self.job_is_finished():
             if not self.sent_purged_req and (
                 ARGS.purge
-                or (ARGS.purge_successful and self.job_running_successfully())
+                or (ARGS.purge_successful and self.job_finished_successfully())
             ):
                 self.stop_job(True)
-            if self.sent_purged_req:
-                # Wait for beeing purged.
-                return False
-            log.info(self.job_dead_message())
-            return True
+            else:
+                log.info(self.job_dead_message())
+                return True
         return False
 
     @override
@@ -1560,7 +1540,15 @@ Examples:
     is_flag=True,
     help="""
         Stop the job on receiving an SIGINT or SIGTERM signal.
-        Exit immidately after receiving a signal the second time.
+        Exit immediately after receiving a signal the second time.
+        """,
+)
+@click.option(
+    "--purge",
+    is_flag=True,
+    help="""
+        After the job is stopped, purge the job and wait until the job is purged.
+        Relevant in job, run, stop and stopped modes.
         """,
 )
 @click.option(
@@ -1568,16 +1556,9 @@ Examples:
     "purge_successful",
     is_flag=True,
     help="""
-        When stopping the job, purge it when all job summary metrics are zero except nonzero complete metric.
-        Relevant in job, run, stop and stopped modes. Implies --attach.
-        """,
-)
-@click.option(
-    "--purge",
-    is_flag=True,
-    help="""
-        Purge the job after it is finished.
-        Relevant in job, run, stop and stopped modes. Implies --attach.
+        After the job is stopped and is successfull, purge the job and wait until it is purged.
+        Job is successfull if all job summary metrics are zero except nonzero complete metric.
+        Relevant in job, run, stop and stopped modes.
         """,
 )
 @click.option(
