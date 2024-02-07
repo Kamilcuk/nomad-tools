@@ -454,7 +454,7 @@ class TaskLogger(threading.Thread):
         #
         self.startevent = threading.Event()
         """This is an event which is sent after --shutdown-timeout time after log listening starts"""
-        self.starttimer = threading.Timer(ARGS.shutdown_timeout, self.__starttimer_do)
+        self.starttimer = threading.Timer(ARGS.shutdown_timeout, self.__set_startevent)
         """A timer that will set startevent"""
         self.exitevent = threading.Event()
         """User should set this event to stop logging the task logs"""
@@ -468,7 +468,7 @@ class TaskLogger(threading.Thread):
         if ARGS.lines < 0 or self.ignoretime_ns < time.time_ns():
             self.ignoretime_ns = 0
 
-    def __starttimer_do(self):
+    def __set_startevent(self):
         self.startevent.set()
         DB.send_empty_event()
 
@@ -561,12 +561,12 @@ class TaskLogger(threading.Thread):
         except requests.HTTPError:
             raise
         finally:
-            self.startevent.set()
+            self.__set_startevent()
 
     def stop(self):
         self.exitevent.set()
-        self.startevent.set()
         self.starttimer.cancel()
+        self.__set_startevent()
 
 
 @dataclass
@@ -843,9 +843,9 @@ class NotifierWorker:
 ###############################################################################
 
 
-def __nomad_job_run(opts: Tuple[str]) -> str:
+def __nomad_job_run(args: List[str]) -> str:
     """Call nomad job run to start a Nomad job using nomad job run call with specified arguments"""
-    cmd: List[str] = "nomad job run -detach -verbose".split() + list(opts)
+    cmd: List[str] = "nomad job run -detach -verbose".split() + args
     log.info(f"+ {' '.join(shlex.quote(x) for x in cmd)}")
     try:
         output = subprocess.check_output(cmd, text=True)
@@ -863,13 +863,15 @@ def __nomad_job_run(opts: Tuple[str]) -> str:
     assert len(founduuids) == 1, (
         "Could not find UUID in nomad job run output."
         " This may be caused by the job being parametric or periodic,"
-        " or nomad command line has upgraded its output or there is an error in this script."
+        " nomad command has upgraded its output,"
+        " invalid command line arguments were passed,"
+        " or there is an error in this script."
     )
     evalid = founduuids[0]
     return evalid
 
 
-def nomad_start_job(opts: Tuple[str]) -> nomadlib.Eval:
+def nomad_start_job(opts: List[str]) -> nomadlib.Eval:
     """Start a nomad job using nomad job run parameters. Return evluation from running the job"""
     evalid = __nomad_job_run(opts)
     evaluation = nomadlib.Eval(mynomad.get(f"evaluation/{evalid}"))
@@ -1045,7 +1047,7 @@ class _NomadJobWatcherDetail(ABC):
     def __loop_debug(self, events: List[nomaddbjob.Event]):
         if flagdebug.debug("loop"):
             info = dict(
-                e=f"{events[0].topic.name}.{events[0].type.name}" if events else None,
+                e=f"{events[0].topic.name}.{events[0].type.name}" if events else "-",
                 minModifyIndex=self.minjobmodifyindex,
                 evalDone=self.eval is None or not self.eval.is_pending_or_blocked(),
                 jobDeregister=DB.job_deregistered_ModifyIndex,
@@ -1656,11 +1658,7 @@ def cli(**kwargs):
     exit_on_thread_exception.install()
     global ARGS
     ARGS = argparse.Namespace(**kwargs)
-    assert (
-        (not ARGS.follow and not ARGS.no_follow)
-        or (ARGS.follow and not ARGS.no_follow)
-        or (not ARGS.follow and ARGS.no_follow)
-    ), "--follow and --no-follow conflict"
+    assert not (ARGS.follow and ARGS.no_follow), "--follow and --no-follow conflict"
     #
     global START_NS
     START_NS = time.time_ns()
@@ -1709,19 +1707,26 @@ def cli_jobfile(name: str, help: str):
 
 
 def cli_command_run_nomad_job_run(name: str, help: str):
+    """Command that forwards all arguments to 'nomad job run' command."""
     return composed(
         cli.command(
             name,
             help=help.rstrip()
-            + """\
-            All following command arguments are passed to nomad job run command.
-            Note that nomad job run has arguments with a single dash.
+            + """
+
+            All following arguments are forwarded to 'nomad job run' command.
+            Note that 'nomad job run' has arguments starting with a single dash.
             """,
             context_settings=dict(ignore_unknown_options=True),
         ),
         click.argument(
-            "cmd",
+            "args",
             nargs=-1,
+            shell_complete=click.File().shell_complete,
+        ),
+        click.argument(
+            "jobfile",
+            nargs=1,
             shell_complete=click.File().shell_complete,
         ),
     )
@@ -1765,8 +1770,8 @@ def mode_eval(evalid):
     "run",
     help="Run a Nomad job and then act like stopped mode.",
 )
-def mode_run(cmd: Tuple[str]):
-    evaluation = nomad_start_job(cmd)
+def mode_run(args: Tuple[str], jobfile: str):
+    evaluation = nomad_start_job(list(args) + [jobfile])
     NomadJobWatcherUntilFinished(None, evaluation).run_and_exit()
 
 
@@ -1781,10 +1786,10 @@ def mode_job(jobid: str):
 
 
 @cli_command_run_nomad_job_run(
-    "start", help="Start a Nomad Job and then act like started command."
+    "start", help="Start a Nomad job file and then act like started command."
 )
-def mode_start(cmd: Tuple[str]):
-    evaluation = nomad_start_job(cmd)
+def mode_start(args: Tuple[str], jobfile: str):
+    evaluation = nomad_start_job(list(args) + [jobfile])
     NomadJobWatcherUntilStarted(None, evaluation).run_and_exit()
 
 
@@ -1828,8 +1833,11 @@ def mode_stop(jobid: str):
     "purge",
     help=f"""
 Alias to `--purge stop`, with the following difference in exit status.
+
+\b
 If the option --no-preserve-status is given, then exit with the following status:
   {ExitCode.success}  when the job was purged or does not exist from the start.
+
 The command `-x purge` exits with zero exit status if the job just does not exists.
 """,
 )
