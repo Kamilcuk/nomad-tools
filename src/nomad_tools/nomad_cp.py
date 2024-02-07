@@ -194,13 +194,13 @@ class NomadMypath(Mypath):
 class NomadOrHostMyPath(click.ParamType):
     _description = textwrap.dedent(
         """\
-        :ALLOCATION:SRC_PATH
-        :ALLOCATION:TASK:SRC_PATH
-        :ALLOCATION:GROUP:TASK:SRC_PATH
-        JOB:SRC_PATH
-        JOB:TASK:SRC_PATH
-        JOB:GROUP:TASK:SRC_PATH
-        SRC_PATH
+        :ALLOCATION:PATH
+        :ALLOCATION:TASK:PATH
+        :ALLOCATION:GROUP:TASK:PATH
+        JOB:PATH
+        JOB:TASK:PATH
+        JOB:GROUP:TASK:PATH
+        PATH
         -
         """
     )
@@ -654,7 +654,7 @@ The logic mimics docker cp.
 Both source and dest take one of the forms:
 {textwrap.indent(NomadOrHostMyPath._description, '   ')}
 
-To use colon in any part of the part, escape it with backslash.
+To use colon in any part of the path, escape it with backslash.
 
 \b
 Examples:
