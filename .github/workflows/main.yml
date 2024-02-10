@@ -11,12 +11,11 @@ jobs:
   test:
     strategy:
       matrix:
-        nomad:
-          - 1.6.3
-          - 1.7.3
-        python:
-          - 3.7
-          - 3.12
+        include:
+          - nomad: 1.7.4
+            python: 3.12
+          - nomad: 1.6.7
+            python: 3.7
     name: Test
     runs-on: ubuntu-latest
     steps:
