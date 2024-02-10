@@ -228,6 +228,9 @@ class Eval(DataDict):
     def is_blocked(self):
         return self.Status == EvalStatus.blocked
 
+    def is_finished(self) -> bool:
+        return not self.is_pending_or_blocked()
+
     def getWaitUntil(self) -> Optional[datetime.datetime]:
         if not self.WaitUntil:
             return None

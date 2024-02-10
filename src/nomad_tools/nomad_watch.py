@@ -1090,15 +1090,6 @@ class _NomadJobWatcherDetail(ABC):
                 and all(th.startevent.is_set() for th in self.notifier.get_threads())
             ):
                 yield
-                if not ARGS.follow and DB.job_purged():
-                    assert self.job
-                    if self.has_no_active_allocations_nor_evaluations_nor_deployments():
-                        log.info(
-                            f"Job {self.job.description()} purged with no active allocations, evaluations nor deployments. Exiting."
-                        )
-                    else:
-                        log.info(f"Job {self.job.description()} purged. Exiting.")
-                    break
             if ARGS.no_follow and time.time() > self.no_follow_timeend:
                 break
         log.debug(f"Watching job {self.jobid}@{mynomad.namespace} exiting")
@@ -1142,9 +1133,9 @@ class NomadJobWatcher(_NomadJobWatcherDetail):
     @override
     def __init__(self, jobid: Optional[str], eval: Optional[nomadlib.Eval] = None):
         super().__init__(jobid, eval)
-        self.sent_purged_req = False
+        self.purged_eval: Optional[str] = None
         """Return true if we sent a request to purge the job"""
-        self.sent_stopped_req = False
+        self.stopped_eval: Optional[str] = None
         """Return true if we sent a request to stop the job"""
 
     @abstractmethod
@@ -1158,17 +1149,17 @@ class NomadJobWatcher(_NomadJobWatcherDetail):
     def stop_job(self, purge: bool = False):
         assert DB.initialized.is_set()
         if purge:
-            if self.sent_purged_req:
+            if self.purged_eval:
                 return
             log.info(f"Purging job {self.jobid}")
-            self.sent_stopped_req = True
-            self.sent_purged_req = True
         else:
-            if self.sent_stopped_req:
+            if self.stopped_eval:
                 return
             log.info(f"Stopping job {self.jobid}")
-            self.sent_stopped_req = True
-        mynomad.stop_job(self.jobid, purge)
+        evalid = mynomad.stop_job(self.jobid, purge)["EvalID"]
+        self.stopped_eval = evalid
+        if purge:
+            self.purged_eval = evalid
 
     def stop_threads(self):
         log.debug(f"stopping {self.__class__.__name__}")
@@ -1187,6 +1178,26 @@ class NomadJobWatcher(_NomadJobWatcherDetail):
     def run_and_exit(self, stopit: bool = False):
         try:
             for _ in self.loop():
+                # If the job is purged, stop watching.
+                if (
+                    not ARGS.follow
+                    and self.job
+                    and (
+                        DB.job_purged()
+                        or (
+                            self.purged_eval
+                            and self.purged_eval in DB.evaluations
+                            and DB.evaluations[self.purged_eval].is_finished()
+                        )
+                    )
+                ):
+                    if self.has_no_active_allocations_nor_evaluations_nor_deployments():
+                        log.info(
+                            f"Job {self.job.description()} purged with no active allocations, evaluations nor deployments. Exiting."
+                        )
+                    else:
+                        log.info(f"Job {self.job.description()} purged. Exiting.")
+                    break
                 if stopit:
                     self.stop_job()
                 if InterruptTwice.received:
@@ -1238,11 +1249,11 @@ class NomadJobWatcherUntilFinished(NomadJobWatcher):
 
     @override
     def _loop_end_cb(self) -> bool:
-        if self.sent_purged_req:
+        if self.purged_eval:
             # Wait for beeing purged in the main loop.
             return False
         if self.job_is_finished():
-            if not self.sent_purged_req and (
+            if not self.purged_eval and (
                 ARGS.purge
                 or (ARGS.purge_successful and self.job_finished_successfully())
             ):
