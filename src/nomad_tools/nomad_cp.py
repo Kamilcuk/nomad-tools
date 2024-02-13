@@ -483,7 +483,6 @@ def run(cmd: str):
 
 
 def nomadpipe(src: Mypath, dst: Mypath, srccmd: str, dstcmd: str):
-    pipe(f"{srccmd}", f"{dstcmd}")
     with src.popen(srccmd, stdout=subprocess.PIPE) as srcp:
         with dst.popen(dstcmd, stdin=subprocess.PIPE) as dstp:
             shutil.copyfileobj(srcp.stdout, dstp.stdin)
@@ -535,7 +534,7 @@ def copy_mode(src: Mypath, dst: Mypath):
                 src,
                 dst,
                 f"cat {src.quotepath()}",
-                f"sh -c 'cat >\"$1\"' -- {dst.quotepath()}"
+                f"sh -c 'cat >\"$1\"' sh {dst.quotepath()}"
                 if not args.dryrun
                 else f"true -- {dst.quotepath()}",
             )
