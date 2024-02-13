@@ -79,6 +79,11 @@ Examples:
     help="When searching for latest version, only get versions with this suffix",
 )
 @click.option("--ent", is_flag=True, help="Equal to --suffix=+ent")
+@click.option(
+    "--showversion",
+    is_flag=True,
+    help="Instead of downloading, only show the chosen version",
+)
 @common_options()
 def cli(
     pinversion: Optional[str],
@@ -89,6 +94,7 @@ def cli(
     verbose: bool,
     suffix: str,
     ent: bool,
+    showversion: bool,
 ):
     logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO)
     if ent:
@@ -119,6 +125,9 @@ def cli(
         vv = versions[-1]
         log.debug(f"Version = {pinversion}")
         pinversion = f"{vv.a}.{vv.b}.{vv.c}{vv.suff}"
+    if showversion:
+        print(pinversion)
+        exit()
     #
     zipurl = f"{url}/{pinversion}/{tool}_{pinversion}_{os.lower()}_{arch.lower()}.zip"
     destfile: Path = destination / tool if destination.is_dir() else destination
