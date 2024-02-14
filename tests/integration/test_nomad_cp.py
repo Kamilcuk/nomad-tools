@@ -1,3 +1,4 @@
+import contextlib
 import os
 import tempfile
 import time
@@ -7,7 +8,7 @@ from typing import List
 
 from nomad_tools import taskexec
 from nomad_tools.common import mynomad
-from nomad_tools.nomad_cp import NomadOrHostMyPath
+from nomad_tools.nomad_cp import ArgPath
 from tests.testlib import get_templatejob, run, run_nomad_cp, run_nomad_watch
 
 
@@ -30,6 +31,7 @@ class NomadTempdir:
         )
 
 
+@contextlib.contextmanager
 def run_temp_job():
     hcl = get_templatejob(script="exec sleep 60")
     jobid = hcl.id
@@ -46,37 +48,35 @@ def run_temp_job():
 def g(incomplete: str) -> List[str]:
     """Wrapper around gen_shell_complete which converts ShellComplete objects to string for easier comparison"""
     os.environ["COMP_DEBUG"] = "1"
-    ret = NomadOrHostMyPath.gen_shell_complete(incomplete)
+    ret = ArgPath.mk(incomplete).gen_shell_complete()
     arr = [x.value for x in ret if x.type == "plain"]
     print(f"gen_shell_complete {incomplete} -> {arr}")
     return arr
 
 
 def test_nomad_cp_complete():
-    hcl = get_templatejob(script="exec sleep 60")
-    jobid = hcl.id
-    run_nomad_watch(f"-x purge {jobid}")
-    try:
-        run_nomad_watch("start -", input=hcl.hcl)
+    with run_temp_job() as (jobid, nomaddir, hostdir):
         allocid = mynomad.get(f"job/{jobid}/allocations")[0]["ID"]
         task = group = jobid.replace("test-", "")
         tests = "/t:/tmp/ ./h:./home/ h:home/ /usr/bi:/usr/bin/"
         for src, dst in (x.split(":") for x in tests.split()):
             assert g(f"{jobid}:{src}") == [dst], f"{src} {dst}"
             assert g(f"{jobid}:{group}:{src}") == [dst], f"{src} {dst}"
+            assert g(f"{jobid}:{group}::{src}") == [dst], f"{src} {dst}"
             assert g(f"{jobid}:{group}:{task}:{src}") == [dst], f"{src} {dst}"
+            assert g(f"{jobid}::{task}:{src}") == [dst], f"{src} {dst}"
             assert g(f":{allocid}:{src}") == [dst], f"{src} {dst}"
-            assert g(f":{allocid}:{group}:{src}") == [dst], f"{src} {dst}"
-            assert g(f":{allocid}:{group}:{task}:{src}") == [dst], f"{src} {dst}"
+            assert g(f":{allocid}:{task}:{src}") == [dst], f"{src} {dst}"
             assert g(f":{allocid[:6]}:{src}") == [dst], f"{src} {dst}"
-            assert g(f":{allocid[:6]}:{group}:{src}") == [dst], f"{src} {dst}"
-            assert g(f":{allocid[:6]}:{group}:{task}:{src}") == [dst], f"{src} {dst}"
-    finally:
-        run_nomad_watch(f"-x purge {jobid}")
+            assert g(f":{allocid[:6]}:{task}:{src}") == [dst], f"{src} {dst}"
+            assert g(f":{allocid[:7]}:{task}:{src}") == [dst], f"{src} {dst}"
+            assert g(f":{allocid[:9]}:{task}:{src}") == [dst], f"{src} {dst}"
+            assert g(f":{allocid[:14]}:{task}:{src}") == [dst], f"{src} {dst}"
+            assert g(f":{allocid[:15]}:{task}:{src}") == [dst], f"{src} {dst}"
 
 
 def test_nomad_cp_dir():
-    for jobname, nomaddir, hostdir in run_temp_job():
+    with run_temp_job() as (jobname, nomaddir, hostdir):
         taskexec.run(
             *taskexec.find_job(jobname),
             split(f"sh -xeuc 'cd {nomaddir} && mkdir -p dir && touch dir/1 dir/2'"),
@@ -88,7 +88,7 @@ def test_nomad_cp_dir():
 
 
 def test_nomad_cp_file():
-    for jobname, nomaddir, hostdir in run_temp_job():
+    with run_temp_job() as (jobname, nomaddir, hostdir):
         txt = f"{time.time()}"
         with Path(f"{hostdir}/file").open("w") as f:
             f.write(txt)

@@ -152,9 +152,16 @@ class NomadPopen(Generic[T]):
         assert task
         assert args
         assert stdin is None or stdin == PIPE
-        self.cmd = [allocid, task] + args
         self.__stdin_arg: _DESTFILE = DEVNULL if stdin is None else stdin
         self.__stdout_arg: _DESTFILE = sys.stdout if stdout is None else stdout
+        self.cmd = [
+            *"nomad alloc exec -t=false".split(),
+            *(["-i=false"] if self.__stdin_arg == DEVNULL else []),
+            "-task",
+            task,
+            allocid,
+            *args,
+        ]
         #
         self.__closed: Set[str] = set()
         """Protect against double closing"""

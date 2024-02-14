@@ -350,6 +350,7 @@ class Alloc(DataDict):
     ID: str
     Name: str
     NodeName: str
+    NodeID: str
     JobID: str
     EvalID: str
     ClientStatus: str
