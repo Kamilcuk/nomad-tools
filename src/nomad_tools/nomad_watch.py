@@ -550,7 +550,16 @@ class TaskLogger(threading.Thread):
     def run(self):
         """Listen to Nomad log stream and print the logs"""
         try:
-            self.__run_in()
+            # Try getting the logs for 5 seconds, then give up.
+            tries: int = 5
+            for tryno in range(tries):
+                try:
+                    self.__run_in()
+                    break
+                except nomadlib.LogNotFound:
+                    if tryno == tries - 1:
+                        raise
+                    time.sleep(1)
         except nomadlib.LogNotFound as e:
             # Gracefully handle missing logs errors from Nomad.
             # Logs are removed by garbage collector and when purging the job.
@@ -560,8 +569,6 @@ class TaskLogger(threading.Thread):
                 datetime.datetime.now(),
                 f"Error getting {self.__typestr()} logs: {code} {text!r}",
             )
-        except requests.HTTPError:
-            raise
         finally:
             self.__set_startevent()
 
