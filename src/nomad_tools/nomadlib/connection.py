@@ -189,11 +189,7 @@ class NomadConn(Requestor):
                 raise JobNotFound(e) from e
             elif "/v1/var/" in url and code == 404 and text == "variable not found":
                 raise VariableNotFound(e) from e
-            elif (
-                "/v1/client/fs/logs/" in url
-                and code in (404, 500)
-                and "no such file or directory" in text
-            ):
+            elif "/v1/client/fs/logs/" in url and code in (404, 500):
                 raise LogNotFound(e) from e
             else:
                 log.exception(f"{code} {text!r}")
