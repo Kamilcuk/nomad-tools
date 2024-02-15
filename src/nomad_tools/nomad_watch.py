@@ -936,14 +936,17 @@ class _NomadJobWatcherDetail(ABC):
             evaluations: List[dict] = mynomad.get(f"job/{self.jobid}/evaluations")
             allocations: List[dict] = mynomad.get(f"job/{self.jobid}/allocations")
         except nomadlib.JobNotFound:
-            # This is fine to fail if it was purged, potentially.
             if DB.seen_job() and self.job:
+                # This is fine to fail if it was purged, potentially.
                 # If the job was purged, generate one event so that listener can catch it.
                 return [
                     Event(
                         -1, EventTopic.Job, EventType.JobDeregistered, self.job.asdict()
                     )
                 ]
+            if ARGS.follow:
+                # In the follow mode, just ignore missing job.
+                return []
             raise
         # Set the job if not set for the first time.
         if not self.job:
