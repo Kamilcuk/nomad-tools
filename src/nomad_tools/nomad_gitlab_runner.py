@@ -14,7 +14,7 @@ from collections import defaultdict
 from pathlib import Path
 from shlex import quote, split
 from textwrap import dedent
-from typing import Dict, List, Optional, Union
+from typing import Callable, Dict, List, Optional, Union
 
 import click
 import yaml
@@ -656,6 +656,7 @@ class BuildFailure(Exception):
 
 
 @click.group(
+    "gitlab-runner",
     help=""" Custom gitlab-runner executor to run gitlab-ci jobs in Nomad. """,
     epilog="Written by Kamil Cukrowski 2023. Licensed under GNU GPL version or later.",
 )
@@ -705,9 +706,27 @@ def cli(verbose: int, configpath: Path, runner_id: int):
         os.environ.setdefault("CUSTOM_ENV_CI_JOB_IMAGE", dc["image"])
 
 
+def executor_exit(f: Callable) -> Callable:
+    """Custom executor should always exit with specific exit codes"""
+
+    def executor_exiting(*args, **kvargs):
+        try:
+            f(*args, **kvargs)
+        except BuildFailure:
+            log.debug("build failure")
+            exit(int(os.environ.get("BUILD_FAILURE_EXIT_CODE", BuildFailure.code)))
+        except Exception as e:
+            log.exception(e)
+            exit(int(os.environ.get("SYSTEM_FAILURE_EXIT_CODE", 111)))
+        return 0
+
+    return executor_exiting
+
+
 @cli.command(
     "config", help="https://docs.gitlab.com/runner/executors/custom.html#config"
 )
+@executor_exit
 def mode_config():
     dc = config.get_driverconfig
     driver_config = {
@@ -730,6 +749,7 @@ def mode_config():
 @cli.command(
     "prepare", help="https://docs.gitlab.com/runner/executors/custom.html#prepare"
 )
+@executor_exit
 def mode_prepare():
     # print_env()
     je = Jobenv()
@@ -744,6 +764,7 @@ def mode_prepare():
 @cli.command("run", help="https://docs.gitlab.com/runner/executors/custom.html#run")
 @click.argument("script")
 @click.argument("stage")
+@executor_exit
 def mode_run(script: str, stage: str):
     je = Jobenv()
     set_x = "-x" if config.verbose > 1 else ""
@@ -772,6 +793,7 @@ def mode_run(script: str, stage: str):
 @cli.command(
     "cleanup", help="https://docs.gitlab.com/runner/executors/custom.html#cleanup"
 )
+@executor_exit
 def mode_cleanup():
     je = Jobenv()
     run_nomad_watch(
@@ -807,19 +829,5 @@ def mode_showconfig():
 
 ###############################################################################
 
-
-def main(*args, **kvargs) -> int:
-    """Custom executor should always exit with specific exit codes"""
-    try:
-        cli.main(*args, **kvargs)
-    except BuildFailure:
-        log.debug("build failure")
-        return int(os.environ.get("BUILD_FAILURE_EXIT_CODE", BuildFailure.code))
-    except Exception as e:
-        log.exception(e)
-        return int(os.environ.get("SYSTEM_FAILURE_EXIT_CODE", 111))
-    return 0
-
-
 if __name__ == "__main__":
-    exit(main())
+    cli()

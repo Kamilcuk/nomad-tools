@@ -37,6 +37,7 @@ def get_arch() -> str:
 
 
 @click.command(
+    "downloadrelease",
     help="""
 \b
 Download specific binary from releases.hashicorp

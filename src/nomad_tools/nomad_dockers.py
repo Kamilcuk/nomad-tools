@@ -47,6 +47,7 @@ def load_job_file(file: IO) -> nomadlib.Job:
 
 
 @click.command(
+    "dockers",
     help="""
     List all docker images referenced by a Nomad job.
     Typically used to download or test the images like

@@ -674,6 +674,7 @@ def stream_mode(src: Mypath, dst: Mypath):
 
 
 @click.command(
+    "cp",
     help=f"""
 Copy files/folders between a nomad allocation and the local filesystem.
 Use '-' as the source to read a tar archive from stdin

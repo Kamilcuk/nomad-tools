@@ -174,7 +174,11 @@ class NomadVariable:
             cas: Optional[int] = (
                 check_index
                 if check_index is not None
-                else None if force else oldvar.ModifyIndex if oldvar else 0
+                else None
+                if force
+                else oldvar.ModifyIndex
+                if oldvar
+                else 0
             )
             if newitems:
                 log.info(
@@ -372,6 +376,7 @@ def click_vardir_paths(required: bool = False):
 
 
 @click.group(
+    "vardir",
     help="""
 This is a solution for managing Nomad variables as directories and files.
 Single Nomad variable can be represented as a directory.
@@ -388,7 +393,7 @@ Typical workflow would look like the following:
     epilog="""
 \b
 Examples:
-    nomad-vardir nomad/jobs/nginx@nginx get nginx.conf
+     nomad/jobs/nginx@nginx get nginx.conf
     nomad-vardir -j nginx@nginx ls
     nomad-vardir -j nginx@nginx put ./nginx.conf
     nomad-vardir -j nginx@nginx cat ./nginx.conf

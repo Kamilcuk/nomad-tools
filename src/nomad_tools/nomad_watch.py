@@ -1521,6 +1521,7 @@ class JobPath:
 
 
 @click.group(
+    "watch",
     help="""
 Depending on the command, run or stop a Nomad job. Watch over the job and
 print all job allocation events and tasks stdouts and tasks stderrs

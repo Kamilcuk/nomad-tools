@@ -24,11 +24,11 @@ documentation = "https://github.com/Kamilcuk/nomad-tools"
 
 [project.scripts]
 # Synchronize with common_base.gen_entrypoints().
-nomadt = "nomad_tools:nomadt.cli"
+nomadt = "nomad_tools:entrypoint.cli"
 nomad-watch = "nomad_tools:nomad_watch.cli"
 nomad-cp = "nomad_tools:nomad_cp.cli"
 nomad-vardir = "nomad_tools:nomad_vardir.cli"
-nomad-gitlab-runner = "nomad_tools:nomad_gitlab_runner.main"
+nomad-gitlab-runner = "nomad_tools:nomad_gitlab_runner.cli"
 nomad-port = "nomad_tools:nomad_port.cli"
 nomad-dockers = "nomad_tools:nomad_dockers.cli"
 nomad-downloadrelease = "nomad_tools:nomad_downloadrelease.cli"

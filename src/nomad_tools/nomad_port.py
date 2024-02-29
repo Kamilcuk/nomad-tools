@@ -80,6 +80,7 @@ long_format = "{host} {port} {label} {Name} {ID}"
 
 
 @click.command(
+    "port",
     help="""
 Print dynamic ports allocated by Nomad for a specific job or allocation.
 If no ports are found, exit with 2 exit status.
