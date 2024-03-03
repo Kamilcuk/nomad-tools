@@ -364,12 +364,15 @@ class ArgPath:
             allocations = [x for x in allocations if x.is_running()]
             assert len(allocations) >= 1, f"Job {jobid} has no running allocations"
         else:
+            # It is a local filesystem path, just return.
             return Mypath(self.path)
+        # Filter using group.
         if self.group:
             allocations = [x for x in allocations if x.TaskGroup == self.group]
             assert (
                 len(allocations) >= 1
             ), f"No running allocations after matching group: {self.arg!r}"
+        # Filter on the task.
         if self.task:
             allocations = [x for x in allocations if self.task in x.get_tasknames()]
             assert (
@@ -379,7 +382,23 @@ class ArgPath:
             len(allocations) == 1
         ), f"Found multiple running allocations mathing {self.arg!r}: {' '.join(x.ID for x in allocations)}"
         allocation = allocations[0]
-        task = self.task if self.task else allocation.get_tasknames()[0]
+        if self.task:
+            task = self.task
+        else:
+            # Get running tasks of specific allocation.
+            runningtasks: List[str] = [
+                task
+                for task, state in allocation.get_taskstates().items()
+                if state.FinishedAt is None
+            ]
+            assert (
+                len(runningtasks) != 0
+            ), f"No running tasks found in allocation {allocation.ID} matching {self.arg!r}"
+            assert len(runningtasks) == 1, (
+                f"Multiple running tasks found in allocation {allocation.ID}"
+                f" matching {self.arg!r}: {' '.join(runningtasks)}"
+            )
+            task = runningtasks[0]
         return NomadMypath(self.path, allocation.ID, task)
 
     @staticmethod
