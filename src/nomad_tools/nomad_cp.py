@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 import enum
 import logging
 import os
@@ -22,6 +21,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
 
 import click
+import clickdc
 from click.shell_completion import BashComplete, CompletionItem
 from typing_extensions import override
 
@@ -36,7 +36,7 @@ from .common import (
 from .common_base import quotearr
 
 log = logging.getLogger(Path(__file__).name)
-ARGS: argparse.Namespace
+ARGS: "Args"
 
 ###############################################################################
 
@@ -689,7 +689,45 @@ def stream_mode(src: Mypath, dst: Mypath):
         assert 0, "Internal error - neither source nor dest is equal to -"
 
 
+def rsync_mode(src: Mypath, dst: Mypath):
+    assert not src.isstdin()
+    assert not dst.isstdin()
+    if isinstance(src, NomadMypath):
+        srcn = True
+        npath = src
+    elif isinstance(dst, NomadMypath):
+        srcn = False
+        npath = dst
+    else:
+        assert False, "One of SOURCE and DEST can be Nomad path"
+    rsh = f"nomad alloc exec -t=false -i=true -task={quote(npath.task)} {quote(npath.allocation)}"
+    srcp = (":" if srcn else "") + src.quotepath().replace(":", r"\:")
+    dstp = ("" if srcn else ":") + dst.quotepath().replace(":", r"\:")
+    cmd = f"rsync {ARGS.rsyncargs} --rsh={quote(rsh)} {srcp} {dstp}"
+    log.debug(f"+ {quotearr(split(cmd))}")
+    if not ARGS.dryrun:
+        subprocess.check_call(split(cmd))
+
+
 ###############################################################################
+
+
+@dataclass
+class Args:
+    dryrun: bool = clickdc.option(
+        "-n",
+        help="Do tar -vt for unpacking. Usefull for listing files for debugging.",
+    )
+    verbose: int = clickdc.option("-v", "--verbose", count=True)
+    quiet: int = clickdc.option("-q", "--quiet", count=True)
+    archive: bool = clickdc.option(
+        "-a",
+        help="Archive mode (copy all uid/gid information)",
+    )
+    rsync: bool = clickdc.option(help="Rsync two paths")
+    rsyncargs: str = clickdc.option(help="Shell quoted rsync options", default="")
+    source: Mypath = clickdc.argument(type=NomadOrHostMyPath())
+    dest: Mypath = clickdc.argument(type=NomadOrHostMyPath())
 
 
 @click.command(
@@ -717,38 +755,27 @@ Examples:
 Written by Kamil Cukrowski 2023. Licensed under GNU GPL version or later.
 """,
 )
-@click.option(
-    "-n",
-    "--dryrun",
-    is_flag=True,
-    help="Do tar -vt for unpacking. Usefull for listing files for debugging.",
-)
-@click.option("-v", "--verbose", count=True)
-@click.option(
-    "-a",
-    "--archive",
-    is_flag=True,
-    help="Archive mode (copy all uid/gid information)",
-)
-@click.argument("source", type=NomadOrHostMyPath())
-@click.argument("dest", type=NomadOrHostMyPath())
 @namespace_option()
 @common_options()
-def cli(source: Mypath, dest: Mypath, **kwargs):
+@clickdc.adddc("args", Args)
+def cli(args: Args):
     global ARGS
-    ARGS = argparse.Namespace(**kwargs)
+    ARGS = args
+    verbose = 1 + ARGS.verbose - ARGS.quiet
     logging.basicConfig(
         level=logging.DEBUG
-        if ARGS.verbose > 1
+        if verbose > 1
         else logging.INFO
-        if ARGS.verbose > 0
+        if verbose > 0
         else logging.WARNING,
         format="%(levelname)s %(name)s:%(funcName)s:%(lineno)d: %(message)s",
     )
-    if source.isstdin() or dest.isstdin():
-        stream_mode(source, dest)
+    if ARGS.rsync:
+        rsync_mode(ARGS.source, ARGS.dest)
+    elif ARGS.source.isstdin() or ARGS.dest.isstdin():
+        stream_mode(ARGS.source, ARGS.dest)
     else:
-        copy_mode(source, dest)
+        copy_mode(ARGS.source, ARGS.dest)
 
 
 if __name__ == "__main__":
