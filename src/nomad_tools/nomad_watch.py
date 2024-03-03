@@ -876,22 +876,15 @@ def __nomad_job_run(args: List[str]) -> str:
 def nomad_start_job(opts: List[str]) -> nomadlib.Eval:
     """Start a nomad job using nomad job run parameters. Return evluation from running the job"""
     assert opts
-    if len(opts) == 1 or (len(opts) == 2 and opts[0] == "-json"):
+    evalid: Optional[str] = None
+    if ARGS.json or (len(opts) == 2 and opts[0] == "-json"):
         # If the input file is a json and we have no arguments, we can use the API ourselves.
         file = opts[-1]
         stream = contextlib.closing(sys.stdin) if file == "-" else open(file)
         with stream as f:
             data: str = f.read()
-        # Try loading it as json, if it fails, try converting from HCL.
-        try:
-            job: dict = json.loads(data)
-            format: str = "json"
-        except json.JSONDecodeError:
-            if ARGS.json:
-                log.exception(data)
-                raise
-            job: dict = mynomad.jobhcl2json(data)
-            format: str = "hcl2"
+        job: dict = json.loads(data)
+        format: str = "json"
         resp = mynomad.start_job(job, nomadlib.JobSubmission(data, format))
         evalid = resp["EvalID"]
         warnings = resp.get("Warnings")
