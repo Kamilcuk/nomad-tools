@@ -99,7 +99,7 @@ class Mypath(ABC):
         return quote(os.path.dirname(self.path) or ".")
 
     def quotename(self):
-        return quote(os.path.basename(self.path))
+        return quote(os.path.basename(self.path) or ".")
 
     def quotepath(self):
         return quote(self.path)
