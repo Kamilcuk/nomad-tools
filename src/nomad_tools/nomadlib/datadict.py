@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import enum
+import traceback
 from typing import Any, ChainMap, Type, Union, get_type_hints
 
 
@@ -49,10 +50,9 @@ def _init_value(classname: str, dstname: str, dsttype: Any, srcval: Any):
         elif issubclass(dsttype, enum.Enum):
             return dsttype(srcval)
         return srcval
-    except AssertionError:
-        raise
     except Exception:
-        raise Exception(msg())
+        print(f"DATADICT:ERROR: {msg()}")
+        traceback.print_exc()
 
 
 def _asdict_value(fname: str, val: Any):
