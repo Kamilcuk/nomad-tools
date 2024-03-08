@@ -1,17 +1,19 @@
 import contextlib
+import csv
 import io
 import json
 import logging
 import os
 import shlex
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
 import threading
 import uuid
 from dataclasses import dataclass
-from typing import IO, Any, List, Optional, Tuple, TypeVar, cast
+from typing import IO, Any, Dict, List, Optional, Tuple, TypeVar, cast
 
 import click
 import clickdc
@@ -70,9 +72,68 @@ class JsonType(click.ParamType):
 
     def convert(
         self, value: Any, param: Optional[click.Parameter], ctx: Optional[click.Context]
-    ) -> Any:
+    ) -> dict:
         """Entrypoint for click option conversion"""
         return json.loads(value) if isinstance(value, str) else value
+
+
+class JsonOrKvCsvType(click.ParamType):
+    name = "JSON_OR_KVCSV"
+
+    def convert(
+        self, value: Any, param: Optional[click.Parameter], ctx: Optional[click.Context]
+    ) -> dict:
+        """Entrypoint for click option conversion"""
+        if not isinstance(value, str):
+            return value
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return {
+                key: val
+                for line in csv.reader(io.StringIO(value))
+                for elem in line
+                for key, val in [elem.split("=", 1)]
+            }
+
+
+class JsonOrShellKvType(click.ParamType):
+    name = "json_or_shellKV"
+
+    def convert(
+        self, value: Any, param: Optional[click.Parameter], ctx: Optional[click.Context]
+    ) -> dict:
+        """Entrypoint for click option conversion"""
+        if not isinstance(value, str):
+            return value
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return {
+                k: v for elem in shlex.split(value) for k, v in [elem.split("=", 1)]
+            }
+
+
+class TemplateType(click.ParamType):
+    name = "json_or_shellKV"
+
+    MAP: Dict[str, str] = dict(
+        destination="DestPath",
+        data="EmbeddedTmpl",
+        source="SourcePath",
+    )
+
+    def convert(
+        self, value: Any, param: Optional[click.Parameter], ctx: Optional[click.Context]
+    ) -> dict:
+        """Entrypoint for click option conversion"""
+        if not isinstance(value, str):
+            return value
+        try:
+            ret = json.loads(value)
+        except json.JSONDecodeError:
+            ret = {k: v for elem in shlex.split(value) for k, v in [elem.split("=", 1)]}
+        return {self.MAP.get(k, k): v for k, v in ret.items()}
 
 
 class MountNfsType(click.ParamType):
@@ -109,6 +170,9 @@ class Parsed:
     cmd: List[str]
 
 
+NAME_PREFIX = "nomad_tools_go_"
+
+
 @dataclass
 class Args:
     name: Optional[str] = clickdc.option(help="Set the name of the job, group and task")
@@ -138,10 +202,10 @@ class Args:
     hostname: Optional[str] = clickdc.option(help="Container host name")
     init: bool = clickdc.option(is_flag=True, help="Add init=true to config")
     name: Optional[str] = clickdc.option(
-        help="Job, group and task name. Default: nomadt_onerun_<uuid>"
+        help=f"Job, group and task name. Default: {NAME_PREFIX}<uuid>"
     )
     mount: Tuple[Any, ...] = clickdc.option(
-        multiple=True, type=JsonType(), help="Add a mount block"
+        multiple=True, type=JsonOrKvCsvType(), help="Add a mount block"
     )
     mountnfs: Tuple[dict, ...] = clickdc.option(
         multiple=True,
@@ -174,12 +238,18 @@ class Args:
         multiple=True,
         help="Datacenter to run in. Can be specified multiple times.",
     )
-    constraints: Tuple[str, ...] = clickdc.option(
+    constraint: Tuple[str, ...] = clickdc.option(
         multiple=True,
         help="List of constrains of 3 elements parsed with shlex.split(). Can be specified multiple times.",
     )
+    constraint_here: bool = clickdc.alias_option(
+        aliased=dict(
+            constraint="${attr.unique.hostname} == " + shlex.quote(socket.gethostname())
+        )
+    )
+    template: Optional[Any] = clickdc.option(multiple=True, type=TemplateType())
     auth: Optional[Any] = clickdc.option(
-        type=JsonType(), help="Pass the JSON data as auth field in config"
+        type=JsonOrKvCsvType(), help="Pass the JSON data as auth field in config"
     )
     image_pull_timeout: Optional[str] = clickdc.option(
         help="Add image_pull_timeout to task config"
@@ -204,8 +274,9 @@ class Args:
         help=""" If using foreground, this is the command that will run in the job,
             and interactive terminal will connect using websockets """,
     )
-    network: Optional[str] = clickdc.option(
-        type=click.Choice(["host"]), help="Connect a container to a network"
+    network: Optional[str] = clickdc.option(help="Connect a container to a network")
+    group_network_mode: Optional[str] = clickdc.option(
+        help="Group network mode configuration"
     )
     cpu: Optional[int] = clickdc.option(type=int)
     image: Optional[str] = clickdc.option(
@@ -230,7 +301,7 @@ class Args:
     )
 
     def parse(self) -> Parsed:
-        name: str = self.name if self.name else f"nomadt_onerun_{uuid.uuid4()}"
+        name: str = self.name if self.name else f"{NAME_PREFIX}{uuid.uuid4()}"
         if self.image is None and self.driver in "podman docker containerd".split():
             self.image = self.command[0]
             self.command = self.command[1:]
@@ -251,10 +322,10 @@ class Args:
                     "Operand": oo,
                     "RTarget": rr,
                 }
-                for cc in self.constraints
+                for cc in self.constraint
                 for ll, oo, rr in [shlex.split(cc)]
             ]
-            if self.constraints
+            if self.constraint
             else None,
             "TaskGroups": [
                 {
@@ -263,6 +334,7 @@ class Args:
                     "Networks": (
                         [
                             {
+                                "Mode": self.group_network_mode,
                                 "DynamicPorts": [
                                     {
                                         "HostNetwork": "default",
@@ -337,6 +409,7 @@ class Args:
                                 "network_mode": self.network,
                                 **self.extra_config,
                             },
+                            "Templates": (self.template if self.template else None),
                             "Env": (
                                 {
                                     **{
