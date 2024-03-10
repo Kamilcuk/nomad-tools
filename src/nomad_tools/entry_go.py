@@ -532,6 +532,7 @@ def cli(args: Args, verbose: bool):
         cmd: List[str] = (["--verbose"] if verbose else []) + [
             "--attach",
             "--json",
+            "-0",
             "start" if args.detach else "run",
             "-",
         ]
