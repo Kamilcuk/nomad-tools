@@ -42,11 +42,12 @@ class JobTaskConfig(DataDict):
     image: str
     command: str
     args: List[str]
-    network_mode: str
-    network_aliases: List[str]
     volumes: List[str]
     mounts: List[DockerMounts]
     extra_hosts: List[str]
+    network_aliases: Optional[List[str]] = None
+    network_mode: Optional[str] = None
+    init: Optional[bool] = None
 
 
 class LifecycleHook(MyStrEnum):
@@ -75,8 +76,8 @@ class JobTask(DataDict):
     User: str
     Config: Union[dict, JobTaskConfig]
     Lifecycle: Optional[JobTaskLifecycle] = None
-    Env: Optional[Dict[str, str]]
-    Services: Optional[List[Any]]
+    Env: Optional[Dict[str, str]] = None
+    Services: Optional[List[Any]] = None
     Templates: Optional[List[JobTaskTemplate]] = None
 
 
@@ -145,9 +146,9 @@ class AllocationMetric(DataDict):
     NodesEvaluated: int
     NodesFiltered: int
     NodesAvailable: Dict[str, int]
+    NodesExhausted: int
     ClassFiltered: Optional[Dict[str, int]] = None
     ConstraintFiltered: Optional[Dict[str, int]] = None
-    NodesExhausted: int
     QuotaExhausted: Optional[Dict[str, int]] = None
     ScoreMetaData: Optional[List[NodeScoreMeta]] = None
     ClassExhausted: Optional[Dict[str, int]] = None
@@ -211,16 +212,16 @@ def fromisoformat(txt: str) -> datetime.datetime:
 class Eval(DataDict):
     ID: str
     Namespace: str
-    DeploymentID: Optional[str] = None
-    """May be missing when evaluation started by user starting the job"""
     JobID: str
-    JobModifyIndex: Optional[int] = None
-    """May be missing. No idea when"""
     ModifyIndex: int
     ModifyTime: int
     Status: str
     WaitUntil: str
     FailedTGAllocs: Dict[str, AllocationMetric]
+    DeploymentID: Optional[str] = None
+    """May be missing when evaluation started by user starting the job"""
+    JobModifyIndex: Optional[int] = None
+    """May be missing. No idea when"""
     TriggeredBy: Optional[str] = None
 
     def is_pending_or_blocked(self):
@@ -432,11 +433,11 @@ class DeploymentTaskGroup(DataDict):
     DesiredTotal: int
     HealthyAllocs: int
     PlacedAllocs: int
-    PlacedCanaries: Optional[List[str]] = None
     ProgressDeadline: int
     Promoted: bool
     RequireProgressBy: Optional[str]
     UnhealthyAllocs: int
+    PlacedCanaries: Optional[List[str]] = None
 
 
 class Deploy(DataDict):
@@ -616,14 +617,14 @@ class JobSummarySummary(DataDict):
 
 class JobSummary(DataDict):
     JobID: str
-    Summary: Dict[str, JobSummarySummary]
-    Children: JobSummaryChildren
     CreateIndex: int
     ModifyIndex: int
+    Summary: Optional[Dict[str, JobSummarySummary]] = None
+    Children: Optional[JobSummaryChildren] = None
 
     def get_sum_summary(self) -> JobSummarySummary:
         """Sum all summaries into one"""
-        ret = JobSummarySummary({})
-        for s in self.Summary.values():
+        ret = JobSummarySummary()
+        for s in (self.Summary or {}).values():
             ret += s
         return ret
