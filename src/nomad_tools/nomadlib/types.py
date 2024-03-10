@@ -45,9 +45,8 @@ class JobTaskConfig(DataDict):
     volumes: List[str]
     mounts: List[DockerMounts]
     extra_hosts: List[str]
-    network_aliases: Optional[List[str]] = None
-    network_mode: Optional[str] = None
-    init: Optional[bool] = None
+    network_mode: str
+    init: bool
 
 
 class LifecycleHook(MyStrEnum):
@@ -75,10 +74,10 @@ class JobTask(DataDict):
     Driver: str
     User: str
     Config: Union[dict, JobTaskConfig]
-    Lifecycle: Optional[JobTaskLifecycle] = None
-    Env: Optional[Dict[str, str]] = None
-    Services: Optional[List[Any]] = None
-    Templates: Optional[List[JobTaskTemplate]] = None
+    Lifecycle: Optional[JobTaskLifecycle]
+    Env: Optional[Dict[str, str]]
+    Services: Optional[List[Any]]
+    Templates: Optional[List[JobTaskTemplate]]
 
 
 class JobTaskGroup(DataDict):
