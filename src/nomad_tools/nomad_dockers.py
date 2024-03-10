@@ -3,12 +3,13 @@ import logging
 import shlex
 import subprocess
 import sys
-from typing import IO, Any, Dict, List
+from dataclasses import dataclass
+from typing import IO, Any, Dict, List, Tuple
 
 import click.shell_completion
+import clickdc
 
 from . import common, nomadlib
-from .common_click import alias_option
 
 log = logging.getLogger(__name__)
 
@@ -46,62 +47,61 @@ def load_job_file(file: IO) -> nomadlib.Job:
     return nomadlib.Job(jobdata.get("Job", jobdata))
 
 
+@dataclass
+class Args:
+    verbose: int = clickdc.option("-v", count=True, help="Be verbose")
+    format: str = clickdc.option(
+        "-f",
+        help="Passed to python .format()",
+        show_default=True,
+        default="{image}",
+    )
+    long: Any = clickdc.alias_option(
+        "-l",
+        aliased=dict(format="{groupName} {taskName} {image}"),
+    )
+    job: Tuple[str, ...] = clickdc.option(
+        "-j",
+        multiple=True,
+        help="List images referenced by a Nomad job name",
+    )
+    all: Tuple[str, ...] = clickdc.option(
+        "-a",
+        multiple=True,
+        help="NextList docker images referenced by all job versions",
+    )
+    files: Tuple[IO, ...] = clickdc.argument("files", nargs=-1, type=click.File("r"))
+
+
 @click.command(
     "dockers",
     help="""
     List all docker images referenced by a Nomad job.
     Typically used to download or test the images like
-    nomad-dockers ./file.nomad.hcl | xargs docker pull.
-    """
+    `nomadtools dockers ./file.nomad.hcl | xargs docker pull`.
+    """,
 )
 @common.common_options()
-@click.option("-v", "--verbose", count=True, help="Be verbose")
-@click.option(
-    "-f",
-    "--format",
-    help="Passed to python .format()",
-    show_default=True,
-    default="{image}",
-)
-@alias_option(
-    "-l",
-    "--long",
-    aliased=dict(format="{groupName} {taskName} {image}"),
-)
-@click.option(
-    "-j",
-    "--job",
-    multiple=True,
-    help="List images referenced by a Nomad job name",
-)
-@click.option(
-    "-a",
-    "--all",
-    multiple=True,
-    help="NextList docker images referenced by all job versions",
-)
-@click.argument("files", nargs=-1, type=click.File("r"))
-def cli(
-    all: List[str], files: List[IO], job: List[str], format: str, verbose: int, **kwargs
-):
-    logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO)
-    if not (all or files or job):
+@clickdc.adddc("args", Args)
+def cli(args: Args):
+    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO)
+    if not (args.all or args.files or args.job):
         raise click.ClickException(
             "One of --all --job or positional arguments have to given"
         )
     njobs: List[nomadlib.Job] = []
     njobs += [
         nomadlib.Job(njobversion)
-        for job in all
+        for job in args.all
         for njobversion in common.mynomad.get(
             f"job/{common.nomad_find_job(job)}/versions"
         )["Versions"]
     ]
     njobs += [
         nomadlib.Job(common.mynomad.get(f"job/{common.nomad_find_job(job)}"))
-        for job in job
+        for job in args.job
     ]
-    njobs += [load_job_file(file) for file in files]
+    njobs += [load_job_file(file) for file in args.files]
     for njob in njobs:
         out: List[str] = []
         for group in njob.TaskGroups or []:
@@ -115,7 +115,7 @@ def cli(
                         image=image,
                     )
                     log.debug(f"{format!r} {params}")
-                    out.append(format.format(**params))
+                    out.append(args.format.format(**params))
         out = sorted(list(set(out)))
         for line in out:
             print(line)
