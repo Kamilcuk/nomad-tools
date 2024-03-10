@@ -193,6 +193,7 @@ class LOGFORMAT:
     mark = "{mark}>"
     post = "{message}{reset}"
     task = "{task + '>' if task else ''}"
+
     DEFAULT = (
         pre + mark + "{id:.{args.log_id_len}}>v{str(jobversion)}>" + task + " " + post
     )
@@ -200,16 +201,22 @@ class LOGFORMAT:
     Default log format. The log is templated with f-string using eval() below.
         O>45fbbd>v0>group1>task1> hello world
     """
+
     ONE = pre + mark + task + " " + post
     """
     Log format with -1 option.
         O>task1> hello world
     """
+
+    ONLYMARK = pre + mark + post
+    """ O>hello world """
+
     ZERO = pre + post
     """
     Log format with -0 option.
         hello world
     """
+
     LOGGING = (
         COLORS.brightblue
         + "{'%(asctime)s>' if ARGS.log_time else ''}"
@@ -219,6 +226,7 @@ class LOGFORMAT:
         + COLORS.reset
     )
     """Logging format, first templated with f-string, then by logging."""
+
     colors: Dict[LogWhat, str] = {
         LogWhat.deploy: COLORS.brightmagenta,
         LogWhat.eval: COLORS.magenta,
@@ -227,6 +235,7 @@ class LOGFORMAT:
         LogWhat.stdout: "",
     }
     """Logs colors"""
+
     marks: Dict[LogWhat, str] = {
         LogWhat.deploy: "deploy",
         LogWhat.eval: "eval",
@@ -285,6 +294,9 @@ class LogOptions:
     log_id_long: Any = clickdc.alias_option("-l", aliased=dict(log_id_len=36))
     log_only_task: Any = clickdc.alias_option(
         "-1", aliased=dict(log_format=LOGFORMAT.ONE)
+    )
+    log_only_mark: Any = clickdc.alias_option(
+        aliased=dict(log_format=LOGFORMAT.ONLYMARK)
     )
     log_none: Any = clickdc.alias_option("-0", aliased=dict(log_format=LOGFORMAT.ZERO))
     out: List[str] = clickdc.option(
