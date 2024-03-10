@@ -22,7 +22,6 @@ import time
 import traceback
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
-from http import client as http_client
 from typing import (
     Any,
     ClassVar,
@@ -317,6 +316,8 @@ def init_logging():
     #
     ARGS.verbose -= ARGS.quiet
     if ARGS.verbose > 1:
+        from http import client as http_client
+
         http_client.HTTPConnection.debuglevel = 1
     logging.basicConfig(
         format=LOGFORMAT.render(LOGFORMAT.LOGGING),
