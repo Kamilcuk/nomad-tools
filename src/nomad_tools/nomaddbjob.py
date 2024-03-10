@@ -5,11 +5,10 @@ from typing import Callable, Dict, Iterable, List, Optional, TypeVar, Union
 
 import requests
 
-from nomad_tools.nomadlib.types import JobStatus
-
 from . import flagdebug, nomadlib
 from .common import eprint, json_loads, mynomad
 from .nomadlib import Event, EventTopic, EventType
+from .nomadlib.types import JobStatus
 
 log = logging.getLogger(__name__)
 T = TypeVar("T")
