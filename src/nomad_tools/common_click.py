@@ -39,9 +39,8 @@ def click_callback_wrap_exit(cb: Callable[[], None]):
     return wrap
 
 
-def common_options():
+def main_options():
     return composed(
-        click.help_option("-h", "--help"),
         click.option(
             "--version",
             is_flag=True,
@@ -66,6 +65,12 @@ def common_options():
             is_eager=True,
             help="Install shell completion.",
         ),
+    )
+
+
+def common_options():
+    return composed(
+        click.help_option("-h", "--help"),
     )
 
 
