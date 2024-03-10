@@ -33,13 +33,13 @@ def composed(*decs):
     return deco
 
 
-def andjoin(arr: Iterable[Any]) -> str:
+def andjoin(arr: Iterable[Any], fin: str = " and ") -> str:
     arr = list(arr)
     if not len(arr):
         return ""
     if len(arr) == 1:
         return str(arr[0])
-    return ", ".join(str(x) for x in arr[:-1]) + " and " + str(arr[-1])
+    return ", ".join(str(x) for x in arr[:-1]) + fin + str(arr[-1])
 
 
 def get_version():
