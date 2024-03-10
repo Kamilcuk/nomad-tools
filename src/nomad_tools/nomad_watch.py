@@ -884,6 +884,8 @@ def nomad_start_job(opts: List[str]) -> nomadlib.Eval:
         with stream as f:
             data: str = f.read()
         job: dict = json.loads(data)
+        if "Job" in job:
+            job = job["Job"]
         format: str = "json"
         resp = mynomad.start_job(job, nomadlib.JobSubmission(data, format))
         evalid = resp["EvalID"]
