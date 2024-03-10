@@ -3,13 +3,13 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 
 import click
 
-from .common_base import NOMAD_NAMESPACE, composed, print_version, shell_completion
+from .common_base import composed, print_version, shell_completion
 
 
 def complete_set_namespace(ctx: click.Context):
     namespace = ctx.params.get("namespace")
     if namespace:
-        os.environ[NOMAD_NAMESPACE] = namespace
+        os.environ["NOMAD_NAMESPACE"] = namespace
 
 
 def completor(

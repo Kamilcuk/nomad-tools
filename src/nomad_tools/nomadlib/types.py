@@ -131,6 +131,7 @@ class Job(DataDict):
 class JobsJob(DataDict):
     """Returned aby jobs API. DO NOT mix with Job"""
 
+    Namespace: Optional[str]
     ID: str
 
 

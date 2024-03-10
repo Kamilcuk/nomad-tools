@@ -15,6 +15,14 @@ from . import types
 
 log = logging.getLogger(__name__)
 
+NOMAD_NAMESPACE = "NOMAD_NAMESPACE"
+NOMAD_TOKEN = "NOMAD_TOKEN"
+NOMAD_HTTP_AUTH = "NOMAD_HTTP_AUTH"
+NOMAD_SKIP_VERIFY = "NOMAD_SKIP_VERIFY"
+NOMAD_CACERT = "NOMAD_CACERT"
+NOMAD_CLIENT_CERT = "NOMAD_CLIENT_CERT"
+NOMAD_CLIENT_KEY = "NOMAD_CLIENT_KEY"
+
 
 def _default_session():
     s = requests.Session()
@@ -30,9 +38,9 @@ def _default_session():
 
 
 class APIException(requests.HTTPError):
-    def __init__(self, e: requests.HTTPError):
+    def __init__(self, e: requests.HTTPError, msg: str = ""):
         """Just construct from other requests.HTTPError"""
-        super().__init__(request=e.request, response=e.response)
+        super().__init__(msg, request=e.request, response=e.response)
 
 
 class PermissionDenied(APIException):
@@ -149,30 +157,33 @@ class NomadConn(Requestor):
     ):
         params = dict(params or {})
         params.setdefault(
-            "namespace", self.namespace or os.environ.get("NOMAD_NAMESPACE", "*")
+            "namespace", self.namespace or os.environ.get(NOMAD_NAMESPACE, "*")
         )
         req = self.session.request(
             method,
             self.addr() + "/v1/" + url,
             *args,
             auth=(
-                requests.auth.HTTPBasicAuth(*os.environ["NOMAD_HTTP_AUTH"].split(":"))
-                if "NOMAD_HTTP_AUTH" in os.environ
+                requests.auth.HTTPBasicAuth(*os.environ[NOMAD_HTTP_AUTH].split(":", 2))
+                if NOMAD_HTTP_AUTH in os.environ
                 else None
             ),
             headers=(
-                {"X-Nomad-Token": os.environ["NOMAD_TOKEN"]}
-                if "NOMAD_TOKEN" in os.environ
+                {"X-Nomad-Token": os.environ[NOMAD_TOKEN]}
+                if NOMAD_TOKEN in os.environ
                 else None
             ),
             params=params,
-            verify=False
-            if "NOMAD_SKIP_VERIFY" in os.environ
-            else os.environ.get("NOMAD_CACERT"),
+            verify=(
+                False
+                if NOMAD_SKIP_VERIFY in os.environ
+                else os.environ[NOMAD_CACERT]
+                if NOMAD_CACERT in os.environ
+                else True
+            ),
             cert=(
-                (os.environ["NOMAD_CLIENT_CERT"], os.environ["NOMAD_CLIENT_KEY"])
-                if "NOMAD_CLIENT_CERT" in os.environ
-                and "NOMAD_CLIENT_KEY" in os.environ
+                (os.environ[NOMAD_CLIENT_CERT], os.environ[NOMAD_CLIENT_KEY])
+                if NOMAD_CLIENT_CERT in os.environ and NOMAD_CLIENT_KEY in os.environ
                 else None
             ),
             **kvargs,
@@ -229,23 +240,23 @@ def create_websocket_connection(path: str) -> websocket.WebSocket:
     url: str = f"{addr}/{path}"
     # Build headers with authorization and token.
     headers: Dict[str, str] = {}
-    token = os.environ.get("NOMAD_TOKEN")
+    token = os.environ.get(NOMAD_TOKEN)
     if token:
         headers["X-Nomad-Token"] = token
-    auth = os.environ.get("NOMAD_HTTP_AUTH")
+    auth = os.environ.get(NOMAD_HTTP_AUTH)
     if auth:
         headers["Authorization"] = "Basic " + base64.b64encode(auth.encode()).decode()
     # Build SSL options from environment variables.
     sslopt: Dict[str, Any] = {}
-    skip_verify = os.environ.get("NOMAD_SKIP_VERIFY")
+    skip_verify = os.environ.get(NOMAD_SKIP_VERIFY)
     if skip_verify:
         sslopt["cert_reqs"] = ssl.CERT_NONE
         sslopt["check_hostname"] = False
-    cacert = os.environ.get("NOMAD_CACERT")
+    cacert = os.environ.get(NOMAD_CACERT)
     if cacert:
         sslopt["ca_cert_path"] = cacert
-    cert = os.environ.get("NOMAD_CLIENT_CERT")
-    key = os.environ.get("NOMAD_CLIENT_KEY")
+    cert = os.environ.get(NOMAD_CLIENT_CERT)
+    key = os.environ.get(NOMAD_CLIENT_KEY)
     if cert and key:
         sslopt["certfile"] = cert
         sslopt["keyfile"] = key

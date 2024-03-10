@@ -1,3 +1,7 @@
+variable "group3" {
+  type = bool
+  default = true
+}
 locals {
   image   = "busybox:stable"
   command = "sh"
@@ -80,6 +84,7 @@ job "test-onestays" {
   }
 
   group "group3change" {
+    count = var.group3 ? 1 : 0
     meta {
       uuid = uuidv4()
     }
