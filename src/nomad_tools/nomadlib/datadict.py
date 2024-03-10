@@ -5,6 +5,7 @@ import enum
 import traceback
 from typing import Any, ChainMap, Type, Union, get_type_hints
 
+from typing_extensions import get_args, get_origin
 
 def all_annotations(cls) -> ChainMap[str, Type]:
     """
