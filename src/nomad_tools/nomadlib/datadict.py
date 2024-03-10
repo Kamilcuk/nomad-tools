@@ -16,7 +16,7 @@ def all_annotations(cls) -> ChainMap[str, Type]:
 
 def _init_value(classname: str, dstname: str, dsttype: Any, srcval: Any):
     # print(f"Constructing {aname} with type {atype} from {val}")
-    dstorigin = getattr(dsttype, "__origin__", None)
+    dstorigin = get_origin(dsttype)
 
     def msg() -> str:
         return (
@@ -28,20 +28,20 @@ def _init_value(classname: str, dstname: str, dsttype: Any, srcval: Any):
         if dstorigin == list:
             assert type(srcval) is dstorigin, msg()
             return [
-                _init_value(classname, dstname, dsttype.__args__[0], x) for x in srcval
+                _init_value(classname, dstname, get_args(dsttype)[0], x) for x in srcval
             ]
         elif dstorigin == dict:
             assert type(srcval) is dstorigin, msg()
             return {
-                _init_value(classname, dstname, dsttype.__args__[0], k): _init_value(
-                    classname, dstname, dsttype.__args__[1], v
+                _init_value(classname, dstname, get_args(dsttype)[0], k): _init_value(
+                    classname, dstname, get_args(dsttype)[1], v
                 )
                 for k, v in srcval.items()
             }
         elif dstorigin == Union:
             if type(srcval) in dsttype.__args__:
                 return srcval
-            return _init_value(classname, dstname, dsttype.__args__[0], srcval)
+            return _init_value(classname, dstname, get_args(dsttype)[0], srcval)
         elif dsttype == Any:
             return srcval
         elif issubclass(dsttype, DataDict):
