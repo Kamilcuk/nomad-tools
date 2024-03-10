@@ -100,7 +100,7 @@ Exits with the following exit status:
   0  if at least one redirection was found,
   1  on python exception, missing job,
   2  if no redirections were found.
-"""
+""",
 )
 @click.option(
     "-f",
