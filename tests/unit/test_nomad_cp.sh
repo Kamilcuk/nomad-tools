@@ -5,7 +5,7 @@ set -xeuo pipefail
 # https://docs.docker.com/engine/reference/commandline/container_cp/
 
 # Small wrapper to execute nomad-cp
-nomad-cp() { python -m nomad_tools.nomad_cp -vv "$@"; }
+nomad-cp() { python -m nomad_tools.entrypoint cp -vv "$@"; }
 
 # Handle that this command will fail
 willfail() { if "$@"; then exit 123; fi; }

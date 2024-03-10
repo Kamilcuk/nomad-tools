@@ -3,7 +3,7 @@ from shlex import quote
 from typing import List, Union
 
 from nomad_tools.common import mynomad
-from tests.testlib import get_testjobs, run, run_nomad_watch
+from tests.testlib import get_testjobs, run_nomad_watch, run_nomadt
 
 testjobs = get_testjobs()
 
@@ -68,7 +68,7 @@ def test_nomad_watch2_okpurge():
 def test_nomad_watch2_canary():
     """
     Run a service that listens on a port.
-    Check if nomad-port works.
+    Check if nomad-tools port works.
     Then try to upgrade that service so that it fails. Deployment should fail.
     Then try to upgrade that service but with success. Deployment should succeed.
     """
@@ -77,9 +77,9 @@ def test_nomad_watch2_canary():
     try:
         # Run nice deployment.
         run_nomad_watch(f"start -var ok=true  {testjobs[job]}", output=output)
-        run(f"nomad-port {job}", output=[re.compile(r"[0-9\.]+:[0-9]+")])
-        run(
-            f"nomad-port -l {job}",
+        run_nomadt(f"port {job}", output=[re.compile(r"[0-9\.]+:[0-9]+")])
+        run_nomadt(
+            f"port -l {job}",
             output=[re.compile(r"[0-9\.]+ [0-9]+ http [^ ]* [^ ]*")],
         )
         # This should fail and revert deployment.
@@ -91,9 +91,9 @@ def test_nomad_watch2_canary():
             check=False,
         )
         run_nomad_watch(f"start -var ok=true  {testjobs[job]}", output=output)
-        run(f"nomad-port {job}", output=[re.compile(r"[0-9\.]+:[0-9]+")])
-        run(
-            f"nomad-port -l {job}",
+        run_nomadt(f"port {job}", output=[re.compile(r"[0-9\.]+:[0-9]+")])
+        run_nomadt(
+            f"port -l {job}",
             output=[re.compile(r"[0-9\.]+ [0-9]+ http [^ ]* [^ ]*")],
         )
         run_nomad_watch(f"-x stop {job}")

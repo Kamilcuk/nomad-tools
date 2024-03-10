@@ -156,12 +156,7 @@ def run(
     :param stdout: capture stdout. tru if output is given
     """
     cmd = f"timeout {timeout} {cmd}"
-    cmda: List[str] = []
-    for i in shlex.split(cmd):
-        if i in "nomad-cp nomad-watch nomad-port".split():
-            cmda.extend(f"python3 -m nomad_tools.{i.replace('-', '_')} -v".split())
-        else:
-            cmda.append(i)
+    cmda: List[str] = shlex.split(cmd)
     print(" ", file=sys.stderr, flush=True)
     print(f"+ {quotearr(cmda)}", file=sys.stderr, flush=True)
     stdout = stdout or bool(output)
@@ -226,12 +221,12 @@ def prefixed_run(prefix: str):
     return inner
 
 
-run_nomad_cp = prefixed_run("python3 -m nomad_tools.nomad_cp -vv")
-run_nomad_watch = prefixed_run("python3 -m nomad_tools.nomad_watch -v")
-run_nomad_vardir = prefixed_run("python3 -m nomad_tools.nomad_vardir -v")
-run_nomad_dockers = prefixed_run("python3 -m nomad_tools.nomad_dockers -v")
-run_downloadrelease = prefixed_run("python3 -m nomad_tools.nomad_downloadrelease")
-run_nomadt = prefixed_run("python3 -m nomad_tools.nomadt --verbose")
+run_nomad_cp = prefixed_run("python3 -m nomad_tools.entrypoint cp -vv")
+run_nomad_watch = prefixed_run("python3 -m nomad_tools.entrypoint watch -v")
+run_nomad_vardir = prefixed_run("python3 -m nomad_tools.entrypoint vardir -v")
+run_nomad_dockers = prefixed_run("python3 -m nomad_tools.entrypoint dockers -v")
+run_downloadrelease = prefixed_run("python3 -m nomad_tools.entrypoint downloadrelease")
+run_nomadt = prefixed_run("python3 -m nomad_tools.entrypoint")
 
 
 def run_bash(script: str, **kwargs):

@@ -54,25 +54,6 @@ def print_version():
     print(f"{os.path.basename(sys.argv[0])}, version {get_version()}")
 
 
-def get_entrypoints() -> List[str]:
-    txt = """
-nomadt = "nomad_tools:nomadt.cli"
-nomad-watch = "nomad_tools:nomad_watch.cli"
-nomad-cp = "nomad_tools:nomad_cp.cli"
-nomad-vardir = "nomad_tools:nomad_vardir.cli"
-nomad-gitlab-runner = "nomad_tools:nomad_gitlab_runner.main"
-nomad-port = "nomad_tools:nomad_port.cli"
-nomad-dockers = "nomad_tools:nomad_dockers.cli"
-nomad-downloadrelease = "nomad_tools:bin_downloadrelease.cli"
-"""
-    return [
-        name
-        for line in txt.splitlines()
-        for name in [line.split("=")[0].strip()]
-        if name
-    ]
-
-
 def eprint(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
 
@@ -83,11 +64,11 @@ class shell_completion:
         dir = "~/.local/share/bash-completion/completions"
         script: List[str] = []
         script.append(f"mkdir -vp {dir}")
-        for name in get_entrypoints():
-            upname = name.upper().replace("-", "_")
-            script.append(
-                f"echo 'eval \"$(_{upname}_COMPLETE=bash_source {name})\"' > {dir}/{name}"
-            )
+        name = "nomad-tools"
+        upname = name.upper().replace("-", "_")
+        script.append(
+            f"echo 'eval \"$(_{upname}_COMPLETE=bash_source {name})\"' > {dir}/{name}"
+        )
         return script
 
     @staticmethod

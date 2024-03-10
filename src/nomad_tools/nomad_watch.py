@@ -213,7 +213,7 @@ class LOGFORMAT:
     LOGGING = (
         COLORS.brightblue
         + "{'%(asctime)s>' if ARGS.log_time else ''}"
-        + "{'nomad-watch' if ARGS.verbose <= 0 else '%(module)s'}>"
+        + "{'watch' if ARGS.verbose <= 0 else '%(module)s'}>"
         + "%(lineno)03d>"
         + " %(levelname)s %(message)s"
         + COLORS.reset
@@ -1697,10 +1697,10 @@ logs of a task.
 
 \b
 Examples:
-    nomad-watch run ./some-job.nomad.hcl
-    nomad-watch job some-job
-    nomad-watch alloc af94b2
-    nomad-watch -N services --task redis -1f job redis
+    watch run ./some-job.nomad.hcl
+    watch job some-job
+    watch alloc af94b2
+    watch -N services --task redis -1f job redis
 """,
     epilog="""
     Written by Kamil Cukrowski 2023. Licensed under GNU GPL version 3 or later.

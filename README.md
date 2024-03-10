@@ -9,15 +9,16 @@ Set of tools and utilities to ease interacting with HashiCorp Nomad scheduling s
 * [Installation](#installation)
     * [Shell completion](#shell-completion)
 * [Usage](#usage)
-    * [nomadt](#nomadt)
-    * [nomad-watch](#nomad-watch)
-    * [nomad-port](#nomad-port)
-    * [nomad-vardir](#nomad-vardir)
-    * [nomad-cp](#nomad-cp)
-    * [nomad-gitlab-runner](#nomad-gitlab-runner)
+    * [watch](#watch)
+    * [onerun](#onerun)
+    * [port](#port)
+    * [vardir](#vardir)
+    * [cp](#cp)
+    * [gitlab-runner](#gitlab-runner)
     * [nomad-dockers](#nomad-dockers)
-    * [nomad-downloadrelease](#nomad-downloadrelease)
+    * [downloadrelease](#downloadrelease)
     * [import nomad_tools](#import-nomad_tools)
+* [History](#history)
 * [Contributing](#contributing)
     * [Running tests](#running-tests)
 * [License](#license)
@@ -35,79 +36,97 @@ pipx install nomad-tools
 
 ## Shell completion
 
-After installation, see `nomad-watch --autocomplete-info` for shell
+After installation, see `watch --autocomplete-info` for shell
 completion installation instruction.
 
 # Usage
 
-This module install several command line tools:
+This module installs command line tool `nomad-tools` with several modes of
+operation:
 
-## nomadt
+## watch
 
-`nomadt` is a wrapper around `nomad` commands and `nomad-anything`
-command. If a `nomad` sub-command exists, `nomad` will be run. Otherwise
-an executable `nomad-subcommand` will be executed for a given sub-command.
-
-The intention is that you can do `alias nomad=nomadt` and use it seamlessly.
-
-```
-nomadt job run example.nomad.hcl    # will execute nomad job run example.nomad.hcl
-nomadt watch run example.nomad.hcl  # will execute nomad-watch run example.nomad.hcl
-```
-
-## nomad-watch
-
-Nomad-watch is meant to watch over a job change that you type in
+`watch` is meant to watch over a job change that you type in
 terminal. It prints all relevant messages - messages about allocation,
 evaluation, deployment and stdout and stderr logs from all the
 processes. Depending on the mode of operation, the tool waits until an
 action is finished.
 
-I primarily use nomad-watch to deploy new versions of services. I was always
+I primarily use `watch` to deploy new versions of services. I was always
 frustrated that I start something from terminal and then I have to check the
 logs of the service in multiple tabs in the Nomad web interface. For example,
-you can use `nomad-watch start ./postgres.nomad.hcl` to update postgres
+you can use `watch start ./postgres.nomad.hcl` to update PostgreSQL
 container and watch it's logs in your terminal.
 
 An example terminal session deploying a HTTP server job with canary and health
 check. Note that while the new version is deployed, the old one still prints
 the logs.
 
-![gif showing example usage of nomad-watch start](./assets/imgs/nomad-watch-start-listen.gif)
+![gif showing example usage of watch start](./assets/imgs/nomad-watch-start-listen.gif)
 
 Another usage of the job is to run an one-shot batch jobs to do something and
 wait until they are finished and collect the exit status and logs, for example
 as an airflow or cron job. In this case `run` mode will wait for the job to be
-finished. For example `nomad-watch --purge run ./compute.nomad.hcl` will run
+finished. For example `watch --purge run ./compute.nomad.hcl` will run
 a calculation job, purge after it is done and exit with calculate job exit
 status (if there is one task).
 
-![gif showing example usage of nomad-watch run](./assets/imgs/nomad-watch-run-compute.gif)
+![gif showing example usage of watch run](./assets/imgs/nomad-watch-run-compute.gif)
 
-Internally, nomad-watch uses Nomad event stream to get the events in real time.
+Internally, watch uses Nomad event stream to get the events in real time.
 
-## nomad-port
+## onerun
+
+Mimics operation of `docker run`, it is built on top of `watch` mode to
+execute a single Nomad job created dynamically from command line arguments.
+
+```
+$ nomad-tools onerun --rm alpine apk add bash
+INFO:nomad_tools.nomad_watch:Watching job nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984@default until it is finished
+eval>f3f3ea>v0> Allocation 8356bdb6-830b-5b05-11bc-fb29a4d47794 started on leonidas
+A>8356bd>v0>nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984> Received Task received by client
+A>8356bd>v0>nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984> Task Setup Building Task Directory
+A>8356bd>v0>nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984> Driver Downloading image
+A>8356bd>v0>nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984> Started Task started by client
+O>8356bd>v0>nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984> fetch https://dl-cdn.alpinelinux.org/alpine/v3.19/main/x86_64/APKINDEX.tar.gz
+O>8356bd>v0>nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984> fetch https://dl-cdn.alpinelinux.org/alpine/v3.19/community/x86_64/APKINDEX.tar.gz
+O>8356bd>v0>nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984> (1/4) Installing ncurses-terminfo-base (6.4_p20231125-r0)
+O>8356bd>v0>nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984> (2/4) Installing libncursesw (6.4_p20231125-r0)
+O>8356bd>v0>nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984> (3/4) Installing readline (8.2.1-r2)
+O>8356bd>v0>nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984> (4/4) Installing bash (5.2.21-r0)
+O>8356bd>v0>nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984> Executing bash-5.2.21-r0.post-install
+O>8356bd>v0>nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984> Executing busybox-1.36.1-r15.trigger
+O>8356bd>v0>nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984> OK: 10 MiB in 19 packages
+A>8356bd>v0>nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984> Terminated Exit Code: 0
+eval>f3f3ea>v0> Allocation 8356bdb6-830b-5b05-11bc-fb29a4d47794 finished
+INFO:nomad_tools.nomad_watch:Job nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984#0@default started allocations 8356bd running group 'nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984' with 1 main tasks.
+INFO:nomad_tools.nomad_watch:Purging job nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984
+INFO:nomad_tools.nomad_watch:Job nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984#0@default purged with no active allocations, evaluations nor deployments. Exiting.
+INFO:nomad_tools.nomad_watch:Single task exited with 0 exit status. Exit code is 0.
+```
+
+## port
 
 Prints out the ports allocated for a particular Nomad job or
 allocation. It is meant to mimic `docker port` command.
 
 ```
-$ nomad-port httpd
+$ nomad-tools port httpd
 192.168.0.5:31076
-$ nomad-port -l httpd
+$ nomad-tools port -l httpd
 192.168.0.5 31076 http httpd.listen[0] d409e855-bf13-a342-fe7a-6fb579d2de85
-$ nomad-port --alloc d409e855
+$ nomad-tools port --alloc d409e855
 192.168.0.5:31076
 ```
 
 Further argument allows to filter for port label.
 
 ```
-$ nomad-port httpd http
+$ nomad-tools port httpd http
 192.168.0.5:31076
 ```
 
-## nomad-vardir
+## vardir
 
 I was frustrated with how Nomad variables look like. It is really hard to
 incrementally modify Nomad variables. The API is at one go. You either update
@@ -118,11 +137,11 @@ Example execution of putting a `passwordfile.txt` into `nomad/jobs/nginx`
 Nomad variable:
 
 ```
-$ nomad-vardir -j nginx put ./passwordfile.txt 
+$ nomad-tools vardir -j nginx put ./passwordfile.txt 
 nomad_vardir: Putting var nomad/jobs/nginx@default with keys: passwordfile.txt
-$ nomad-vardir -j nginx cat passwordfile.txt 
+$ nomad-tools vardir -j nginx cat passwordfile.txt 
 secretpassword
-$ nomad-vardir -j nginx ls
+$ nomad-tools vardir -j nginx ls
 nomad_vardir: Listing Nomad variable at nomad/jobs/nginx@default
 key              size
 passwordfile.txt 15
@@ -131,20 +150,20 @@ passwordfile.txt 15
 You can then remove the `passwordfile.txt` key from the Nomad variable:
 
 ```
-$ nomad-vardir -j nginx rm passwordfile.txt 
+$ nomad-tools vardir -j nginx rm passwordfile.txt 
 nomad_vardir: Removing passwordfile.txt
 nomad_vardir: Removing empty var nomad/jobs/nginx@default
-$ nomad-vardir -j nginx ls
+$ nomad-tools vardir -j nginx ls
 nomad_vardir: Nomad variable not found at nomad/jobs/nginx@default
 ```
 
-## nomad-cp
+## cp
 
 This is a copy of the `docker cp` command. The syntax is meant to be the
 same with docker. The rules of copying a file vs directory are meant to be
 in-line with `docker cp` documentation.
 
-`nomad-cp` uses some special syntax for specifying from which allocation/task
+`nomad-tools cp` uses some special syntax for specifying from which allocation/task
 exactly do you want to copy by using colon `:`. The number of colons in the
 arguments determines the format. The colon can be escaped with slash `\` in
 the path if needed.
@@ -152,25 +171,28 @@ the path if needed.
 Both `SRC` and `DST` addresses can be specified as follows:
 
 ```
+# Search a task matching specific URL query:
+task://JOB[@NAMESPACE]/PATH[?group=GROUP][&alloc=ALLOC][&task=TASK][&hostname=HOSTNAME][&node=NODE]
+# or
 :ALLOCATION:PATH                  copy path from this allocation having one job
-:ALLOCATION:TASK:PATH             copy path from this task inside allocation
+:ALLOCATION::TASK:PATH            copy path from this task inside allocation
 :ALLOCATION:GROUP:TASK:PATH       like above, but filter by group name
 JOB:PATH                          copy path from one task inside specified job
-JOB:TASK:PATH                     copy path from the task inside this job
+JOB::TASK:PATH                    copy path from the task inside this job
 JOB:GROUP:TASK:PATH               like above, but filter also by group name
 PATH                              copy local path
 -                                 copy stdin or stdout TAR stream
 ```
 
-`nomad-cp` depends on `sh` and `tar` command line utility to be available
+`cp` depends on `sh` and `tar` command line utility to be available
 inside the allocation it is coping to/from. It has to be available there.
 
 Example:
 
 ```
-$ nomad-cp -v nginx:/etc/nginx/nginx.conf ./nginx.conf
+$ nomad-tools cp -v nginx:/etc/nginx/nginx.conf ./nginx.conf
 INFO nomad_cp.py:copy_mode:487: File :d409e855-bf13-a342-fe7a-6fb579d2de85:listen:/etc/nginx/nginx.conf -> ./nginx.conf
-$ nomad-cp -v alpine:/etc/. ./etc/
+$ nomad-tools cp -v alpine:/etc/. ./etc/
 INFO nomad_cp.py:copy_mode:512: New mkdir :d409e855-bf13-a342-fe7a-6fb579d2de85:listen:/etc/. -> /home/kamil/tmp/etc2/
 ```
 
@@ -180,7 +202,7 @@ calls to execute a `tar` pipe to stream the data from or to the allocation
 context to or from the local host using stdout and stdin forwarded by
 `nomad exec`.
 
-## nomad-gitlab-runner
+## gitlab-runner
 
 An implementation of custom Gitlab executor driver that runs Gitlab CI/CD jobs
 using Nomad.
@@ -190,32 +212,32 @@ This program does _not_ run the `gitlab-runner` itself in Nomad. Rather, the
 schedule Nomad jobs to execute using the script as an executor. These jobs will
 execute the CI/CD from Gitlab inside Nomad cluster.
 
-More on it can be read on [github wiki](https://github.com/Kamilcuk/nomad-tools/wiki/nomad%E2%80%90gitlab%E2%80%90runner).
+More on it can be read on [github wiki](https://github.com/Kamilcuk/nomad-tools/wiki/gitlab%E2%80%90runner).
 
 ## nomad-dockers
 
 Lists docker images referenced in Nomad job file or a running Nomad job.
 
 ```
-$ nomad-dockers ./httpd.nomad.hcl
+$ nomad-tools dockers ./httpd.nomad.hcl
 busybox:stable
-$ nomad-dockers --job httpd
+$ nomad-tools dockers --job httpd
 busybox:stable
 ```
 
-## nomad-downloadrelease
+## downloadrelease
 
 Program for downloading specific Nomad release binary from their release page.
 I use it for testing and checking new Nomad versions.
 
 ```
-$ nomad-downloadrelease nomad
+$ nomad-tools downloadrelease nomad
 INFO:nomad_tools.nomad_downloadrelease:Downloading https://releases.hashicorp.com/nomad/1.7.3/nomad_1.7.3_linux_amd64.zip to nomad
 INFO:nomad_tools.nomad_downloadrelease:https://releases.hashicorp.com/nomad/1.7.3/nomad_1.7.3_linux_amd64.zip -> -rwxr-xr-x 105.7MB nomad
-$ nomad-downloadrelease consul
+$ nomad-tools downloadrelease consul
 INFO:nomad_tools.nomad_downloadrelease:Downloading https://releases.hashicorp.com/consul/1.9.9/consul_1.9.9_linux_amd64.zip to consul
 INFO:nomad_tools.nomad_downloadrelease:https://releases.hashicorp.com/consul/1.9.9/consul_1.9.9_linux_amd64.zip -> -rwxr-xr-x 105.8MB consul
-$ nomad-downloadrelease -p 1.6.3 nomad ./nomad1.6.3
+$ nomad-tools downloadrelease -p 1.6.3 nomad ./nomad1.6.3
 INFO:nomad_tools.nomad_downloadrelease:Downloading https://releases.hashicorp.com/nomad/1.6.3/nomad_1.6.3_linux_amd64.zip to nomad1.6.3
 INFO:nomad_tools.nomad_downloadrelease:https://releases.hashicorp.com/nomad/1.6.3/nomad_1.6.3_linux_amd64.zip -> -rwxr-xr-x 101.8MB nomad1.6.3
 
@@ -228,6 +250,12 @@ used, however it is not stable at all and is an implementation detail.
 
 Internally, `nomad_tools.nomadlib` is a Python class definitions which
 represents models for Nomad API data documentation.
+
+# History
+
+This module once installed bunch of separate tools, like `nomad-watch` or
+`nomad-gitlab-runner`. That became unmaintainable. It is one `nomad-tools`
+executable with several sub-commands.
 
 # Contributing
 

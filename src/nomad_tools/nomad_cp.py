@@ -545,35 +545,6 @@ class NomadOrHostMyPath(click.ParamType):
         return []
 
 
-# Fix bash splitting completion on colon.
-# Use __reassemble_comp_words_by_ref from bash-completion.
-# Pass COMP_POINT as environment variable.
-BashComplete.source_template = """\
-    %(complete_func)s() {
-        if [[ $(type -t __reassemble_comp_words_by_ref) != function ]]; then
-            return -1
-        fi
-        local cword words=()
-        __reassemble_comp_words_by_ref "=:" words cword
-        local IFS=$'\\n'
-        response=$(env COMP_POINT=$COMP_POINT COMP_WORDS="${words[*]}" COMP_CWORD="$cword" %(complete_var)s=bash_complete $1)
-        for completion in $response; do
-            IFS=',' read type value <<< "$completion"
-            case $type in
-            dir) COMPREPLY=(); compopt -o dirnames; ;;
-            file) COMPREPLY=(); compopt -o default; ;;
-            plain) COMPREPLY+=("$value"); ;;
-            nospace) compopt -o nospace; ;;
-            esac
-        done
-    }
-    %(complete_func)s_setup() {
-        complete -o nosort -F %(complete_func)s %(prog_name)s
-    }
-    %(complete_func)s_setup;
-"""
-
-
 ###############################################################################
 
 
@@ -748,8 +719,8 @@ To use colon in any part of the path, escape it with backslash.
 
 \b
 Examples:
-    nomad-cp -n :9190d781:/tmp ~/tmp
-    nomad-cp -vn -Nservices promtail:/. ~/tmp
+    nomad-tools cp -n :9190d781:/tmp ~/tmp
+    nomad-tools cp -vn -Nservices promtail:/. ~/tmp
 """,
     epilog="""
 Written by Kamil Cukrowski 2023. Licensed under GNU GPL version or later.
