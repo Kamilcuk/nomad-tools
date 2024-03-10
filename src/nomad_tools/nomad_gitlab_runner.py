@@ -142,7 +142,7 @@ class ConfigDocker(ConfigCustom):
     """The image to run jobs with."""
     volumes: List[str] = []
     """https://developer.hashicorp.com/nomad/docs/drivers/docker#volumes
-    The default mounts /certs to ../alloc to have it available for docker dind sevice just like in gitlab-runner."""
+    The default mounts ${NOMAD_ALLOD_DIR} to /certs to have it available for docker dind sevice just like in gitlab-runner."""
     wait_for_services_timeout: int = 30
     """How long to wait for Docker services. Set to -1 to disable. Default is 30."""
     privileged: bool = False
@@ -152,15 +152,15 @@ class ConfigDocker(ConfigCustom):
     Use with the Docker executor. Insecure."""
     force_pull: bool = True
     """https://developer.hashicorp.com/nomad/docs/drivers/docker#force_pull"""
-    waiter_image: str = "docker:24.0.6-cli"
+    waiter_image: str = "docker:25.0.3-cli"
     """A image with POSIX sh and docker that waits for services to have open ports"""
-    helper_image: str = "gitlab/gitlab-runner:alpine-v16.3.1"
+    helper_image: str = "gitlab/gitlab-runner:alpine-v16.9.1"
     """(Advanced) The default helper image used to clone repositories and upload artifacts."""
     auto_fix_docker_dind: bool = True
     """
     If there is a service aliased "docker" and DOCKER_TLS_CERTDIR is set to exactly "/certs"
     and DOCKER_CERT_PATH, DOCKER_HOST nor DOCKER_TLS_VERIFY are not set, then:
-    automatically mount volume "../alloc:/certs"
+    automatically mount volume "${NOMAD_ALLOC_DIR}:/certs"
     and add following environment variables:
         DOCKER_CERT_PATH="/certs/client"
         DOCKER_HOST=tcp://docker:2376
@@ -251,7 +251,6 @@ class ConfigDocker(ConfigCustom):
                     "image": s.name,
                     **({"entrypoint": s.entrypoint} if s.entrypoint else {}),
                     **({"args": s.command} if s.command else {}),
-                    "network_aliases": [s.alias],
                     "privileged": (
                         self.services_privileged
                         if self.services_privileged is not None
@@ -319,14 +318,15 @@ class ConfigDocker(ConfigCustom):
                         }
                     )
             # Volumes handled below.
-            self.volumes += ["../alloc:/certs"]
+            self.volumes += ["${NOMAD_ALLOC_DIR}:/certs"]
         for task in taskgroup.Tasks:
             taskconfig = task["Config"]
             # Apply cpuset_cpus
             if config.cpuset_cpus:
                 taskconfig["cpuset_cpus"] = config.cpuset_cpus
             # Apply volumes.
-            taskconfig.setdefault("volumes", []).extend(self.volumes)
+            if self.volumes:
+                taskconfig.setdefault("volumes", []).extend(self.volumes)
 
     def get_task_for_stage(self, stage: str) -> str:
         return (
@@ -549,7 +549,7 @@ def run_nomad_watch(cmd: str):
 
 def purge_previous_nomad_job(jobname: str):
     try:
-        jobdata = mynomad.get("job/{jobname}")
+        jobdata = mynomad.get(f"job/{jobname}")
     except nomadlib.JobNotFound:
         return
     job = Job(jobdata["Job"])
@@ -755,10 +755,11 @@ def mode_prepare():
     je = Jobenv()
     purge_previous_nomad_job(je.jobname)
     jobjson = json.dumps({"Job": je.job.asdict()})
+    log.debug(f"JOBJSON: {jobjson}")
     with tempfile.NamedTemporaryFile("w+") as f:
         f.write(jobjson)
         f.flush()
-        run_nomad_watch(f"start -json {f.name}")
+        run_nomad_watch(f"--json start {f.name}")
 
 
 @cli.command("run", help="https://docs.gitlab.com/runner/executors/custom.html#run")
