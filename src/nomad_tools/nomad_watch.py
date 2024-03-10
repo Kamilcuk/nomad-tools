@@ -41,6 +41,7 @@ from click.shell_completion import CompletionItem
 from typing_extensions import override
 
 from . import colors, exit_on_thread_exception, flagdebug, nomaddbjob, nomadlib
+from .common import json_loads
 from .common_base import andjoin, cached_property, composed, eprint
 from .common_click import alias_option, common_options, complete_set_namespace
 from .common_nomad import (
@@ -858,7 +859,7 @@ def __nomad_job_run(args: List[str]) -> str:
     cmd: List[str] = "nomad job run -detach -verbose".split() + args
     log.info(f"+ {' '.join(shlex.quote(x) for x in cmd)}")
     try:
-        output = subprocess.check_output(cmd, text=True)
+        output = subprocess.check_output(cmd, text=True, stdin=sys.stdin)
     except subprocess.CalledProcessError as e:
         # nomad will print its error, we can just exit
         exit(e.returncode)
@@ -883,7 +884,32 @@ def __nomad_job_run(args: List[str]) -> str:
 
 def nomad_start_job(opts: List[str]) -> nomadlib.Eval:
     """Start a nomad job using nomad job run parameters. Return evluation from running the job"""
-    evalid = __nomad_job_run(opts)
+    assert opts
+    if len(opts) == 1 or (len(opts) == 2 and opts[0] == "-json"):
+        # If the input file is a json and we have no arguments, we can use the API ourselves.
+        file = opts[-1]
+        stream = contextlib.closing(sys.stdin) if file == "-" else open(file)
+        with stream as f:
+            data: str = f.read()
+        # Try loading it as json, if it fails, try converting from HCL.
+        try:
+            job: dict = json_loads(data)
+            format: str = "json"
+        except json.JSONDecodeError:
+            if ARGS.json:
+                raise
+            job: dict = mynomad.jobhcl2json(data)
+            format: str = "hcl2"
+        resp = mynomad.start_job(job, nomadlib.JobSubmission(data, format))
+        evalid = resp["EvalID"]
+        warnings = resp.get("Warnings")
+        if warnings:
+            log.warning(f"{warnings}")
+    else:
+        # Otherwise, call nomad executable to schedule the job.
+        if ARGS.json:
+            opts = ["-json"] + opts
+        evalid = __nomad_job_run(opts)
     evaluation = nomadlib.Eval(mynomad.get(f"evaluation/{evalid}"))
     mynomad.namespace = evaluation.Namespace
     return evaluation
@@ -1583,6 +1609,11 @@ Examples:
         Job is successfull if all job summary metrics are zero except nonzero complete metric.
         Relevant in job, run, stop and stopped modes.
         """,
+)
+@click.option(
+    "--json",
+    is_flag=True,
+    help="The job file is in JSON format",
 )
 @click.option(
     "-n",

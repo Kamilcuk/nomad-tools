@@ -127,6 +127,14 @@ class VariableConn(_Conn):
         )
 
 
+@dataclasses.dataclass
+class JobSubmission:
+    Source: str
+    Format: str
+    VariableFlags: Dict[str, str] = dataclasses.field(default_factory=dict)
+    Variables: str = ""
+
+
 class NomadConn(Requestor):
     """Represents connection to Nomad"""
 
@@ -210,8 +218,11 @@ class NomadConn(Requestor):
     def jobhcl2json(self, hcl: str):
         return self.post("jobs/parse", json={"JobHCL": hcl})
 
-    def start_job(self, jobjson: dict, submission: Optional[str] = None):
-        return self.post("jobs", json={"Job": jobjson, "Submission": submission})
+    def start_job(self, jobjson: dict, submission: Optional[JobSubmission] = None):
+        data = {"Job": jobjson}
+        if submission:
+            data["Submission"] = dataclasses.asdict(submission)
+        return self.post("jobs", json=data)
 
     def stop_job(self, jobid: str, purge: bool = False):
         assert self.namespace
