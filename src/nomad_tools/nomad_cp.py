@@ -232,7 +232,7 @@ class ArgPath:
         """\
         :ALLOCATION[:TASK]:[PATH]
         JOB[:[GROUP][:TASK]]:[PATH]
-        task://JOB[@NAMESPACE]/PATH[?group=GROUP][alloc=ALLOC][&task=TASK][&hostname=HOSTNAME][&node=NODE]
+        task://JOB[@NAMESPACE]/PATH[?group=GROUP][&alloc=ALLOC][&task=TASK][&hostname=HOSTNAME][&node=NODE]
         PATH
         -
         """
