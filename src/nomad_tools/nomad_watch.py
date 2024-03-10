@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
 import datetime
 import enum
 import inspect
@@ -1166,7 +1167,18 @@ class _NomadJobWatcherDetail(ABC):
         )
 
 
-class NomadJobWatcher(_NomadJobWatcherDetail):
+class NotifyEvent(MyStrEnum):
+    started = enum.auto()
+    purging = enum.auto()
+    stopping = enum.auto()
+    exit = enum.auto()
+
+    @classmethod
+    def txt(cls) -> str:
+        return andjoin((repr(x + "") for x in cls), fin=" or ")
+
+
+class _NomadJobWatcherEvents(_NomadJobWatcherDetail):
     @override
     def __init__(self, jobid: Optional[str], eval: Optional[nomadlib.Eval] = None):
         super().__init__(jobid, eval)
@@ -1174,7 +1186,156 @@ class NomadJobWatcher(_NomadJobWatcherDetail):
         """Return true if we sent a request to purge the job"""
         self.stopped_eval: Optional[str] = None
         """Return true if we sent a request to stop the job"""
+        self.job_started: bool = False
+        """If set to True, means that the job has started all main tasks"""
 
+    def __notifyuser(self, event: NotifyEvent):
+        cmd: List[str] = [self.jobid, event]
+        if ARGS.notifyexe:
+            cmd = [ARGS.notifyexe] + cmd
+            log.debug(f"notifyexe {cmd}")
+            subprocess.check_call(cmd)
+        if ARGS.notifyfd is not None:
+            line = json.dumps(cmd)
+            assert line.count("\n") == 0
+            log.debug(f"notifyfd {line}")
+            try:
+                os.write(ARGS.notifyfd, f"{line}\n".encode())
+            except BrokenPipeError:
+                try:
+                    os.close(ARGS.notifyfd)
+                except Exception:
+                    pass
+                ARGS.notifyfd = None
+
+    @override
+    def loop(self) -> Iterator[None]:
+        try:
+            for i in super().loop():
+                if not self.job_started:
+                    if self.__job_has_finished_starting():
+                        self.__notifyuser(NotifyEvent.started)
+                        self.job_started = True
+                yield i
+        finally:
+            self.__notifyuser(NotifyEvent.exit)
+
+    def stop_job(self, purge: bool = False):
+        assert DB.initialized.is_set()
+        if purge:
+            if self.purged_eval:
+                return
+            self.__notifyuser(NotifyEvent.purging)
+            log.info(f"Purging job {self.jobid}")
+        else:
+            if self.stopped_eval:
+                return
+            log.info(f"Stopping job {self.jobid}")
+            self.__notifyuser(NotifyEvent.stopping)
+        evalid = mynomad.stop_job(self.jobid, purge)["EvalID"]
+        self.stopped_eval = evalid
+        if purge:
+            self.purged_eval = evalid
+
+    @staticmethod
+    def __nomad_job_group_main_tasks(group: nomadlib.JobTaskGroup):
+        """Get a set of names of Nomad job group main tasks"""
+        # Main tasks are tasks that:
+        # - do not have lifecycle
+        # - have lifecycle prestart with sidecar = true
+        # - have lifecycle poststart
+        # All these tasks have to be started.
+        maintasks = set(
+            t.Name
+            for t in group.Tasks
+            if "Lifecycle" not in t
+            or t.Lifecycle is None
+            or (
+                t.Lifecycle.Hook == nomadlib.LifecycleHook.prestart
+                and t.Lifecycle.get_sidecar() is True
+            )
+            or t.Lifecycle.Hook == nomadlib.LifecycleHook.poststart
+        )
+        assert len(maintasks) > 0, f"Internal error when getting main tasks of {group}"
+        return maintasks
+
+    def __job_has_finished_starting(self) -> bool:
+        """
+        Return True if the job is not starting anymore.
+        self.started will be set to True, if the job was successfully started.
+        """
+        # log.debug(f"has_active_deployments={self.has_active_deployments()} has_active_evaluations={self.has_active_evaluations()} allocations={len(DB.allocations)}")  # noqa
+        if (
+            not self.job
+            or self.has_active_deployments()
+            or self.has_active_evaluations()
+        ):
+            # The job is still doing something. Wait for it.
+            return False
+        allocations = DB.allocations.values()
+        if (
+            not allocations
+            or any(alloc.is_pending() for alloc in allocations)
+            or any(alloc.TaskStates is None for alloc in allocations)
+        ):
+            # There are still allocations which Tasks have not started yet. Wait for them.
+            return False
+        #
+        groupmsgs: List[str] = []
+        for group in self.job.TaskGroups:
+            groupallocs: List[nomadlib.Alloc] = [
+                alloc
+                for alloc in allocations
+                if alloc.TaskGroup == group.Name
+                and DB.get_allocation_jobmodifyindex(alloc, -1)
+                >= self.minjobmodifyindex
+                and DB.get_allocation_jobversion(alloc, -1) == self.job.Version
+            ]
+            # There have to be at exactly group.Count allocations of this group for it to be deployed.
+            # The allocation not necessarily have to be running - they may have finished.
+            if len(groupallocs) != group.Count:
+                # This group has no active evaluation and deployments (checked above).
+                log.debug(
+                    f"groupallocs={[x.ID for x in groupallocs]}"
+                    f" {[DB.get_allocation_jobmodifyindex(alloc, -1) for alloc in groupallocs]}"
+                    f" {[DB.get_allocation_jobversion(alloc, -1) for alloc in groupallocs]}"
+                )
+                log.error(
+                    f"Job {self.job.description()} group {group.Name!r} started"
+                    f" {len(groupallocs)} allocation out of {group.Count}."
+                )
+                return True
+            maintasks: Set[str] = self.__nomad_job_group_main_tasks(group)
+            for alloc in groupallocs:
+                # List of started tasks.
+                startedtasks: Set[str] = set(
+                    name
+                    for name, taskstate in alloc.get_taskstates().items()
+                    if taskstate.was_started()
+                )
+                notrunningmaintasks = maintasks.difference(startedtasks)
+                if notrunningmaintasks:
+                    # There are main tasks that are not running.
+                    if alloc.TaskStates is None or alloc.is_pending_or_running():
+                        # Wait for them.
+                        return False
+                    else:
+                        # The allocation has finished - the tasks will never start.
+                        log.error(
+                            f"Job {self.job.description()} failed to start group"
+                            f" {group.Name!r} tasks {' '.join(notrunningmaintasks)}"
+                        )
+                        return True
+            groupallocsidsstr = andjoin(alloc.ID[:6] for alloc in groupallocs)
+            groupmsgs.append(
+                f"allocations {groupallocsidsstr} running group {group.Name!r} with {len(maintasks)} main tasks"
+            )
+        log.info(f"Job {self.job.description()} started " + andjoin(groupmsgs) + ".")
+        self.started = True
+        return True
+
+
+class NomadJobWatcher(_NomadJobWatcherEvents):
     @abstractmethod
     def _get_exitcode_cb(self) -> int:
         raise NotImplementedError()
@@ -1182,21 +1343,6 @@ class NomadJobWatcher(_NomadJobWatcherDetail):
     @abstractmethod
     def _loop_end_cb(self):
         raise NotImplementedError()
-
-    def stop_job(self, purge: bool = False):
-        assert DB.initialized.is_set()
-        if purge:
-            if self.purged_eval:
-                return
-            log.info(f"Purging job {self.jobid}")
-        else:
-            if self.stopped_eval:
-                return
-            log.info(f"Stopping job {self.jobid}")
-        evalid = mynomad.stop_job(self.jobid, purge)["EvalID"]
-        self.stopped_eval = evalid
-        if purge:
-            self.purged_eval = evalid
 
     def stop_threads(self):
         log.debug(f"stopping {self.__class__.__name__}")
@@ -1322,7 +1468,7 @@ class NomadJobWatcherUntilStarted(NomadJobWatcher):
 
     @override
     def _loop_end_cb(self) -> bool:
-        if self.job_has_finished_starting():
+        if self.job_started:
             return True
         if self.job_is_finished():
             log.info(self.job_dead_message())
@@ -1334,103 +1480,6 @@ class NomadJobWatcherUntilStarted(NomadJobWatcher):
         exitcode = ExitCode.success if self.started else ExitCode.failed
         log.debug(f"started={self.started} exitcode={exitcode}")
         return exitcode
-
-    @staticmethod
-    def nomad_job_group_main_tasks(group: nomadlib.JobTaskGroup):
-        """Get a set of names of Nomad job group main tasks"""
-        # Main tasks are tasks that:
-        # - do not have lifecycle
-        # - have lifecycle prestart with sidecar = true
-        # - have lifecycle poststart
-        # All these tasks have to be started.
-        maintasks = set(
-            t.Name
-            for t in group.Tasks
-            if "Lifecycle" not in t
-            or t.Lifecycle is None
-            or (
-                t.Lifecycle.Hook == nomadlib.LifecycleHook.prestart
-                and t.Lifecycle.get_sidecar() is True
-            )
-            or t.Lifecycle.Hook == nomadlib.LifecycleHook.poststart
-        )
-        assert len(maintasks) > 0, f"Internal error when getting main tasks of {group}"
-        return maintasks
-
-    def job_has_finished_starting(self) -> bool:
-        """
-        Return True if the job is not starting anymore.
-        self.started will be set to True, if the job was successfully started.
-        """
-        # log.debug(f"has_active_deployments={self.has_active_deployments()} has_active_evaluations={self.has_active_evaluations()} allocations={len(DB.allocations)}")  # noqa
-        if (
-            not self.job
-            or self.has_active_deployments()
-            or self.has_active_evaluations()
-        ):
-            # The job is still doing something. Wait for it.
-            return False
-        allocations = DB.allocations.values()
-        if (
-            not allocations
-            or any(alloc.is_pending() for alloc in allocations)
-            or any(alloc.TaskStates is None for alloc in allocations)
-        ):
-            # There are still allocations which Tasks have not started yet. Wait for them.
-            return False
-        #
-        groupmsgs: List[str] = []
-        for group in self.job.TaskGroups:
-            groupallocs: List[nomadlib.Alloc] = [
-                alloc
-                for alloc in allocations
-                if alloc.TaskGroup == group.Name
-                and DB.get_allocation_jobmodifyindex(alloc, -1)
-                >= self.minjobmodifyindex
-                and DB.get_allocation_jobversion(alloc, -1) == self.job.Version
-            ]
-            # There have to be at exactly group.Count allocations of this group for it to be deployed.
-            # The allocation not necessarily have to be running - they may have finished.
-            if len(groupallocs) != group.Count:
-                # This group has no active evaluation and deployments (checked above).
-                log.debug(
-                    f"groupallocs={[x.ID for x in groupallocs]}"
-                    f" {[DB.get_allocation_jobmodifyindex(alloc, -1) for alloc in groupallocs]}"
-                    f" {[DB.get_allocation_jobversion(alloc, -1) for alloc in groupallocs]}"
-                )
-                log.error(
-                    f"Job {self.job.description()} group {group.Name!r} started"
-                    f" {len(groupallocs)} allocation out of {group.Count}."
-                )
-                return True
-            maintasks: Set[str] = self.nomad_job_group_main_tasks(group)
-            for alloc in groupallocs:
-                # List of started tasks.
-                startedtasks: Set[str] = set(
-                    name
-                    for name, taskstate in alloc.get_taskstates().items()
-                    if taskstate.was_started()
-                )
-                notrunningmaintasks = maintasks.difference(startedtasks)
-                if notrunningmaintasks:
-                    # There are main tasks that are not running.
-                    if alloc.TaskStates is None or alloc.is_pending_or_running():
-                        # Wait for them.
-                        return False
-                    else:
-                        # The allocation has finished - the tasks will never start.
-                        log.error(
-                            f"Job {self.job.description()} failed to start group"
-                            f" {group.Name!r} tasks {' '.join(notrunningmaintasks)}"
-                        )
-                        return True
-            groupallocsidsstr = andjoin(alloc.ID[:6] for alloc in groupallocs)
-            groupmsgs.append(
-                f"allocations {groupallocsidsstr} running group {group.Name!r} with {len(maintasks)} main tasks"
-            )
-        log.info(f"Job {self.job.description()} started " + andjoin(groupmsgs) + ".")
-        self.started = True
-        return True
 
 
 ###############################################################################
@@ -1685,6 +1734,21 @@ Examples:
     "no_preserve_status",
     is_flag=True,
     help="Do not preserve tasks exit statuses.",
+)
+@click.option(
+    "--notifyexe",
+    help=f"""
+        When state changes execute this command with two arguments:
+        the watched jobid and one of {NotifyEvent.txt()}.
+        """,
+)
+@click.option(
+    "--notifyfd",
+    type=int,
+    help=f"""
+        When state changes write to this file descriptor a JSON array with two elements:
+        the watched jobid and one of {NotifyEvent.txt()}.
+        """,
 )
 @click_log_options()
 @common_options()
