@@ -45,8 +45,9 @@ def namespace_option():
         "--namespace",
         help="Set NOMAD_NAMESPACE environment variable.",
         envvar=NOMAD_NAMESPACE,
+        expose_value=False,
         show_default=True,
-        default="default",
+        default=os.environ.get(NOMAD_NAMESPACE, "default"),
         shell_complete=completor(
             lambda: (x["Name"] for x in mynomad.get("namespaces"))
         ),
