@@ -44,7 +44,7 @@ Download specific binary from releases.hashicorp
 Examples:
     %(prog) -p 1.7.2 nomad ./bin/nomad
     %(prog) consul ./bin/consul
-"""
+""",
 )
 @click.option("--verbose", is_flag=True)
 @click.option(
