@@ -1,7 +1,7 @@
 from textwrap import dedent
 
 from nomad_tools import nomad_gitlab_runner
-from tests.testlib import NamedTemporaryFileContent, run
+from tests.testlib import NamedTemporaryFileContent, run_nomadt
 
 
 def test_nomad_gitlab_runner_showconfig():
@@ -10,9 +10,7 @@ default:
     mode: docker
 """
     with NamedTemporaryFileContent(dedent(config)) as configfile:
-        run(
-            f"python3 -m nomad_tools.nomad_gitlab_runner -vvc {configfile} showconfig",
-        )
+        run_nomadt(f"gitlab-runner -vvc {configfile} showconfig")
 
 
 def test_nomad_gitlab_runner_templater():
