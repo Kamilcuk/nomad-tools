@@ -4,3 +4,5 @@ PyYAML==6.0.1
 requests==2.31.0
 typing_extensions==4.7.1
 websocket-client==1.6.1
+clickdc==0.0.4
+clickforward==0.0.1
