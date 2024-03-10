@@ -1,6 +1,9 @@
 from typing import Any, Dict, List, Optional
 
+from nomad_tools.nomadlib import datadict
 from nomad_tools.nomadlib.datadict import DataDict
+
+datadict.strict = True
 
 
 class Simple(DataDict):

@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import copy
 import enum
-import traceback
+import logging
 from typing import Any, ChainMap, Type, Union, get_type_hints
 
 from typing_extensions import get_args, get_origin
+
+log = logging.getLogger(__name__)
+strict: bool = False
+
 
 def all_annotations(cls) -> ChainMap[str, Type]:
     """
@@ -50,10 +54,11 @@ def _init_value(classname: str, dstname: str, dsttype: Any, srcval: Any):
             return dsttype(srcval)
         elif issubclass(dsttype, enum.Enum):
             return dsttype(srcval)
-        return srcval
     except Exception:
-        print(f"DATADICT:ERROR: {msg()}")
-        traceback.print_exc()
+        log.exception(f"DATADICT:ERROR: {msg()}")
+        if strict:
+            raise
+    return srcval
 
 
 def _asdict_value(fname: str, val: Any):
