@@ -15,6 +15,9 @@ client {
     ignore_system_jobs = false
   }
 }
+limits {
+  http_max_conns_per_client = 10000
+}
 plugin "raw_exec" {
   config {
     enabled = true
