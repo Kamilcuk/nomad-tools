@@ -31,6 +31,7 @@ def click_debug_option(envname: str):
     return click.option(
         "--debug",
         hidden=True,
+        expose_value=False,
         default=lambda: debug.add(os.environ.get(envname, "")),
         callback=lambda _a, _b, value: debug.add(value) if value else debug,
         help="Comma separated list of debug flags",
