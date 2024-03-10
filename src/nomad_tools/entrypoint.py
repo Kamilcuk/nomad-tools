@@ -3,6 +3,7 @@ import clickforward
 from click.shell_completion import BashComplete
 
 from . import (
+    entry_go,
     nomad_cp,
     nomad_dockers,
     nomad_downloadrelease,
@@ -59,6 +60,7 @@ def cli():
     pass
 
 
+cli.add_command(entry_go.cli)
 cli.add_command(nomad_cp.cli)
 cli.add_command(nomad_dockers.cli)
 cli.add_command(nomad_downloadrelease.cli)
