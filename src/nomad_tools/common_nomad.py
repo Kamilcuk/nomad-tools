@@ -5,7 +5,7 @@ import click
 
 from . import nomadlib
 from .common_click import completor
-from .nomadlib.connection import NOMAD_NAMESPACE
+from .nomadlib.connection import NOMAD_NAMESPACE, JobNotFound
 from .nomadlib.types import JobsJob
 
 mynomad = nomadlib.NomadConn()
@@ -22,9 +22,9 @@ class NoJobFound(Exception):
 
 def nomad_find_job(id: str, namespace: Optional[str] = None):
     """Set nomad namespace to the given id"""
-    namespace = namespace or os.environ.get(NOMAD_NAMESPACE, "*")
+    namespace = namespace or os.environ.get(NOMAD_NAMESPACE)
+    mynomad.namespace = namespace or "*"
     if namespace == "*":
-        mynomad.namespace = namespace
         jobs = [JobsJob(x) for x in mynomad.get("jobs", params={"prefix": id})]
         jobs = [job for job in jobs if job.ID == id]
         if not jobs:
@@ -36,6 +36,11 @@ def nomad_find_job(id: str, namespace: Optional[str] = None):
             found.Namespace
         ), "Internal error: Nomad returned NULL for found job namespace"
         os.environ[NOMAD_NAMESPACE] = mynomad.namespace = found.Namespace
+    else:
+        try:
+            mynomad.get(f"job/{id}")
+        except JobNotFound:
+            raise NoJobFound(f"Job named {id!r} not found in {namespace} namespace")
     return id
 
 

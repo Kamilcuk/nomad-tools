@@ -1882,7 +1882,13 @@ def mode_started(jobid: str):
 )
 @cli_jobid
 def mode_stop(jobid: str):
-    jobid = nomad_find_job(jobid)
+    try:
+        jobid = nomad_find_job(jobid)
+    except NoJobFound:
+        if ARGS.no_preserve_status and (ARGS.purge or ARGS.purge_successful):
+            return
+        else:
+            raise
     NomadJobWatcherUntilFinished(jobid).run_and_exit(True)
 
 
