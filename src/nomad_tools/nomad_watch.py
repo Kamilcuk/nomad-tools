@@ -37,14 +37,14 @@ from typing import (
 )
 
 import click
+import clickdc
 import requests
 from click.shell_completion import CompletionItem
 from typing_extensions import override
 
 from . import colors, exit_on_thread_exception, flagdebug, nomaddbjob, nomadlib
-from .common import json_loads
 from .common_base import andjoin, cached_property, composed, eprint
-from .common_click import alias_option, common_options, complete_set_namespace
+from .common_click import common_options, complete_set_namespace
 from .common_nomad import (
     NoJobFound,
     complete_job,
@@ -242,70 +242,60 @@ class LOGFORMAT:
         return eval(f"f{fmt!r}")
 
 
-def click_log_options():
-    """All logging options"""
-    return composed(
-        click.option(
-            "-T",
-            "--log-time",
-            is_flag=True,
-            help="""
-                Additionally add timestamp to the logs.
-                The timestamp of stdout and stderr streams is when the log was received,
-                as Nomad does not store timestamp of task logs.
-                """,
+@dataclass
+class LogOptions:
+    log_time: bool = clickdc.option(
+        "-T",
+        is_flag=True,
+        help="""
+            Additionally add timestamp to the logs.
+            The timestamp of stdout and stderr streams is when the log was received,
+            as Nomad does not store timestamp of task logs.
+            """,
+    )
+    log_time_format: str = clickdc.option(
+        default="%Y-%m-%dT%H:%M:%S%z",
+        show_default=True,
+        help="Format time with specific format. Passed to python datetime.strftime.",
+    )
+    log_time_hour: Any = clickdc.alias_option(
+        "-H",
+        aliased=dict(
+            log_time_format="%H:%M:%S",
+            log_time=True,
         ),
-        click.option(
-            "--log-time-format",
-            default="%Y-%m-%dT%H:%M:%S%z",
-            show_default=True,
-            help="Format time with specific format. Passed to python datetime.strftime.",
+    )
+    log_time_us: Any = clickdc.alias_option(
+        "-U",
+        aliased=dict(
+            log_time_format="%H:%M:%S.%f",
+            log_time=True,
         ),
-        alias_option(
-            "-H",
-            "--log-time-hour",
-            aliased=dict(
-                log_time_format="%H:%M:%S",
-                log_time=True,
-            ),
-        ),
-        click.option(
-            "--log-format",
-            default=LOGFORMAT.DEFAULT,
-            show_default=True,
-            help="The format to use when printing job logs",
-        ),
-        click.option(
-            "--log-id-len",
-            default=6,
-            help="The length of id to log. UUIDv4 has 36 characters.",
-        ),
-        alias_option(
-            "-l",
-            "--log-id-long",
-            aliased=dict(log_id_len=36),
-        ),
-        alias_option(
-            "-1",
-            "--log-only-task",
-            aliased=dict(log_format=LOGFORMAT.ONE),
-        ),
-        alias_option(
-            "-0",
-            "--log-none",
-            aliased=dict(log_format=LOGFORMAT.ZERO),
-        ),
-        click.option(
-            "-o",
-            "--out",
-            type=CommaList("all alloc stdout stderr eval deploy none".split()),
-            default=["all"],
-            show_default=True,
-            help="""
-                Comma separated list of streams of messages to print:
-                deployment, evaluation, allocation, stdout and stderr logs of tasks.
-                """,
-        ),
+    )
+    log_format: str = clickdc.option(
+        default=LOGFORMAT.DEFAULT,
+        show_default=True,
+        help="The format to use when printing job logs",
+    )
+    log_id_len: int = clickdc.option(
+        default=6,
+        type=int,
+        help="The length of id to log. UUIDv4 has 36 characters.",
+    )
+    log_id_long: Any = clickdc.alias_option("-l", aliased=dict(log_id_len=36))
+    log_only_task: Any = clickdc.alias_option(
+        "-1", aliased=dict(log_format=LOGFORMAT.ONE)
+    )
+    log_none: Any = clickdc.alias_option("-0", aliased=dict(log_format=LOGFORMAT.ZERO))
+    out: List[str] = clickdc.option(
+        "-o",
+        type=CommaList("all alloc stdout stderr eval deploy none".split()),
+        default=["all"],
+        show_default=True,
+        help="""
+            Comma separated list of streams of messages to print:
+            deployment, evaluation, allocation, stdout and stderr logs of tasks.
+            """,
     )
 
 
@@ -894,10 +884,11 @@ def nomad_start_job(opts: List[str]) -> nomadlib.Eval:
             data: str = f.read()
         # Try loading it as json, if it fails, try converting from HCL.
         try:
-            job: dict = json_loads(data)
+            job: dict = json.loads(data)
             format: str = "json"
         except json.JSONDecodeError:
             if ARGS.json:
+                log.exception(data)
                 raise
             job: dict = mynomad.jobhcl2json(data)
             format: str = "hcl2"
@@ -1596,6 +1587,104 @@ class JobPath:
         return [x for x in complete if x.startswith(incomplete)]
 
 
+@dataclass
+class Args(LogOptions):
+    all: bool = clickdc.option(
+        "-a",
+        is_flag=True,
+        help="Print logs from all allocations, including previous versions of the job.",
+    )
+    verbose: int = clickdc.option("-v", count=True, help="Be more verbose.")
+    quiet: int = clickdc.option("-q", count=True, help="Be less verbose.")
+    attach: bool = clickdc.option(
+        "-A",
+        is_flag=True,
+        help="""
+             Stop the job on receiving an SIGINT or SIGTERM signal.
+             Exit immediately after receiving a signal the second time.
+             """,
+    )
+    purge: bool = clickdc.option(
+        is_flag=True,
+        help="""
+             After the job is stopped, purge the job and wait until the job is purged.
+             Relevant in job, run, stop and stopped modes.
+             """,
+    )
+    purge_successful: bool = clickdc.option(
+        is_flag=True,
+        help="""
+             After the job is stopped and is successfull, purge the job and wait until it is purged.
+             Job is successfull if all job summary metrics are zero except nonzero complete metric.
+             Relevant in job, run, stop and stopped modes.
+             """,
+    )
+    json: bool = clickdc.option(
+        help="The job file is in JSON format",
+    )
+    lines: int = clickdc.option(
+        "-n",
+        default=10,
+        show_default=True,
+        help="""
+             Sets the tail location in best-efforted number of lines relative to the end of logs.
+             Negative value prints all available log lines.
+             """,
+    )
+    lines_timeout: float = clickdc.option(
+        default=0.5,
+        show_default=True,
+        help="When using --lines the number of lines is best-efforted by ignoring lines for this specific time",
+    )
+    shutdown_timeout: float = clickdc.option(
+        default=1,
+        show_default=True,
+        help="The time to wait to make sure task loggers received all logs when exiting.",
+    )
+    follow: bool = clickdc.option(
+        help="Never exit",
+    )
+    no_follow: bool = clickdc.option(
+        help="Just run once, get the logs in a best-effort style and exit.",
+    )
+    no_follow_timeout: float = clickdc.option(
+        default=3,
+        show_default=True,
+        type=float,
+        help="The time to run in --no-follow mode.",
+    )
+    task: Optional[re.Pattern] = clickdc.option(
+        "-t",
+        type=re.compile,
+        help="Only watch tasks names matching this regex.",
+    )
+    group: Optional[re.Pattern] = clickdc.option(
+        "-g",
+        type=re.compile,
+        help="Only watch group names matching this regex.",
+    )
+    polling: bool = clickdc.option(
+        help="Instead of listening to Nomad event stream, periodically poll for events.",
+    )
+    no_preserve_status: bool = clickdc.option(
+        "-x",
+        help="Do not preserve tasks exit statuses.",
+    )
+    notifyexe: Optional[str] = clickdc.option(
+        help=f"""
+             When state changes execute this command with two arguments:
+             the watched jobid and one of {NotifyEvent.txt()}.
+             """,
+    )
+    notifyfd: Optional[int] = clickdc.option(
+        type=int,
+        help=f"""
+             When state changes write to this file descriptor a JSON array with two elements:
+             the watched jobid and one of {NotifyEvent.txt()}.
+             """,
+    )
+
+
 @click.group(
     "watch",
     help="""
@@ -1622,141 +1711,15 @@ Examples:
     Written by Kamil Cukrowski 2023. Licensed under GNU GPL version 3 or later.
     """,
 )
-@namespace_option()
-@click.option(
-    "-a",
-    "--all",
-    is_flag=True,
-    help="Print logs from all allocations, including previous versions of the job.",
-)
-@click.option("-v", "--verbose", count=True, help="Be more verbose.")
-@click.option("-q", "--quiet", count=True, help="Be less verbose.")
 @flagdebug.click_debug_option("NOMAD_WATCH_DEBUG")
-@click.option(
-    "-A",
-    "--attach",
-    is_flag=True,
-    help="""
-        Stop the job on receiving an SIGINT or SIGTERM signal.
-        Exit immediately after receiving a signal the second time.
-        """,
-)
-@click.option(
-    "--purge",
-    is_flag=True,
-    help="""
-        After the job is stopped, purge the job and wait until the job is purged.
-        Relevant in job, run, stop and stopped modes.
-        """,
-)
-@click.option(
-    "--purge-successful",
-    "purge_successful",
-    is_flag=True,
-    help="""
-        After the job is stopped and is successfull, purge the job and wait until it is purged.
-        Job is successfull if all job summary metrics are zero except nonzero complete metric.
-        Relevant in job, run, stop and stopped modes.
-        """,
-)
-@click.option(
-    "--json",
-    is_flag=True,
-    help="The job file is in JSON format",
-)
-@click.option(
-    "-n",
-    "--lines",
-    default=10,
-    show_default=True,
-    type=int,
-    help="""
-        Sets the tail location in best-efforted number of lines relative to the end of logs.
-        Negative value prints all available log lines.
-        """,
-)
-@click.option(
-    "--lines-timeout",
-    "lines_timeout",
-    default=0.5,
-    show_default=True,
-    type=float,
-    help="When using --lines the number of lines is best-efforted by ignoring lines for this specific time",
-)
-@click.option(
-    "--shutdown-timeout",
-    "shutdown_timeout",
-    default=1,
-    show_default=True,
-    type=float,
-    help="The time to wait to make sure task loggers received all logs when exiting.",
-)
-@click.option(
-    "-f",
-    "--follow",
-    is_flag=True,
-    help="Never exit",
-)
-@click.option(
-    "--no-follow",
-    "no_follow",
-    is_flag=True,
-    help="Just run once, get the logs in a best-effort style and exit.",
-)
-@click.option(
-    "--no-follow-timeout",
-    "no_follow_timeout",
-    default=3,
-    show_default=True,
-    type=float,
-    help="The time to run in --no-follow mode.",
-)
-@click.option(
-    "-t",
-    "--task",
-    type=re.compile,
-    help="Only watch tasks names matching this regex.",
-)
-@click.option(
-    "-g",
-    "--group",
-    type=re.compile,
-    help="Only watch group names matching this regex.",
-)
-@click.option(
-    "--polling",
-    is_flag=True,
-    help="Instead of listening to Nomad event stream, periodically poll for events.",
-)
-@click.option(
-    "-x",
-    "--no-preserve-status",
-    "no_preserve_status",
-    is_flag=True,
-    help="Do not preserve tasks exit statuses.",
-)
-@click.option(
-    "--notifyexe",
-    help=f"""
-        When state changes execute this command with two arguments:
-        the watched jobid and one of {NotifyEvent.txt()}.
-        """,
-)
-@click.option(
-    "--notifyfd",
-    type=int,
-    help=f"""
-        When state changes write to this file descriptor a JSON array with two elements:
-        the watched jobid and one of {NotifyEvent.txt()}.
-        """,
-)
-@click_log_options()
+@clickdc.adddc("args", Args)
+@namespace_option()
 @common_options()
-def cli(**kwargs):
+def cli(args: Args):
     signal.signal(signal.SIGUSR1, print_all_threads_stacktrace)
     exit_on_thread_exception.install()
     global ARGS
-    ARGS = argparse.Namespace(**kwargs)
+    ARGS = args
     assert not (ARGS.follow and ARGS.no_follow), "--follow and --no-follow conflict"
     #
     global START_NS
