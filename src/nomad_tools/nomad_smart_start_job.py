@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Optional, TextIO, Tuple, Union
 
 from .common import mynomad
+from .nomadlib.connection import JobSubmission
 
 log = logging.getLogger(__name__)
 
@@ -71,10 +72,10 @@ def nomad_job_run(
 
 @dataclasses.dataclass
 class Detail(ABC):
-    # The actual inputed string from the user.
     input: str
-    # This is true, we know that content is a JSON.
+    """The actual inputed string from the user."""
     forcejson: bool
+    """This is true, we know that content is a JSON."""
 
     @abstractmethod
     def seekable_read(self) -> Optional[str]:
@@ -122,21 +123,25 @@ class Detail(ABC):
             input=input,
         )
 
-    def read_dict(self) -> Tuple[str, dict]:
+    def read_dict(self) -> Tuple[str, str, dict]:
         content = self.read()
         # Assume input is a string with valid job specification.
         try:
             # try json
             data = json.loads(content)
+            format = "json"
         except json.JSONDecodeError:
             if self.forcejson:
                 raise
             data = json.loads(mynomad.jobhcl2json(content))
-        return content, data
+            format = "hcl2"
+        return content, format, data
 
     def api_start(self):
-        content, data = self.read_dict()
-        evalid = mynomad.start_job(data, content)["EvalID"]
+        content, format, data = self.read_dict()
+        evalid = mynomad.start_job(data, JobSubmission(Source=content, Format=format))[
+            "EvalID"
+        ]
         return evalid
 
     def run(self) -> str:
