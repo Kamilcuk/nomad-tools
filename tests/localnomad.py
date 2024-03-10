@@ -19,7 +19,7 @@ if not args.version:
     print(f"+ {cmdstr}")
     args.version = subprocess.check_output(cmd, text=True).strip()
 
-exe = DIR / "build" / f"nomad{args.version}"
+exe = Path("build") / f"nomad{args.version}"
 if not exe.exists():
     cmdstr = f"nomad-tools downloadrelease -p {quote(args.version)} nomad {quote(str(exe))}"
     cmd = split(cmdstr)
