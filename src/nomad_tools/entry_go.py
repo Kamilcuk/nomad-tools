@@ -226,10 +226,11 @@ class Args:
     tty: bool = clickdc.option("-t", is_flag=True, help="Add tty to config")
     workdir: Optional[str] = clickdc.option("-w", help="Add work_dir to config")
     volume: Tuple[str, ...] = clickdc.option(
-        "-v", multiple=True, help="Add volumes to config"
+        multiple=True, help="Add volumes to config"
     )
     restart: Optional[str] = clickdc.option(
         type=click.Choice(["always", "no"]),
+        default="no",
         help="With restart always, will add always restarting restart policy",
     )
     driver: str = clickdc.option(default="docker", help="Nomad task driver")
@@ -272,7 +273,7 @@ class Args:
     interactive_foreground: str = clickdc.option(
         default="sleep infinity",
         help=""" If using foreground, this is the command that will run in the job,
-            and interactive terminal will connect using websockets """,
+e           and interactive terminal will connect using websockets """,
     )
     network: Optional[str] = clickdc.option(help="Connect a container to a network")
     group_network_mode: Optional[str] = clickdc.option(
@@ -438,16 +439,15 @@ class Args:
                                 if self.memorymb or self.cpu
                                 else None
                             ),
-                            "RestartPolicy": (
-                                {"Mode": "delay"}
-                                if self.restart == "always"
-                                else {"Attempts": 0}
-                                if self.restart == "no"
-                                else None
-                            ),
+                            "RestartPolicy": {"Attempts": 0, "Mode": "fail"},
                             **self.extra_task,
                         }
                     ],
+                    "ReschedulePolicy": (
+                        {"Unlimited": True}
+                        if self.restart == "always"
+                        else {"Attempts": 0, "Unlimited": False}
+                    ),
                     **self.extra_group,
                 }
             ],
@@ -511,7 +511,7 @@ Then this specification is executed using `nomadt watch run` command.
 @common_options()
 @namespace_option()
 @clickdc.adddc("args", Args)
-@click.option("-V", "--verbose", is_flag=True)
+@click.option("-v", "--verbose", is_flag=True)
 def cli(args: Args, verbose: bool):
     global ARGS
     ARGS = args
