@@ -17,7 +17,9 @@ def quotearr(cmd: List[str]):
 @functools.lru_cache()
 def get_package_file(file: str) -> str:
     """Get a file relative to current package"""
-    res = pkgutil.get_data(__package__, file)
+    package = __package__
+    assert package
+    res = pkgutil.get_data(package, file)
     assert res is not None, f"Could not find {file}"
     return res.decode()
 
@@ -46,7 +48,9 @@ def get_version():
     # Load lazily, to optimize for import speed.
     import pkg_resources
 
-    return pkg_resources.get_distribution(__package__).version
+    package = __package__
+    assert package
+    return pkg_resources.get_distribution(package).version
 
 
 def print_version():
