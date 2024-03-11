@@ -10,6 +10,7 @@ env:
 jobs:
   test:
     strategy:
+      max-parallel: 1
       matrix:
         include:
           - nomad: 1.7.5
