@@ -46,11 +46,16 @@ def andjoin(arr: Iterable[Any], fin: str = " and ") -> str:
 
 def get_version():
     # Load lazily, to optimize for import speed.
-    import pkg_resources
-
     package = __package__
     assert package
-    return pkg_resources.get_distribution(package).version
+    try:
+        import importlib.metadata  # pyright: ignore
+
+        return importlib.metadata.version(package)
+    except ImportError:
+        import pkg_resources  # pyright: ignore
+
+        return pkg_resources.get_distribution(package).version
 
 
 def print_version():
