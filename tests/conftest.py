@@ -1,11 +1,15 @@
 import logging
 import os
+import sys
 from pathlib import Path
+from typing import IO, Dict
+
+LOGFILES: Dict[str, IO] = {}
 
 
 def pytest_configure(config):
     worker_id = os.environ.get("PYTEST_XDIST_WORKER")
-    if worker_id:
+    if worker_id and worker_id not in LOGFILES:
         logfile = Path(f"build/tests/{worker_id}.log")
         logfile.parent.mkdir(exist_ok=True, parents=True)
         logging.basicConfig(
@@ -13,7 +17,6 @@ def pytest_configure(config):
             filename=logfile,
             level=config.getini("log_file_level"),
         )
-        global logfilef
-        logfilef = logfile.open("wb")
-        os.dup2(logfilef.fileno(), 1)
-        os.dup2(logfilef.fileno(), 2)
+        LOGFILES[worker_id] = logfile.open("wb")
+        os.dup2(LOGFILES[worker_id].fileno(), sys.stdout.fileno())
+        os.dup2(LOGFILES[worker_id].fileno(), sys.stderr.fileno())
