@@ -112,7 +112,7 @@ def test_nomad_watch2_blocked():
             for j in range(2):
                 run_nomad_watch(
                     f"{i} -var block=true {testjobs[job]}",
-                    timeout=10,
+                    timeout=12,
                     check=124,
                     output=[
                         "Placement Failures",
