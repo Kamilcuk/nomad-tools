@@ -633,7 +633,7 @@ class TaskHandler:
         if self.stoptimer is None and self.loggers and taskstate.State == "dead":
             # If the task is already finished, give myself max 3 seconds to query all the logs.
             # This is to reduce the number of connections.
-            self.stoptimer = threading.Timer(3, self.stop)
+            self.stoptimer = threading.Timer(ARGS.shutdown_timeout, self.stop)
             self.stoptimer.start()
         if self.exitcode is None and taskstate.State == "dead":
             terminatedevent = taskstate.find_event("Terminated")
@@ -1644,7 +1644,7 @@ class Args(LogOptions):
         help="When using --lines the number of lines is best-efforted by ignoring lines for this specific time",
     )
     shutdown_timeout: float = clickdc.option(
-        default=1,
+        default=2,
         show_default=True,
         help="The time to wait to make sure task loggers received all logs when exiting.",
     )
