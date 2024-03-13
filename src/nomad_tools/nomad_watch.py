@@ -459,28 +459,21 @@ class TaskLogger(threading.Thread):
         self.stderr: bool = stderr
         """is this stderr or stdout logger"""
         #
-        self.startevent = threading.Event()
-        """This is an event which is sent after --shutdown-timeout time after log listening starts"""
-        self.starttimer = threading.Timer(ARGS.shutdown_timeout, self.__set_startevent)
-        """A timer that will set startevent"""
-        self.exitevent = threading.Event()
-        """User should set this event to stop logging the task logs"""
         self.ignoredlines: List[str] = []
         """In the case of --lines argument, this is a buffer of spare lines to output"""
         self.first_line: bool = True
         """Ignore input lines if printing only trailing lines."""
-        self.ignoretime_ns: int = START_NS + int(ARGS.lines_timeout * 1e9)
+        self.ignoretime_ns: int = START_NS + int(ARGS.lines_timeout * 10**9)
         """If ignore time is in the past, it is no longer relevant anyway."""
+        #
+        self.startedtime_ns: Optional[int] = None
+        self.exitreqtime_ns: Optional[int] = None
         #
         if ARGS.lines < 0 or self.ignoretime_ns < time.time_ns():
             self.ignoretime_ns = 0
 
-    def __set_startevent(self):
-        self.startevent.set()
-        DB.send_empty_event()
-
     @staticmethod
-    def read_json_stream(stream: requests.Response):
+    def read_json_txt(stream: requests.Response) -> Iterator[str]:
         txt: str = ""
         for dataorbytes in stream.iter_content(decode_unicode=True):
             try:
@@ -491,13 +484,23 @@ class TaskLogger(threading.Thread):
                 txt += c
                 # Nomad happens to be consistent, the jsons are flat.
                 if c == "}":
-                    try:
-                        ret = json.loads(txt)
-                        # log.debug(f"RECV: {ret}")
-                        yield ret
-                    except json.JSONDecodeError as e:
-                        log.warn(f"error decoding json: {txt} {e}")
+                    yield txt
                     txt = ""
+        if txt:
+            yield txt
+
+    @classmethod
+    def read_json_stream(cls, stream: requests.Response) -> Iterator[Dict[str, Any]]:
+        for txt in cls.read_json_txt(stream):
+            try:
+                ret = json.loads(txt)
+                # log.debug(f"RECV: {ret}")
+                yield ret
+            except json.JSONDecodeError as e:
+                if not re.match(
+                    "failed to list entries:.*no such file or directory", txt
+                ):
+                    log.warn(f"error decoding json: {txt} {e}")
 
     def taskout(self, lines: List[str]):
         """Output the lines"""
@@ -535,8 +538,9 @@ class TaskLogger(threading.Thread):
                 "offset": 50000 if self.ignoretime_ns else 0,
             },
         ) as stream:
-            self.starttimer.start()
             for event in self.read_json_stream(stream):
+                if self.startedtime_ns is None:
+                    self.startedtime_ns = time.time_ns()
                 if event:
                     line64: Optional[str] = event.get("Data")
                     if line64:
@@ -546,11 +550,18 @@ class TaskLogger(threading.Thread):
                             .splitlines()
                         )
                         self.taskout(lines)
+                    fileevent: Optional[str] = event.get("FileEvent")
+                    if fileevent == "file deleted":
+                        # Deleted means end of stream.
+                        break
                 else:
                     # Nomad json stream periodically sends empty {}.
                     self.taskout([])
-                if self.exitevent.is_set():
-                    break
+                if self.exitreqtime_ns:
+                    now = time.time_ns()
+                    timeout_ns = ARGS.shutdown_timeout * 10**9
+                    if now - self.exitreqtime_ns > timeout_ns:
+                        break
 
     def run(self):
         """Listen to Nomad log stream and print the logs"""
@@ -575,12 +586,14 @@ class TaskLogger(threading.Thread):
                 f"Error getting {self.__typestr()} logs: {code} {text!r}",
             )
         finally:
-            self.__set_startevent()
+            if self.exitreqtime_ns is None:
+                self.exitreqtime_ns = time.time_ns()
 
     def stop(self):
-        self.exitevent.set()
-        self.starttimer.cancel()
-        self.__set_startevent()
+        if self.exitreqtime_ns is None:
+            self.exitreqtime_ns = time.time_ns()
+        if self.startedtime_ns is None:
+            self.startedtime_ns = time.time_ns()
 
 
 @dataclass
@@ -592,7 +605,6 @@ class TaskHandler:
     messages: Set[int] = field(default_factory=set)
     """A set of message timestamp to know what has been printed."""
     exitcode: Optional[int] = None
-    stoptimer: Optional[threading.Timer] = None
 
     @staticmethod
     def _create_loggers(tk: TaskKey):
@@ -630,19 +642,14 @@ class TaskHandler:
             and taskstate.was_started()
         ):
             self.loggers = self._create_loggers(tk)
-        if self.stoptimer is None and self.loggers and taskstate.State == "dead":
-            # If the task is already finished, give myself max 3 seconds to query all the logs.
-            # This is to reduce the number of connections.
-            self.stoptimer = threading.Timer(ARGS.shutdown_timeout, self.stop)
-            self.stoptimer.start()
+        if taskstate.State == "dead":
+            self.stop()
         if self.exitcode is None and taskstate.State == "dead":
             terminatedevent = taskstate.find_event("Terminated")
             if terminatedevent:
                 self.exitcode = terminatedevent.ExitCode
 
     def stop(self):
-        if self.stoptimer:
-            self.stoptimer.cancel()
         for ll in self.loggers or []:
             ll.stop()
 
@@ -802,7 +809,7 @@ class NotifierWorker:
             timeout = timeend - time.time()
             if timeout > 0:
                 log.debug(f"joining worker {thread.name} timeout={timeout}")
-                thread.startevent.wait(timeout)
+                thread.join(timeout)
             else:
                 break
         log.debug(f"{len(threads)} threads joined with {timeout} timeout to spare")
@@ -1096,7 +1103,7 @@ class _NomadJobWatcherDetail(ABC):
                 isPurged=DB.job_purged(),
                 jobDead=self.job.is_dead() if self.job else None,
                 notifiers=[
-                    f"{th.name}={int(th.startevent.is_set())}"
+                    f"{th.name}={th.startedtime_ns}"
                     for th in self.notifier.get_threads()
                 ],
             )
@@ -1122,8 +1129,8 @@ class _NomadJobWatcherDetail(ABC):
                 # If we started with an evaluation, it has to be finished.
                 # Otherwise the events may be related to a previous job version.
                 (self.eval is None or not self.eval.is_pending_or_blocked())
-                # Make sure all the threads have finished outputting logs.
-                and all(th.startevent.is_set() for th in self.notifier.get_threads())
+                # Make sure all the threads are started outputting logs.
+                and all(th.startedtime_ns for th in self.notifier.get_threads())
             ):
                 yield
             if ARGS.no_follow and time.time() > self.no_follow_timeend:
