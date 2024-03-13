@@ -144,8 +144,8 @@ class NodeScoreMeta(DataDict):
 class AllocationMetric(DataDict):
     NodesEvaluated: int
     NodesFiltered: int
-    NodesAvailable: Dict[str, int]
     NodesExhausted: int
+    NodesAvailable: Optional[Dict[str, int]] = None
     ClassFiltered: Optional[Dict[str, int]] = None
     ConstraintFiltered: Optional[Dict[str, int]] = None
     QuotaExhausted: Optional[Dict[str, int]] = None
@@ -159,7 +159,7 @@ class AllocationMetric(DataDict):
         out = []
         if self.NodesEvaluated == 0:
             out += ["No nodes were eligible for evaluation"]
-        for dc, available in self.NodesAvailable.items():
+        for dc, available in (self.NodesAvailable or {}).items():
             if available == 0:
                 out += [f"No nodes are available in datacenter {dc}"]
         for cls, num in (self.ClassFiltered or {}).items():
