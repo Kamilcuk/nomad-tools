@@ -1192,25 +1192,42 @@ class _NomadJobWatcherEvents(_NomadJobWatcherDetail):
         """Return true if we sent a request to stop the job"""
         self.job_started: bool = False
         """If set to True, means that the job has started all main tasks"""
+        self.notifyfd = sorted(list(set(ARGS.notifyfd)))
+        self.notifyfdstarted = sorted(list(set(ARGS.notifyfdstarted)))
+
+    def __notifyfd(self, arg: List[str], fdlist: List[int]):
+        if fdlist:
+            for fd in list(fdlist):
+                line: str = json.dumps(arg)
+                assert line.count("\n") == 0
+                linebytes: bytes = f"{line}\n".encode()
+                flagdebug.logdebug("notify", f"notifyfd {fd} {line!r}")
+                try:
+                    os.write(fd, linebytes)
+                except (BrokenPipeError, IOError) as e:
+                    flagdebug.logdebug("notify", f"{e}")
+                    try:
+                        os.close(fd)
+                    except Exception:
+                        pass
+                    fdlist.remove(fd)
 
     def __notifyuser(self, event: NotifyEvent):
-        cmd: List[str] = [self.jobid, event]
-        if ARGS.notifyexe:
-            cmd = [ARGS.notifyexe] + cmd
-            log.debug(f"notifyexe {cmd}")
+        flagdebug.logdebug("notify", f"notify {event}")
+        arg: List[str] = [self.jobid, event]
+        for exe in ARGS.notifyexe:
+            cmd = shlex.split(exe) + arg
+            flagdebug.logdebug("notify", f"notifyexe {cmd}")
             subprocess.check_call(cmd)
-        if ARGS.notifyfd is not None:
-            line = json.dumps(cmd)
-            assert line.count("\n") == 0
-            log.debug(f"notifyfd {line}")
-            try:
-                os.write(ARGS.notifyfd, f"{line}\n".encode())
-            except BrokenPipeError:
-                try:
-                    os.close(ARGS.notifyfd)
-                except Exception:
-                    pass
-                ARGS.notifyfd = None
+        self.__notifyfd(arg, self.notifyfd)
+        if event == NotifyEvent.started:
+            for exe in ARGS.notifyexestarted:
+                cmd = shlex.split(exe)
+                flagdebug.logdebug("notify", f"notifyexestarted {cmd}")
+                subprocess.check_call(cmd)
+            self.__notifyfd(arg, self.notifyfdstarted)
+            for fd in self.notifyfdstarted:
+                os.close(fd)
 
     @override
     def loop(self) -> Iterator[None]:
@@ -1274,7 +1291,11 @@ class _NomadJobWatcherEvents(_NomadJobWatcherDetail):
             or self.has_active_deployments()
             or self.has_active_evaluations()
         ):
-            # The job is still doing something. Wait for it.
+            flagdebug.logdebug(
+                "started",
+                "The job is still doing something. Wait for it. "
+                f" job={self.job} deployments={self.has_active_deployments()} evals={self.has_active_evaluations()}",
+            )
             return False
         allocations = DB.allocations.values()
         if (
@@ -1282,7 +1303,13 @@ class _NomadJobWatcherEvents(_NomadJobWatcherDetail):
             or any(alloc.is_pending() for alloc in allocations)
             or any(alloc.TaskStates is None for alloc in allocations)
         ):
-            # There are still allocations which Tasks have not started yet. Wait for them.
+            flagdebug.logdebug(
+                "started",
+                "There are still allocations which Tasks have not started yet. Wait for them."
+                f" allocations={not not allocations}"
+                f" pendings={sum(alloc.is_pending() for alloc in allocations)}"
+                f" taskstates={sum(alloc.TaskStates is None for alloc in allocations)}",
+            )
             return False
         #
         groupmsgs: List[str] = []
@@ -1299,10 +1326,11 @@ class _NomadJobWatcherEvents(_NomadJobWatcherDetail):
             # The allocation not necessarily have to be running - they may have finished.
             if len(groupallocs) != group.Count:
                 # This group has no active evaluation and deployments (checked above).
-                log.debug(
+                flagdebug.logdebug(
+                    "started",
                     f"groupallocs={[x.ID for x in groupallocs]}"
                     f" {[DB.get_allocation_jobmodifyindex(alloc, -1) for alloc in groupallocs]}"
-                    f" {[DB.get_allocation_jobversion(alloc, -1) for alloc in groupallocs]}"
+                    f" {[DB.get_allocation_jobversion(alloc, -1) for alloc in groupallocs]}",
                 )
                 log.error(
                     f"Job {self.job.description()} group {group.Name!r} started"
@@ -1321,6 +1349,10 @@ class _NomadJobWatcherEvents(_NomadJobWatcherDetail):
                 if notrunningmaintasks:
                     # There are main tasks that are not running.
                     if alloc.TaskStates is None or alloc.is_pending_or_running():
+                        flagdebug.logdebug(
+                            "started",
+                            f"TaskStates={alloc.TaskStates} is_pending_or_running={alloc.is_pending_or_running()}",
+                        )
                         # Wait for them.
                         return False
                     else:
@@ -1601,7 +1633,35 @@ class JobPath:
 
 
 @dataclass
-class Args(LogOptions):
+class NotifyOptions:
+    notifyexe: Tuple[str, ...] = clickdc.option(
+        help=f"""
+             When state changes execute this shlex.split command with two arguments:
+             the watched jobid and one of {NotifyEvent.txt()}.
+             """,
+        multiple=True,
+    )
+    notifyfd: Tuple[int, ...] = clickdc.option(
+        type=int,
+        help=f"""
+             When state changes write to this file descriptor a JSON array with two elements:
+             the watched jobid and one of {NotifyEvent.txt()}.
+             """,
+        multiple=True,
+    )
+    notifyexestarted: Tuple[str, ...] = clickdc.option(
+        help="Execute this shlex.split command once the job is started.",
+        multiple=True,
+    )
+    notifyfdstarted: Tuple[int, ...] = clickdc.option(
+        type=int,
+        help="Send a single line message to this fiole descriptor when the job is started.",
+        multiple=True,
+    )
+
+
+@dataclass
+class Args(LogOptions, NotifyOptions):
     all: bool = clickdc.option(
         "-a",
         is_flag=True,
@@ -1682,19 +1742,6 @@ class Args(LogOptions):
     no_preserve_status: bool = clickdc.option(
         "-x",
         help="Do not preserve tasks exit statuses.",
-    )
-    notifyexe: Optional[str] = clickdc.option(
-        help=f"""
-             When state changes execute this command with two arguments:
-             the watched jobid and one of {NotifyEvent.txt()}.
-             """,
-    )
-    notifyfd: Optional[int] = clickdc.option(
-        type=int,
-        help=f"""
-             When state changes write to this file descriptor a JSON array with two elements:
-             the watched jobid and one of {NotifyEvent.txt()}.
-             """,
     )
 
 
