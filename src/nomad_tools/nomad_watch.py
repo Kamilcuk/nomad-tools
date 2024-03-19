@@ -466,8 +466,8 @@ class TaskLogger(threading.Thread):
         self.ignoretime_ns: int = START_NS + int(ARGS.lines_timeout * 10**9)
         """If ignore time is in the past, it is no longer relevant anyway."""
         #
-        self.startedtime_ns: Optional[int] = None
-        self.exitreqtime_ns: Optional[int] = None
+        self.startedtime_s: Optional[float] = None
+        self.exittime_s: Optional[float] = None
         #
         if ARGS.lines < 0 or self.ignoretime_ns < time.time_ns():
             self.ignoretime_ns = 0
@@ -539,8 +539,9 @@ class TaskLogger(threading.Thread):
             },
         ) as stream:
             for event in self.read_json_stream(stream):
-                if self.startedtime_ns is None:
-                    self.startedtime_ns = time.time_ns()
+                if self.startedtime_s is None:
+                    self.startedtime_s = time.time_ns()
+                    DB.send_empty_event()
                 if event:
                     line64: Optional[str] = event.get("Data")
                     if line64:
@@ -557,10 +558,9 @@ class TaskLogger(threading.Thread):
                 else:
                     # Nomad json stream periodically sends empty {}.
                     self.taskout([])
-                if self.exitreqtime_ns:
-                    now = time.time_ns()
-                    timeout_ns = ARGS.shutdown_timeout * 10**9
-                    if now - self.exitreqtime_ns > timeout_ns:
+                if self.exittime_s:
+                    if self.exittime_s > time.time():
+                        DB.send_empty_event()
                         break
 
     def run(self):
@@ -586,14 +586,13 @@ class TaskLogger(threading.Thread):
                 f"Error getting {self.__typestr()} logs: {code} {text!r}",
             )
         finally:
-            if self.exitreqtime_ns is None:
-                self.exitreqtime_ns = time.time_ns()
+            self.stop()
 
     def stop(self):
-        if self.exitreqtime_ns is None:
-            self.exitreqtime_ns = time.time_ns()
-        if self.startedtime_ns is None:
-            self.startedtime_ns = time.time_ns()
+        if self.exittime_s is None:
+            self.exittime_s = time.time() + ARGS.shutdown_timeout
+        if self.startedtime_s is None:
+            self.startedtime_s = time.time()
 
 
 @dataclass
@@ -1103,7 +1102,7 @@ class _NomadJobWatcherDetail(ABC):
                 isPurged=DB.job_purged(),
                 jobDead=self.job.is_dead() if self.job else None,
                 notifiers=[
-                    f"{th.name}={th.startedtime_ns}"
+                    f"{th.name}={th.startedtime_s}"
                     for th in self.notifier.get_threads()
                 ],
             )
@@ -1130,7 +1129,7 @@ class _NomadJobWatcherDetail(ABC):
                 # Otherwise the events may be related to a previous job version.
                 (self.eval is None or not self.eval.is_pending_or_blocked())
                 # Make sure all the threads are started outputting logs.
-                and all(th.startedtime_ns for th in self.notifier.get_threads())
+                and all(th.startedtime_s for th in self.notifier.get_threads())
             ):
                 yield
             if ARGS.no_follow and time.time() > self.no_follow_timeend:
