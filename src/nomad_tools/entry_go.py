@@ -285,6 +285,24 @@ e           and interactive terminal will connect using websockets """,
             the image is taken from the first command line argument. """
     )
     count: Optional[int] = clickdc.option(type=int, help="The group count")
+    kill_timeout: Optional[str] = clickdc.option(
+        help="""
+        Specifies the duration to wait for an application to gracefully quit
+        before force-killing. Nomad first sends a kill_signal. If the task does
+        not exit before the configured timeout, SIGKILL is sent to the task. Note
+        that the value set here is capped at the value set for max_kill_timeout
+        on the agent running the task, which has a default value of 30 seconds.
+        """
+    )
+    kill_signal: Optional[str] = clickdc.option(
+        """
+        Specifies a configurable kill signal for a task, where the default
+        is SIGINT (or SIGTERM for docker, or CTRL_BREAK_EVENT for raw_exec on
+        Windows). Note that this is only supported for drivers sending signals
+        (currently docker, exec, raw_exec, and java drivers).
+        """
+    )
+    #
     extra_config: Any = clickdc.option(
         type=JsonType(), default={}, help="Add extra JSON to config"
     )
@@ -410,6 +428,8 @@ e           and interactive terminal will connect using websockets """,
                                 "network_mode": self.network,
                                 **self.extra_config,
                             },
+                            "kill_timeout": self.kill_timeout,
+                            "kill_signal": self.kill_signal,
                             "Templates": (self.template if self.template else None),
                             "Env": (
                                 {
@@ -472,11 +492,8 @@ class Interactive:
     def __thread(self):
         try:
             # Wait for started notification from nomad watch.
-            with os.fdopen(self.rfd) as file:
-                for line in file:
-                    data = json.loads(line)
-                    if data[1] == "started":
-                        break
+            os.read(self.rfd, 1)
+            os.close(self.rfd)
             #
             at = taskexec.find_job(job=self.par.jobid)
             cmd = [
@@ -511,8 +528,9 @@ Then this specification is executed using `nomadt watch run` command.
 @common_options()
 @namespace_option()
 @clickdc.adddc("args", Args)
+@clickdc.adddc("notifyargs", nomad_watch.NotifyOptions)
 @click.option("-v", "--verbose", is_flag=True)
-def cli(args: Args, verbose: bool):
+def cli(args: Args, notifyargs: nomad_watch.NotifyOptions, verbose: bool):
     global ARGS
     ARGS = args
     if args.command[0].startswith("-"):
@@ -529,20 +547,22 @@ def cli(args: Args, verbose: bool):
     if args.output:
         print(jobjson)
     else:
-        cmd: List[str] = (["--verbose"] if verbose else []) + [
+        cmd: List[str] = [
+            *(["--verbose"] if verbose else []),
             "--attach",
             "--json",
             "-0",
+            *clickdc.to_args(notifyargs),
             "start" if args.detach else "run",
             "-",
         ]
         if args.purge:
             assert not args.detach, "detach conflicts with purge"
-            cmd = ["--purge"] + cmd
+            cmd = ["--purge", *cmd]
         if args.interactive:
             assert not args.detach, "interactive with detach doesn't make sense"
             wfd = Interactive(par).setup()
-            cmd = [f"--notifyfd={wfd}"] + cmd
+            cmd = [f"--notifyfdstarted={wfd}", *cmd]
         with redirect_stdin_str(jobjson):
             log.debug(f"+ {quotearr(cmd)}")
             nomad_watch.cli.main(args=cmd)

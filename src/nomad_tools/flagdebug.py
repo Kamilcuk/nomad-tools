@@ -1,30 +1,37 @@
+import logging
 import os
+import sys
 from typing import Counter
 
 import click
 
-
-class Flagdebug(Counter[str]):
-    """
-    Small wrapper over counter to split the string on comma and return the count with call operator.
-    Basically holds flags with the count.
-    """
-
-    def __init__(self, txt: str = ""):
-        self.add(txt)
-
-    def add(self, txt: str):
-        self.update(txt.lower().split(","))
-        return self
-
-    def __call__(self, name: str) -> int:
-        if "all" in self:
-            return 100
-        return self[name.lower()]
+log = logging.getLogger(__name__)
 
 
-debug = Flagdebug()
-"""All options are in this object"""
+DEBUGFLAGS: Counter[str] = Counter()
+
+
+def __log(name: str, txt: str):
+    print(f"{name.upper()}: {txt}", flush=True, file=sys.stderr)
+
+
+def add(txt: str):
+    if txt:
+        __log("flagdebug", txt)
+        DEBUGFLAGS.update(txt.lower().split(","))
+
+
+def debug(name: str) -> int:
+    if "all" in DEBUGFLAGS:
+        return 100
+    return DEBUGFLAGS[name.lower()]
+
+
+def logdebug(name: str, txt: str, ths: int = 0) -> bool:
+    if debug(name) > ths:
+        __log(name, txt)
+        return True
+    return False
 
 
 def click_debug_option(envname: str):
@@ -32,7 +39,7 @@ def click_debug_option(envname: str):
         "--debug",
         hidden=True,
         expose_value=False,
-        default=lambda: debug.add(os.environ.get(envname, "")),
-        callback=lambda _a, _b, value: debug.add(value) if value else debug,
+        default=lambda: add(os.environ.get(envname, "")),
+        callback=lambda _a, _b, value: add(value),
         help="Comma separated list of debug flags",
     )

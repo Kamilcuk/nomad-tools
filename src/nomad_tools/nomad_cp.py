@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+import contextlib
 import enum
 import logging
 import os
 import re
 import shlex
-import shutil
 import string
 import subprocess
 import sys
@@ -17,13 +17,13 @@ from abc import ABC
 from dataclasses import dataclass
 from pathlib import Path
 from shlex import quote, split
-from typing import Any, Dict, List, Optional
+from typing import IO, Any, Dict, Iterator, List, Optional
 from urllib.parse import parse_qs, urlparse
 
 import click
 import clickdc
-from click.shell_completion import BashComplete, CompletionItem
-from typing_extensions import override
+from click.shell_completion import CompletionItem
+from typing_extensions import Protocol, override
 
 from . import nomadlib, taskexec
 from .common import (
@@ -34,9 +34,23 @@ from .common import (
     nomad_find_job,
 )
 from .common_base import quotearr
+from .transferstats import transfer_stats
 
 log = logging.getLogger(Path(__file__).name)
 ARGS: "Args"
+
+###############################################################################
+
+
+def popen_raise_for_returncode(pp: subprocess.Popen):
+    if pp.returncode:
+        raise subprocess.CalledProcessError(pp.returncode, pp.args)
+
+
+class MyPopen(Protocol):
+    stdin: Optional[IO[bytes]]
+    stdout: Optional[IO[bytes]]
+
 
 ###############################################################################
 
@@ -51,19 +65,21 @@ class Mypath(ABC):
     This has to be a string to properly handle /. suffixes in strings given by user.
     """
 
-    def run(self, cmd: str):
-        log.debug(f"+ {cmd}")
-        subprocess.run(split(cmd), check=True)
-
     def check_output(self, cmd: str) -> str:
         log.debug(f"+ {cmd}")
         return subprocess.check_output(split(cmd), text=True)
 
+    @contextlib.contextmanager
     def popen(
-        self, cmd: str, stdout: Optional[int] = None, stdin: Optional[int] = None
-    ) -> Any:
+        self,
+        cmd: str,
+        stdin: int = subprocess.DEVNULL,
+        stdout: int = subprocess.DEVNULL,
+    ) -> Iterator[MyPopen]:
         log.debug(f"+ {cmd}")
-        return subprocess.Popen(split(cmd), stdout=stdout, stdin=stdin)
+        with subprocess.Popen(split(cmd), stdin=stdin, stdout=stdout) as pp:
+            yield pp
+        popen_raise_for_returncode(pp)
 
     def isstdin(self) -> bool:
         return str(self.path) == "-"
@@ -120,23 +136,33 @@ class NomadMypath(Mypath):
     task: str
 
     @override
-    def run(self, cmd: str):
-        log.debug(f"+ {self.allocation} {self.task} {cmd}")
-        taskexec.run(self.allocation, self.task, split(cmd))
-
-    @override
     def check_output(self, cmd: str) -> str:
-        log.debug(f"+ {self.allocation} {self.task} {cmd}")
-        return taskexec.check_output(self.allocation, self.task, split(cmd), text=True)
+        log.debug(f"+ {self.allocation}/{self.task} {cmd}")
+        with taskexec.NomadProcess(self.allocation, self.task, split(cmd)) as pp:
+            buf: bytes = pp.read()
+        return buf.decode(errors="replace")
 
     @override
+    @contextlib.contextmanager
     def popen(
-        self, cmd: str, stdout: Optional[int] = None, stdin: Optional[int] = None
-    ) -> Any:
-        log.debug(f"+ {self.allocation} {self.task} {cmd}")
-        return taskexec.NomadPopen(
-            self.allocation, self.task, split(cmd), stdout=stdout, stdin=stdin
-        )
+        self,
+        cmd: str,
+        stdin: int = subprocess.DEVNULL,
+        stdout: int = subprocess.DEVNULL,
+    ) -> Iterator[MyPopen]:
+        log.debug(f"+ {self.allocation}/{self.task} {cmd}")
+        with subprocess.Popen(
+            [
+                *"nomad alloc exec -i=false -t=false -task".split(),
+                self.task,
+                self.allocation,
+                *split(cmd),
+            ],
+            stdin=stdin,
+            stdout=stdout,
+        ) as pp:
+            yield pp
+        popen_raise_for_returncode(pp)
 
     @override
     def isstdin(self) -> bool:
@@ -549,18 +575,26 @@ class NomadOrHostMyPath(click.ParamType):
 
 
 def nomadpipe(src: Mypath, dst: Mypath, srccmd: str, dstcmd: str):
-    with src.popen(srccmd, stdout=subprocess.PIPE) as srcp:
-        with dst.popen(dstcmd, stdin=subprocess.PIPE) as dstp:
-            shutil.copyfileobj(srcp.stdout, dstp.stdin)
-    for p in [srcp, dstp]:
-        if p.returncode:
-            raise subprocess.CalledProcessError(p.returncode, p.cmd)
+    with src.popen(srccmd, stdout=subprocess.PIPE) as psrc:
+        with dst.popen(dstcmd, stdin=subprocess.PIPE) as pdst:
+            assert psrc.stdout
+            assert pdst.stdin
+            transfer_stats(psrc.stdout.fileno(), pdst.stdin.fileno())
 
 
-def get_tar_x_opt():
+def tar_out_opt() -> str:
     return (
+        ("z" if ARGS.gzip else "")
+        + ("j" if ARGS.bzip2 else "")
+        + ("J" if ARGS.xz else "")
+    )
+
+
+def tar_in_opt() -> str:
+    return (
+        tar_out_opt()
         # If dryrun, pass vt to print to stdout.
-        ("vt" if ARGS.dryrun else "x")
+        + ("vt" if ARGS.dryrun else "x")
         + ("v" if ARGS.verbose else "")
         # If archive, pass p to preserve permissions when not root.
         # If not archive, pass o to do not preserve permissions even as root.
@@ -570,9 +604,12 @@ def get_tar_x_opt():
 
 
 def nomadtarpipe(src: Mypath, dst: Mypath, tar_c: str, tar_x: str):
-    global ARGS
-    x = get_tar_x_opt()
-    nomadpipe(src, dst, f"tar -cf - {tar_c}", f"tar -{x}f - {tar_x}")
+    nomadpipe(
+        src,
+        dst,
+        f"tar -c{tar_out_opt()}f - {tar_c}",
+        f"tar -{tar_in_opt()}f - {tar_x}",
+    )
 
 
 def copy_mode(src: Mypath, dst: Mypath):
@@ -596,14 +633,24 @@ def copy_mode(src: Mypath, dst: Mypath):
         ):
             # Copy one file.
             log.info(f"File {src} -> {dst}")
-            dstscript: str = f"cat >{dst.quotepath()}"
+            prog: Optional[str] = (
+                "gzip"
+                if ARGS.gzip
+                else "xz"
+                if ARGS.xz
+                else "bzip2"
+                if ARGS.bzip2
+                else None
+            )
+            srcscript: str = f"{prog} -c" if prog else "cat"
+            dstscript: str = f"{prog} -d" if prog else "cat"
             nomadpipe(
                 src,
                 dst,
-                f"cat {src.quotepath()}",
-                f"sh -c {quote(dstscript)}"
+                f"{srcscript} {src.quotepath()}",
+                "sh -c " + quote(f"{dstscript} >{dst.quotepath()}")
                 if not ARGS.dryrun
-                else f"true -- {dst.quotepath()}",
+                else f"true -- {quote(dstscript)} {dst.quotepath()}",
             )
         else:
             exit(f"Not a file or directory: {dst}")
@@ -650,12 +697,19 @@ def stream_mode(src: Mypath, dst: Mypath):
     # One of source or dest is a -
     if src.isstdin():
         log.info(f"Stream stdin -> {dst}")
-        assert dst.isstdin(), "Both operands are '-'"
-        x = get_tar_x_opt()
-        dst.run(f"tar -{x}f - -C {dst.quotepath()}")
+        assert not dst.isstdin(), f"Both operands are '-': {src} {dst}"
+        with dst.popen(
+            f"tar -{tar_in_opt()}f - -C {dst.quotepath()}",
+            stdin=sys.stdin.fileno(),
+        ):
+            pass
     elif dst.isstdin():
         log.info(f"Stream {src} -> stdout")
-        src.run(f"tar -cf - -C {src.quoteparent()} -- {src.quotename()}")
+        with src.popen(
+            f"tar -c{tar_out_opt()}f - -C {src.quoteparent()} -- {src.quotename()}",
+            stdout=sys.stdout.fileno(),
+        ):
+            pass
     else:
         assert 0, "Internal error - neither source nor dest is equal to -"
 
@@ -685,16 +739,20 @@ def rsync_mode(src: Mypath, dst: Mypath):
 
 @dataclass
 class Args:
+    gzip: bool = clickdc.option("-z", help="Pass -z to tar")
+    xz: bool = clickdc.option("-J", help="Pass -J to tar")
+    bzip2: bool = clickdc.option("-j", help="Pass -j to tar")
+    archive: bool = clickdc.option(
+        "-a",
+        help="Archive mode (copy all uid/gid information)",
+    )
+    #
     dryrun: bool = clickdc.option(
         "-n",
         help="Do tar -vt for unpacking. Usefull for listing files for debugging.",
     )
     verbose: int = clickdc.option("-v", "--verbose", count=True)
     quiet: int = clickdc.option("-q", "--quiet", count=True)
-    archive: bool = clickdc.option(
-        "-a",
-        help="Archive mode (copy all uid/gid information)",
-    )
     rsync: bool = clickdc.option(help="Rsync two paths")
     rsyncargs: str = clickdc.option(help="Shell quoted rsync options", default="")
     source: Mypath = clickdc.argument(type=NomadOrHostMyPath())

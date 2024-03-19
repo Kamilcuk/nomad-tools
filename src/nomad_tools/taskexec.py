@@ -1,47 +1,42 @@
 from __future__ import annotations
 
 import base64
-import dataclasses
-import io
+import collections
+import functools
 import json
 import logging
+import os
 import subprocess
-import sys
+import threading
 import urllib.parse
 from typing import (
     IO,
     Any,
     BinaryIO,
+    Callable,
     Generic,
     Iterator,
     List,
     Optional,
     Set,
+    TextIO,
     Tuple,
     TypeVar,
     Union,
     cast,
-    overload,
 )
 
 import websocket
-from typing_extensions import Literal, override
+from typing_extensions import Literal, overload
 
 from . import nomadlib
 from .common_base import eprint
-from .common_nomad import mynomad, nomad_find_job
+from .common_nomad import mynomad
+from .nomadlib.datadict import DataDict
 from .nomadlib.types import Alloc
 
 log = logging.getLogger(__name__)
 log.setLevel(level=logging.INFO)
-
-DEVNULL = subprocess.DEVNULL
-PIPE = subprocess.PIPE
-CompletedProcess = subprocess.CompletedProcess
-_DESTFILE = Union[int, IO[Any]]
-_FILE = Optional[_DESTFILE]
-_StrAny = Union[bytes, str]
-_InputString = Optional[_StrAny]
 
 
 def find_alloc_task(
@@ -89,7 +84,167 @@ def find_job(job: str) -> Tuple[str, str]:
     return find_alloc_task(None, None, job)
 
 
+###############################################################################
+
+
+class FrameData(DataDict):
+    data: Optional[str] = None
+
+
+class FrameResult(DataDict):
+    exit_code: Optional[int] = 0
+
+
+class ExecStreamingOutput(DataDict):
+    stderr: Optional[FrameData] = None
+    stdout: Optional[FrameData] = None
+    exited: Optional[bool] = None
+    result: Optional[FrameResult] = None
+
+
+class NomadProcess:
+    """
+    An implementation of subprocess.Popen on top of Nomad Exec Alocation API.
+    https://developer.hashicorp.com/nomad/api-docs/allocations#exec-allocation
+    https://docs.python.org/3/library/subprocess.html
+    """
+
+    def __init__(self, allocid: str, task: str, args: List[str]):
+        assert allocid
+        assert task
+        assert args
+        self.name: str = f"{self.__class__.__name__}({allocid}/{task},{args})"
+        self.__closed: Set[str] = set()
+        """Protect against double closing"""
+        self.returncode: Optional[int] = None
+        # Connect to the remote side.
+        path = f"v1/client/allocation/{allocid}/exec?" + urllib.parse.urlencode(
+            dict(task=task, command=json.dumps(args))
+        )
+        log.debug(f"CONNECT {path!r}")
+        self.ws: websocket.WebSocket = nomadlib.create_websocket_connection(path)
+        self.__readergen = self.__reader()
+        assert self.ws.connected
+
+    def __reader(self) -> Iterator[bytes]:
+        while self.ws.connected:
+            line = self.ws.recv()
+            if not line:
+                break
+            frame = ExecStreamingOutput(json.loads(line))
+            if frame.stderr:
+                if frame.stderr.data:
+                    txt: str = base64.b64decode(frame.stderr.data.encode()).decode(
+                        errors="replace"
+                    )
+                    eprint(txt, end="")
+            if frame.stdout:
+                if frame.stdout.data:
+                    yield base64.b64decode(frame.stdout.data.encode())
+            if frame.exited and frame.result:
+                self.returncode = frame.result.exit_code
+                break
+        self.terminate()
+
+    def __send(self, msg: str):
+        try:
+            self.ws.send(msg)
+        except BrokenPipeError:
+            self.ws.close()
+            raise
+
+    def __close_stream(self, stream: str):
+        """Send message to Nomad to close specific stream"""
+        if self.ws.connected:
+            return
+        if stream in self.__closed:
+            return
+        self.__closed.add(stream)
+        msg = json.dumps({stream: {"close": True}})
+        log.debug(f"W {msg}")
+        self.__send(msg)
+
+    def close_stdin(self):
+        return self.__close_stream("stdin")
+
+    def close_stdout(self):
+        # Only stdin is handled in Nomad
+        # https://github.com/hashicorp/nomad/blob/695bb7ffcf90fc9455152dadd2a504bc4499e3b3/plugins/drivers/execstreaming.go#L41
+        pass
+
+    def terminate(self):
+        log.debug("closing")
+        self.ws.close()
+
+    def wait(self):
+        if not self.ws.connected:
+            return
+        self.close_stdin()
+        self.read()
+
+    def read(self) -> bytes:
+        return functools.reduce(bytes.__add__, self.read1())
+
+    def read1(self) -> Iterator[bytes]:
+        return self.__readergen
+
+    def write(self, s: bytes):
+        msg = json.dumps({"stdin": {"data": base64.b64encode(s).decode()}})
+        log.debug(f"W stdin:data:{s!r}")
+        self.__send(msg)
+
+    def raise_for_returncode(self, output: Optional[Union[str, bytes]] = None):
+        if self.returncode is None:
+            raise Exception(
+                f"when executing {self.name}"
+                "the websocket was closed by Nomad server without sending the exit code of the process."
+            )
+        if self.returncode:
+            raise subprocess.CalledProcessError(self.returncode, self.name, output)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.wait()
+
+
+###############################################################################
+
+
+DEVNULL = subprocess.DEVNULL
+PIPE = subprocess.PIPE
+CompletedProcess = subprocess.CompletedProcess
+_IoAny = Union[IO[bytes], IO[str]]
+_DESTFILE = Union[int, _IoAny]
+_FILE = Optional[_DESTFILE]
+_StrAny = Union[bytes, str]
+_InputString = Optional[_StrAny]
+
+
 T = TypeVar("T", bytes, str)
+
+
+def drain_iter(chan: Iterator[Any]):
+    return collections.deque(chan, maxlen=0)
+
+
+def copy_read1_to_writefd(read1: Iterator[bytes], fd: BinaryIO):
+    with fd as f:
+        for buf in read1:
+            try:
+                f.write(buf)
+            except BrokenPipeError:
+                break
+
+
+def copy_readfd_to_write(fd: BinaryIO, write: Callable[[bytes], None]):
+    with fd as f:
+        for buf in f:
+            try:
+                write(buf)
+            except BrokenPipeError:
+                break
 
 
 class NomadPopen(Generic[T]):
@@ -105,7 +260,6 @@ class NomadPopen(Generic[T]):
         allocid: str,
         task: str,
         args: List[str],
-        job: Optional[str] = ...,
         stdin: _FILE = ...,
         stdout: _FILE = ...,
         text: Literal[False] = ...,
@@ -118,7 +272,6 @@ class NomadPopen(Generic[T]):
         allocid: str,
         task: str,
         args: List[str],
-        job: Optional[str] = ...,
         stdin: _FILE = ...,
         stdout: _FILE = ...,
         text: Literal[True] = ...,
@@ -131,7 +284,6 @@ class NomadPopen(Generic[T]):
         allocid: str,
         task: str,
         args: List[str],
-        job: Optional[str] = ...,
         stdin: _FILE = ...,
         stdout: _FILE = ...,
         text: bool = ...,
@@ -143,97 +295,65 @@ class NomadPopen(Generic[T]):
         allocid: str,
         task: str,
         args: List[str],
-        job: Optional[str] = None,
         stdin: _FILE = None,
         stdout: _FILE = None,
         text: bool = False,
     ):
-        assert allocid
-        assert task
-        assert args
-        assert stdin is None or stdin == PIPE
-        self.__stdin_arg: _DESTFILE = DEVNULL if stdin is None else stdin
-        self.__stdout_arg: _DESTFILE = sys.stdout if stdout is None else stdout
-        self.cmd = [
-            *"nomad alloc exec -t=false".split(),
-            *(["-i=false"] if self.__stdin_arg == DEVNULL else []),
-            "-task",
-            task,
-            allocid,
-            *args,
-        ]
-        #
-        self.__closed: Set[str] = set()
-        """Protect against double closing"""
-        self.__returncode: Optional[int] = None
-        self._reader = self.__readergen()
+        self.np = NomadProcess(allocid, task, args)
         self.text = text
-        # Connect to the remote side.
-        path = f"v1/client/allocation/{allocid}/exec?" + urllib.parse.urlencode(
-            dict(task=task, command=json.dumps(args))
-        )
-        log.debug(f"CONNECT {path!r} text={text}")
-        self.ws: Optional[websocket.WebSocket] = nomadlib.create_websocket_connection(
-            path
-        )
-        # Initialize self.stdin
+        self.__stdin_arg = stdin
+        self.__stdout_arg = stdout
+        self.__initialize_stdin(stdin)
+        self.__initialize_stdout(stdout)
+
+    def __initialize_stdin(self, stdin: _FILE):
         self.stdin: Optional[IO[T]] = None
-        if self.__stdin_arg == DEVNULL:
-            self._close_stream("stdin")
-        elif self.__stdin_arg == PIPE:
-            stream = self.Stdin(self)
-            if self.text:
-                stream = io.TextIOWrapper(stream)
-            self.stdin = cast(IO[T], stream)
-        else:
-            assert 0, f"Unhandled stdin={self.__stdin_arg}"
-        # Initialize self.stdout
-        self.stdout: Optional[IO[T]] = None
-        if self.__stdout_arg == DEVNULL:
-            self._close_stream("stdout")
-        elif self.__stdout_arg is sys.stdout:
+        fd: Optional[IO[bytes]] = None
+        if stdin == DEVNULL:
             pass
+        elif isinstance(stdin, BinaryIO):
+            fd = stdin
+        elif isinstance(stdin, TextIO):
+            fd = stdin.buffer
+        elif stdin == PIPE:
+            pipe = os.pipe()
+            self.stdin = os.fdopen(pipe[1], "w" if self.text else "wb")
+            fd = os.fdopen(pipe[0], "rb")
+        elif isinstance(stdin, int):
+            fd = os.fdopen(stdin, "rb")
+        elif stdin is None:
+            self.np.close_stdin()
+        else:
+            assert 0, f"Unhandled stdin={stdin}"
+        if fd is not None:
+            threading.Thread(
+                name=f"{self.np.name}WRITER",
+                target=lambda: copy_readfd_to_write(fd, self.np.write),
+                daemon=True,
+            ).start()
+
+    def __initialize_stdout(self, stdout: _FILE):
+        self.stdout: Optional[IO[T]] = None
+        fd: Optional[IO[bytes]] = None
+        if stdout == DEVNULL or stdout is None:
+            fd = open(os.devnull, "wb")
+        elif isinstance(stdout, BinaryIO):
+            fd = stdout
+        elif isinstance(stdout, TextIO):
+            fd = stdout.buffer
         elif self.__stdout_arg == PIPE:
-            stream = self.Stdout(self)
-            if self.text:
-                stream = io.TextIOWrapper(stream)
-            self.stdout = cast(IO[T], stream)
+            pipe = os.pipe()
+            self.stdout = os.fdopen(pipe[0], "r" if self.text else "rb")
+            fd = os.fdopen(pipe[1], "wb")
         else:
             assert 0, f"Unhandled stdout={self.__stdout_arg}"
-
-    def __output(self, buf: bytes) -> Iterator[int]:
-        log.debug(f"RRAW len={len(buf)} {self.__stdout_arg}")
-        if self.__stdout_arg is sys.stdout:
-            sys.stdout.buffer.write(buf)
-        elif self.__stdout_arg == PIPE:
-            for c in buf:
-                yield c
-        else:
-            assert 0, f"Unhandled stdout={self.__stdout_arg}"
-
-    def __readergen(self) -> Iterator[int]:
-        while self.ws:
-            line = self.ws.recv()
-            if not line:
-                break
-            frame: dict = json.loads(line)
-            fstderr: Optional[dict] = frame.get("stderr")
-            if fstderr:
-                data: Optional[str] = fstderr.get("data")
-                if data:
-                    txt: str = base64.b64decode(data.encode()).decode(errors="replace")
-                    eprint(txt, end="")
-            fstdout: Optional[dict] = frame.get("stdout")
-            if fstdout:
-                data: Optional[str] = fstdout.get("data")
-                if data:
-                    buf = base64.b64decode(data.encode())
-                    for c in self.__output(buf):
-                        yield c
-            fexited = frame.get("exited")
-            if fexited:
-                self.__returncode = frame["result"].get("exit_code", 0)
-                break
+        assert fd is not None
+        self.readthread = threading.Thread(
+            name=f"{self.np.name}READER",
+            target=lambda: copy_read1_to_writefd(self.np.read1(), fd),
+            daemon=True,
+        )
+        self.readthread.start()
 
     def __enter__(self):
         return self
@@ -256,104 +376,17 @@ class NomadPopen(Generic[T]):
 
     @property
     def returncode(self):
-        assert (
-            self.__returncode is not None
-        ), f"nomad alloc exec {self.cmd} not finished"
-        return self.__returncode
+        assert self.np.returncode is not None, f"{self.np.name} not finished"
+        return self.np.returncode
 
     def wait(self):
-        assert self.ws
-        self._close_stream("stdin")
-        for _ in self._reader:
-            pass
-        if self.__returncode is None:
-            raise Exception(
-                f"when executing nomad alloc exec {self.cmd}"
-                "the websocket was closed by Nomad server without sending the exit code of the process."
-            )
-        log.debug("closing")
-        self.ws.close()
-        self.ws = None
+        self.readthread.join()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.wait()
 
-    def _close_stream(self, stream: str):
-        """Send message to Nomad to close specific stream"""
-        assert self.ws
-        if stream in self.__closed:
-            return
-        self.__closed.add(stream)
-        msg = json.dumps({stream: {"close": True}})
-        log.debug(f"W {msg}")
-        try:
-            self.ws.send(msg)
-        except BrokenPipeError:
-            self.ws.close()
-            self.ws = None
-            raise
-
-    def write(self, s: bytes) -> int:
-        assert isinstance(s, bytes)
-        assert self.ws
-        msg = json.dumps({"stdin": {"data": base64.b64encode(s).decode()}})
-        log.debug(f"W stdin:data:{s!r}")
-        return self.ws.send(msg)
-
-    def read(self, size: int = -1) -> bytes:
-        acc: bytearray = bytearray()
-        for c in self._reader:
-            acc.append(c)
-            if size != -1 and len(acc) == size:
-                break
-        accbytes = bytes(acc)
-        log.debug(f"R({size}) {accbytes!r}")
-        return accbytes
-
-    @dataclasses.dataclass
-    class Stdin(BinaryIO):
-        p: NomadPopen
-
-        @override
-        def fileno(self) -> int:
-            return -1
-
-        @override
-        def writable(self) -> bool:
-            return True
-
-        @override
-        def write(self, s) -> int:
-            assert isinstance(s, bytes)
-            return self.p.write(s)
-
-        @override
-        def close(self):
-            self.p._close_stream("stdin")
-
-    @dataclasses.dataclass
-    class Stdout(BinaryIO):
-        p: NomadPopen
-
-        @override
-        def fileno(self) -> int:
-            return -1
-
-        @override
-        def readable(self) -> bool:
-            return True
-
-        @override
-        def read(self, size: int = -1) -> bytes:
-            return self.p.read(size)
-
-        @override
-        def close(self):
-            self.p._close_stream("stdout")
-
     def raise_for_returncode(self, output: Optional[Union[str, bytes]] = None):
-        if self.returncode:
-            raise subprocess.CalledProcessError(self.returncode, self.cmd, output, None)
+        self.np.raise_for_returncode()
 
 
 ###############################################################################
@@ -517,7 +550,7 @@ if __name__ == "__main__":
     if args.debug:
         log.setLevel(level=logging.DEBUG)
     print(args)
-    job = nomad_find_job(args.job)
+    spec = find_job(args.job)
     allocid = find_job_alloc(args.job, args.task)
     if args.mode == "check_output":
         output = ""
