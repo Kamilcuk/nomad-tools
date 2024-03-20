@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import collections
 import contextlib
 import enum
 import logging
@@ -224,7 +225,7 @@ class NomadMypath(Mypath):
         path: str = self.path
         parts: List[str] = path[::-1].split("/", 1)
         noslash: bool = len(parts) == 1
-        searchdir: str = "." if noslash else parts[1][::-1] + "/"
+        searchdir: str = "." if noslash else (parts[1][::-1] + "/")
         searchname: str = parts[0][::-1]
         searchnamenoglob: str = (
             searchname.replace("\\", "\\\\")
@@ -232,18 +233,20 @@ class NomadMypath(Mypath):
             .replace(r"?", r"\?")
             .replace(r"[", r"\[")  # ]]
         )
-        script = " ".join(
-            [
-                r'find "$1" -maxdepth 1 -mindepth 1 -type f -name "$2*";',
-                r'find "$1" -maxdepth 1 -mindepth 1 -type d -name "$2*" |',
-                r'while IFS= read -r line; do printf "%s\n" "$line/"; done',
-            ]
+        # Repetition in output means it is a directory.
+        # Technically, maxdepth and mindepth are not POSIX.
+        cmd: str = (
+            f'find {quote(searchdir)} -maxdepth 1 -mindepth 1 -name {quote(searchnamenoglob)}"*"'
+            f' "(" -type f  -print ")" -o "(" -type d -print -print ")"'
         )
-        cmd: List[str] = ["sh", "-c", script, "--", searchdir, searchnamenoglob]
-        cmdstr = quotearr(cmd)
-        output = self.check_output(cmdstr)
+        output = self.check_output(cmd)
+        # Add trailing / to directories.
+        ret: List[str] = [
+            k if v == 1 else (k + "/")
+            for k, v in collections.Counter(output.rstrip("\n").split("\n")).items()
+        ]
         # In case of noslash is given, the initial part is going to be './'. Strip it.
-        ret = [x[2 if noslash else 0 :] for x in output.splitlines()]
+        ret = [x[2 if noslash else 0 :] for x in ret]
         return ret
 
 
