@@ -103,12 +103,6 @@ class ExecStreamingOutput(DataDict):
 
 
 class NomadProcess:
-    """
-    An implementation of subprocess.Popen on top of Nomad Exec Alocation API.
-    https://developer.hashicorp.com/nomad/api-docs/allocations#exec-allocation
-    https://docs.python.org/3/library/subprocess.html
-    """
-
     def __init__(self, allocid: str, task: str, args: List[str]):
         assert allocid
         assert task
@@ -129,6 +123,7 @@ class NomadProcess:
     def __reader(self) -> Iterator[bytes]:
         while self.ws.connected:
             line = self.ws.recv()
+            eprint(f"{line}")
             if not line:
                 break
             frame = ExecStreamingOutput(json.loads(line))
@@ -155,7 +150,7 @@ class NomadProcess:
 
     def __close_stream(self, stream: str):
         """Send message to Nomad to close specific stream"""
-        if self.ws.connected:
+        if not self.ws.connected:
             return
         if stream in self.__closed:
             return
@@ -173,7 +168,7 @@ class NomadProcess:
         pass
 
     def terminate(self):
-        log.debug("closing")
+        log.debug("closing ws")
         self.ws.close()
 
     def wait(self):
@@ -183,7 +178,7 @@ class NomadProcess:
         self.read()
 
     def read(self) -> bytes:
-        return functools.reduce(bytes.__add__, self.read1())
+        return functools.reduce(bytes.__add__, self.read1(), b"")
 
     def read1(self) -> Iterator[bytes]:
         return self.__readergen
@@ -319,17 +314,26 @@ class NomadPopen(Generic[T]):
             pipe = os.pipe()
             self.stdin = os.fdopen(pipe[1], "w" if self.text else "wb")
             fd = os.fdopen(pipe[0], "rb")
-        elif isinstance(stdin, int):
+        elif isinstance(stdin, int) and stdin >= 0:
             fd = os.fdopen(stdin, "rb")
         elif stdin is None:
             self.np.close_stdin()
         else:
             assert 0, f"Unhandled stdin={stdin}"
         if fd is not None:
+
+            def writer():
+                try:
+                    with fd as f:
+                        for buf in f:
+                            self.np.write(buf)
+                except BrokenPipeError:
+                    pass
+                finally:
+                    self.np.close_stdin()
+
             threading.Thread(
-                name=f"{self.np.name}WRITER",
-                target=lambda: copy_readfd_to_write(fd, self.np.write),
-                daemon=True,
+                name=f"{self.np.name}WRITER", target=writer, daemon=True
             ).start()
 
     def __initialize_stdout(self, stdout: _FILE):
@@ -345,6 +349,8 @@ class NomadPopen(Generic[T]):
             pipe = os.pipe()
             self.stdout = os.fdopen(pipe[0], "r" if self.text else "rb")
             fd = os.fdopen(pipe[1], "wb")
+        elif isinstance(stdout, int) and stdout >= 0:
+            fd = os.fdopen(stdout, "wb")
         else:
             assert 0, f"Unhandled stdout={self.__stdout_arg}"
         assert fd is not None
@@ -386,6 +392,7 @@ class NomadPopen(Generic[T]):
         self.wait()
 
     def raise_for_returncode(self, output: Optional[Union[str, bytes]] = None):
+        self.readthread.join()
         self.np.raise_for_returncode()
 
 
@@ -537,8 +544,9 @@ if __name__ == "__main__":
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--text", action="store_false")
     parser.add_argument(
+        "-m",
         "--mode",
-        choices="check_output run".split(),
+        choices="check_output run popen".split(),
         default="check_output",
     )
     parser.add_argument("job")
@@ -549,8 +557,8 @@ if __name__ == "__main__":
         websocket.enableTrace(True)
     if args.debug:
         log.setLevel(level=logging.DEBUG)
-    print(args)
-    spec = find_job(args.job)
+    print("ARGS", args)
+    # spec = find_job(args.job)
     allocid = find_job_alloc(args.job, args.task)
     if args.mode == "check_output":
         output = ""
@@ -562,3 +570,14 @@ if __name__ == "__main__":
             print(output)
     elif args.mode == "run":
         run(allocid, args.task, args.cmd, input=args.input, text=args.text)
+    elif args.mode == "popen":
+        with NomadPopen(
+            allocid,
+            args.task,
+            args.cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            text=args.text,
+        ) as pp:
+            out = pp.communicate(args.input if args.text else args.input.encode())
+            print(f"{out[0]!r}")

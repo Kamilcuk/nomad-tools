@@ -539,9 +539,6 @@ class TaskLogger(threading.Thread):
             },
         ) as stream:
             for event in self.read_json_stream(stream):
-                if self.startedtime_s is None:
-                    self.startedtime_s = time.time_ns()
-                    DB.send_empty_event()
                 if event:
                     line64: Optional[str] = event.get("Data")
                     if line64:
@@ -558,6 +555,9 @@ class TaskLogger(threading.Thread):
                 else:
                     # Nomad json stream periodically sends empty {}.
                     self.taskout([])
+                if self.startedtime_s is None:
+                    self.startedtime_s = time.time_ns()
+                    DB.send_empty_event()
                 if self.exittime_s:
                     if self.exittime_s > time.time():
                         DB.send_empty_event()
