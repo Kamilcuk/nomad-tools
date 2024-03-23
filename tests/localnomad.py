@@ -8,10 +8,10 @@ from shlex import quote, split
 from typing import List
 
 parser = argparse.ArgumentParser()
+parser.add_argument("-l", "--log-level", default="info")
 parser.add_argument("version", nargs="?")
 args = parser.parse_args()
-DIR = Path(__file__).parent
-os.chdir(DIR)
+DIR: Path = Path(__file__).parent.parent
 
 if not args.version:
     cmdstr: str = "nomad-tools downloadrelease --showversion nomad"
@@ -19,17 +19,21 @@ if not args.version:
     print(f"+ {cmdstr}")
     args.version = subprocess.check_output(cmd, text=True).strip()
 
-exe = Path("build") / f"nomad{args.version}"
+exe: Path = DIR / f"build/bin/nomad{args.version}"
 if not exe.exists():
-    cmdstr = f"nomad-tools downloadrelease -p {quote(args.version)} nomad {quote(str(exe))}"
+    cmdstr = (
+        f"nomad-tools downloadrelease -p {quote(args.version)} nomad {quote(str(exe))}"
+    )
     cmd = split(cmdstr)
     print(f"+ {cmdstr}")
     subprocess.check_call(cmd)
 
-cmd = [
+config: Path = DIR / "tests/nomad.hcl"
+assert config.exists()
+cmd: List[str] = [
     *(["sudo"] if os.getuid() != 0 else []),
     str(exe),
-    *"agent -dev -config ./nomad.hcl -log-level debug".split(),
+    *f"agent -dev -config {quote(str(config))} -log-level {args.log_level}".split(),
 ]
 cmdstr = " ".join(quote(x) for x in cmd)
 print(f"+ {cmdstr}")
