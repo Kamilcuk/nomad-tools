@@ -420,16 +420,15 @@ class Mylogger:
 
 @dataclass(frozen=True)
 class TaskKey:
-    """Represent data to unique identify a task"""
+    """Represent data to uniquely identify a task"""
 
     allocid: str
-    jobversion: str
     nodename: str
     group: str
     task: str
 
     def __str__(self):
-        return f"{self.allocid:.6}:v{self.jobversion}:{self.group}:{self.task}"
+        return f"{self.allocid:.6}:{self.group}:{self.task}"
 
     def asdict(self):
         return asdict(self)
@@ -666,7 +665,6 @@ class AllocWorker:
                 continue
             tk = TaskKey(
                 alloc.ID,
-                str(DB.get_allocation_jobversion(alloc, "?")),
                 alloc.NodeName,
                 alloc.TaskGroup,
                 taskname,
@@ -820,9 +818,7 @@ class NotifierWorker:
         if flagdebug.debug("exitcode"):
             for allocid, w in self.workers.items():
                 for taskkey, taskhandler in w.taskhandlers.items():
-                    eprint(
-                        f"EXITCODE: {allocid[:6]} {taskkey.group}/{taskkey.task} {taskhandler.exitcode}"
-                    )
+                    eprint(f"EXITCODE: {taskkey} {taskhandler.exitcode}")
         if len(tasks_exitcodes) == 0:
             return ExitcodeRet(ExitCode.no_allocations, "there were no allocations")
         unfinished_tasks = [v for v in tasks_exitcodes if v is None]
