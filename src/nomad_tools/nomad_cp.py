@@ -139,8 +139,10 @@ class NomadMypath(Mypath):
     @override
     def check_output(self, cmd: str) -> str:
         log.debug(f"+ {self.allocation}/{self.task} {cmd}")
-        with taskexec.NomadProcess(self.allocation, self.task, split(cmd)) as pp:
+        with taskexec.TaskExec(self.allocation, self.task, split(cmd)) as pp:
+            pp.close_stdin()
             buf: bytes = pp.read()
+        pp.raise_for_returncode(buf)
         return buf.decode(errors="replace")
 
     @override
@@ -152,16 +154,14 @@ class NomadMypath(Mypath):
         stdout: int = subprocess.DEVNULL,
     ) -> Iterator[MyPopen]:
         log.debug(f"+ {self.allocation}/{self.task} {cmd}")
-        with subprocess.Popen(
-            [
-                *"nomad alloc exec -i=false -t=false -task".split(),
-                self.task,
-                self.allocation,
-                *split(cmd),
-            ],
-            stdin=stdin,
-            stdout=stdout,
-        ) as pp:
+        i = str(bool(stdin != subprocess.DEVNULL)).lower()
+        cmdarr: List[str] = [
+            *f"nomad alloc exec -i={quote(i)} -t=false -task={quote(self.task)}".split(),
+            self.allocation,
+            *split(cmd),
+        ]
+        log.debug(f"+ {quotearr(cmdarr)}")
+        with subprocess.Popen(cmdarr, stdin=stdin, stdout=stdout) as pp:
             yield pp
         popen_raise_for_returncode(pp)
 
@@ -243,7 +243,8 @@ class NomadMypath(Mypath):
         # Add trailing / to directories.
         ret: List[str] = [
             k if v == 1 else (k + "/")
-            for k, v in collections.Counter(output.rstrip("\n").split("\n")).items()
+            for k, v in collections.Counter(output.split("\n")).items()
+            if k
         ]
         # In case of noslash is given, the initial part is going to be './'. Strip it.
         ret = [x[2 if noslash else 0 :] for x in ret]
@@ -578,11 +579,16 @@ class NomadOrHostMyPath(click.ParamType):
 
 
 def nomadpipe(src: Mypath, dst: Mypath, srccmd: str, dstcmd: str):
-    with src.popen(srccmd, stdout=subprocess.PIPE) as psrc:
-        with dst.popen(dstcmd, stdin=subprocess.PIPE) as pdst:
-            assert psrc.stdout
-            assert pdst.stdin
-            transfer_stats(psrc.stdout.fileno(), pdst.stdin.fileno())
+    stats: bool = (ARGS.stats is None and sys.stderr.isatty()) or ARGS.stats is True
+    with dst.popen(dstcmd, stdin=subprocess.PIPE) as pdst:
+        assert pdst.stdin
+        if stats:
+            with src.popen(srccmd, stdout=subprocess.PIPE) as psrc:
+                assert psrc.stdout
+                transfer_stats(psrc.stdout.fileno(), pdst.stdin.fileno(), ARGS.pv)
+        else:
+            with src.popen(srccmd, stdout=pdst.stdin.fileno()) as psrc:
+                pass
 
 
 def tar_out_opt() -> str:
@@ -668,7 +674,7 @@ def copy_mode(src: Mypath, dst: Mypath):
                 dst.mkdir()
             tar_c = f"-C {src.quotepath()} ."
             # And unpack to parent directory.
-            components: int = str(src.path).count("/")
+            components: int = src.path.count("/")
             tar_x = f"-C {dst.quotepath()} --strip-components={components}"
             nomadtarpipe(src, dst, tar_c, tar_x)
         # DEST_PATH exists and is a file
@@ -750,14 +756,26 @@ class Args:
         help="Archive mode (copy all uid/gid information)",
     )
     #
+    rsync: bool = clickdc.option(help="Rsync two paths")
+    rsyncargs: str = clickdc.option(help="Shell quoted rsync options", default="")
+    #
+    pv: Optional[bool] = clickdc.option(
+        "--pv/--no-pv",
+        help="Use pv to show statistics. By default, if pv is available, it will be used.",
+        default=None,
+    )
+    stats: Optional[bool] = clickdc.option(
+        "--stats/--no-stats",
+        help="Display statistics. By default, if stderr is a terminal, stats will be shown.",
+        default=None,
+    )
+    #
     dryrun: bool = clickdc.option(
         "-n",
         help="Do tar -vt for unpacking. Usefull for listing files for debugging.",
     )
     verbose: int = clickdc.option("-v", "--verbose", count=True)
     quiet: int = clickdc.option("-q", "--quiet", count=True)
-    rsync: bool = clickdc.option(help="Rsync two paths")
-    rsyncargs: str = clickdc.option(help="Shell quoted rsync options", default="")
     source: Mypath = clickdc.argument(type=NomadOrHostMyPath())
     dest: Mypath = clickdc.argument(type=NomadOrHostMyPath())
 
@@ -802,6 +820,7 @@ def cli(args: Args):
         else logging.WARNING,
         format="%(levelname)s %(name)s:%(funcName)s:%(lineno)d: %(message)s",
     )
+    log.debug(f"ARGS={ARGS}")
     if ARGS.rsync:
         rsync_mode(ARGS.source, ARGS.dest)
     elif ARGS.source.isstdin() or ARGS.dest.isstdin():

@@ -221,7 +221,7 @@ def prefixed_run(prefix: str):
     return inner
 
 
-run_nomad_cp = prefixed_run("python3 -m nomad_tools.entrypoint cp -vv")
+run_nomad_cp = prefixed_run("python3 -m nomad_tools.entrypoint cp -vv --no-stats --no-pv")
 run_nomad_watch = prefixed_run("python3 -m nomad_tools.entrypoint watch -v")
 run_nomad_vardir = prefixed_run("python3 -m nomad_tools.entrypoint vardir -v")
 run_nomad_dockers = prefixed_run("python3 -m nomad_tools.entrypoint dockers -v")

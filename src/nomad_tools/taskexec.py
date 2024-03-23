@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import base64
-import collections
 import functools
 import json
 import logging
@@ -13,7 +12,6 @@ from typing import (
     IO,
     Any,
     BinaryIO,
-    Callable,
     Generic,
     Iterator,
     List,
@@ -89,6 +87,7 @@ def find_job(job: str) -> Tuple[str, str]:
 
 class FrameData(DataDict):
     data: Optional[str] = None
+    close: Optional[bool] = None
 
 
 class FrameResult(DataDict):
@@ -102,7 +101,9 @@ class ExecStreamingOutput(DataDict):
     result: Optional[FrameResult] = None
 
 
-class NomadProcess:
+class TaskExec:
+    """Abstraction over Nomad websocket API for running argument in task"""
+
     def __init__(self, allocid: str, task: str, args: List[str]):
         assert allocid
         assert task
@@ -123,7 +124,6 @@ class NomadProcess:
     def __reader(self) -> Iterator[bytes]:
         while self.ws.connected:
             line = self.ws.recv()
-            eprint(f"{line}")
             if not line:
                 break
             frame = ExecStreamingOutput(json.loads(line))
@@ -160,16 +160,14 @@ class NomadProcess:
         self.__send(msg)
 
     def close_stdin(self):
-        return self.__close_stream("stdin")
-
-    def close_stdout(self):
         # Only stdin is handled in Nomad
         # https://github.com/hashicorp/nomad/blob/695bb7ffcf90fc9455152dadd2a504bc4499e3b3/plugins/drivers/execstreaming.go#L41
-        pass
+        return self.__close_stream("stdin")
 
     def terminate(self):
-        log.debug("closing ws")
-        self.ws.close()
+        if self.ws.connected:
+            log.debug("closing ws")
+            self.ws.close()
 
     def wait(self):
         if not self.ws.connected:
@@ -188,6 +186,12 @@ class NomadProcess:
         log.debug(f"W stdin:data:{s!r}")
         self.__send(msg)
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.terminate()
+
     def raise_for_returncode(self, output: Optional[Union[str, bytes]] = None):
         if self.returncode is None:
             raise Exception(
@@ -196,12 +200,6 @@ class NomadProcess:
             )
         if self.returncode:
             raise subprocess.CalledProcessError(self.returncode, self.name, output)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.wait()
 
 
 ###############################################################################
@@ -218,28 +216,6 @@ _InputString = Optional[_StrAny]
 
 
 T = TypeVar("T", bytes, str)
-
-
-def drain_iter(chan: Iterator[Any]):
-    return collections.deque(chan, maxlen=0)
-
-
-def copy_read1_to_writefd(read1: Iterator[bytes], fd: BinaryIO):
-    with fd as f:
-        for buf in read1:
-            try:
-                f.write(buf)
-            except BrokenPipeError:
-                break
-
-
-def copy_readfd_to_write(fd: BinaryIO, write: Callable[[bytes], None]):
-    with fd as f:
-        for buf in f:
-            try:
-                write(buf)
-            except BrokenPipeError:
-                break
 
 
 class NomadPopen(Generic[T]):
@@ -294,32 +270,47 @@ class NomadPopen(Generic[T]):
         stdout: _FILE = None,
         text: bool = False,
     ):
-        self.np = NomadProcess(allocid, task, args)
+        self.np = TaskExec(allocid, task, args)
         self.text = text
-        self.__stdin_arg = stdin
-        self.__stdout_arg = stdout
-        self.__initialize_stdin(stdin)
-        self.__initialize_stdout(stdout)
+        self.__initialize_stdin(self.__stdin_to_fd(stdin))
+        self.__initialize_stdout(self.__stdout_to_fd(stdout))
 
-    def __initialize_stdin(self, stdin: _FILE):
+    def __stdin_to_fd(self, stdin: _FILE) -> Optional[IO[bytes]]:
         self.stdin: Optional[IO[T]] = None
-        fd: Optional[IO[bytes]] = None
-        if stdin == DEVNULL:
-            pass
+        if stdin == DEVNULL or stdin is None:
+            return None
         elif isinstance(stdin, BinaryIO):
-            fd = stdin
+            return stdin
         elif isinstance(stdin, TextIO):
-            fd = stdin.buffer
+            return stdin.buffer
         elif stdin == PIPE:
             pipe = os.pipe()
             self.stdin = os.fdopen(pipe[1], "w" if self.text else "wb")
-            fd = os.fdopen(pipe[0], "rb")
+            return os.fdopen(pipe[0], "rb")
         elif isinstance(stdin, int) and stdin >= 0:
-            fd = os.fdopen(stdin, "rb")
-        elif stdin is None:
-            self.np.close_stdin()
+            return os.fdopen(stdin, "rb")
         else:
             assert 0, f"Unhandled stdin={stdin}"
+
+    def __stdout_to_fd(self, stdout: _FILE) -> IO[bytes]:
+        self.stdout: Optional[IO[T]] = None
+        if stdout == DEVNULL or stdout is None:
+            pass
+        elif isinstance(stdout, BinaryIO):
+            return stdout
+        elif isinstance(stdout, TextIO):
+            return stdout.buffer
+        elif stdout == PIPE:
+            pipe = os.pipe()
+            self.stdout = os.fdopen(pipe[0], "r" if self.text else "rb")
+            return os.fdopen(pipe[1], "wb")
+        elif isinstance(stdout, int) and stdout >= 0:
+            return os.fdopen(stdout, "wb")
+        else:
+            assert 0, f"Unhandled stdout={self.stdout}"
+        return open(os.devnull, "wb")
+
+    def __initialize_stdin(self, fd: Optional[IO[bytes]]):
         if fd is not None:
 
             def writer():
@@ -329,37 +320,38 @@ class NomadPopen(Generic[T]):
                             self.np.write(buf)
                 except BrokenPipeError:
                     pass
+                except Exception as e:
+                    log.exception(e)
                 finally:
                     self.np.close_stdin()
 
             threading.Thread(
                 name=f"{self.np.name}WRITER", target=writer, daemon=True
             ).start()
-
-    def __initialize_stdout(self, stdout: _FILE):
-        self.stdout: Optional[IO[T]] = None
-        fd: Optional[IO[bytes]] = None
-        if stdout == DEVNULL or stdout is None:
-            fd = open(os.devnull, "wb")
-        elif isinstance(stdout, BinaryIO):
-            fd = stdout
-        elif isinstance(stdout, TextIO):
-            fd = stdout.buffer
-        elif self.__stdout_arg == PIPE:
-            pipe = os.pipe()
-            self.stdout = os.fdopen(pipe[0], "r" if self.text else "rb")
-            fd = os.fdopen(pipe[1], "wb")
-        elif isinstance(stdout, int) and stdout >= 0:
-            fd = os.fdopen(stdout, "wb")
         else:
-            assert 0, f"Unhandled stdout={self.__stdout_arg}"
-        assert fd is not None
+            self.np.close_stdin()
+
+    def __initialize_stdout(self, fd: IO[bytes]):
+        def reader():
+            try:
+                with fd as f:
+                    for buf in self.np.read1():
+                        f.write(buf)
+            except BrokenPipeError:
+                pass
+            except Exception as e:
+                log.exception(e)
+
         self.readthread = threading.Thread(
-            name=f"{self.np.name}READER",
-            target=lambda: copy_read1_to_writefd(self.np.read1(), fd),
-            daemon=True,
+            name=f"{self.np.name}READER", target=reader, daemon=True
         )
         self.readthread.start()
+
+    ###############################################################################
+
+    @property
+    def name(self):
+        return self.np.name
 
     def __enter__(self):
         return self
@@ -368,27 +360,30 @@ class NomadPopen(Generic[T]):
         self, input: Optional[Union[str, bytes]] = None
     ) -> Tuple[Optional[Union[str, bytes]], None]:
         if input:
-            assert self.__stdin_arg == PIPE
             assert self.stdin
-            assert isinstance(input, str) if self.text else isinstance(input, bytes)
+            assert isinstance(input, str if self.text else bytes)
             self.stdin.write(cast(T, input))
+        if self.stdin:
             self.stdin.close()
         output: Optional[T] = None
-        if self.__stdout_arg == PIPE:
-            assert self.stdout
+        if self.stdout:
             output = self.stdout.read()
-            assert isinstance(output, str) if self.text else isinstance(output, bytes)
+            assert isinstance(output, str if self.text else bytes)
         return output, None
 
     @property
-    def returncode(self):
-        assert self.np.returncode is not None, f"{self.np.name} not finished"
+    def returncode(self) -> Optional[int]:
         return self.np.returncode
 
-    def wait(self):
-        self.readthread.join()
+    def wait(self, timeout: Optional[float] = None):
+        self.readthread.join(timeout)
+
+    def terminate(self):
+        self.np.terminate()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type:
+            self.terminate()
         self.wait()
 
     def raise_for_returncode(self, output: Optional[Union[str, bytes]] = None):
@@ -539,16 +534,18 @@ if __name__ == "__main__":
 
     logging.basicConfig(level=logging.DEBUG)
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input")
+    parser.add_argument("-i", "--input")
     parser.add_argument("--trace", action="store_true")
-    parser.add_argument("--debug", action="store_true")
-    parser.add_argument("--text", action="store_false")
+    parser.add_argument("-d", "--debug", action="store_true")
+    parser.add_argument("-t", "--text", action="store_true")
     parser.add_argument(
         "-m",
         "--mode",
         choices="check_output run popen".split(),
         default="check_output",
     )
+    parser.add_argument("--stdin", "--in", default=str(subprocess.PIPE))
+    parser.add_argument("--stdout", "--out", default=str(subprocess.PIPE))
     parser.add_argument("job")
     parser.add_argument("task")
     parser.add_argument("cmd", nargs="+")
@@ -571,13 +568,27 @@ if __name__ == "__main__":
     elif args.mode == "run":
         run(allocid, args.task, args.cmd, input=args.input, text=args.text)
     elif args.mode == "popen":
-        with NomadPopen(
-            allocid,
-            args.task,
-            args.cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
+
+        def parse_stream(txt: str) -> int:
+            map = {"pipe": subprocess.PIPE, "null": subprocess.DEVNULL, "none": None}
+            return map[txt.lower()] if txt.lower() in map else int(txt)
+
+        ppargs = dict(
+            allocid=allocid,
+            task=args.task,
+            args=args.cmd,
+            stdin=parse_stream(args.stdin),
+            stdout=parse_stream(args.stdout),
             text=args.text,
-        ) as pp:
-            out = pp.communicate(args.input if args.text else args.input.encode())
+        )
+        print(f"PIPE={subprocess.PIPE} DEVNULL={subprocess.DEVNULL}")
+        print(f"NomadPopen({ppargs})")
+        with NomadPopen(**ppargs) as pp:
+            out = pp.communicate(
+                None
+                if args.input is None
+                else args.input
+                if args.text
+                else args.input.encode()
+            )
             print(f"{out[0]!r}")
