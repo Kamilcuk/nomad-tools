@@ -465,8 +465,12 @@ class TaskLogger(threading.Thread):
         self.ignoretime_ns: int = START_NS + int(ARGS.lines_timeout * 10**9)
         """If ignore time is in the past, it is no longer relevant anyway."""
         #
-        self.startedtime_s: Optional[float] = None
-        self.exittime_s: Optional[float] = None
+        self.exitreq: bool = False
+        """stop() was called"""
+        self.started: bool = False
+        """This logger is assumed to have started and printed logs"""
+        self.startedtimer: Optional[threading.Timer] = None
+        """A timer that will set self.stated"""
         #
         if ARGS.lines < 0 or self.ignoretime_ns < time.time_ns():
             self.ignoretime_ns = 0
@@ -526,6 +530,10 @@ class TaskLogger(threading.Thread):
     def __typestr(self):
         return "stderr" if self.stderr else "stdout"
 
+    def __set_started(self):
+        self.started = True
+        DB.send_empty_event()
+
     def __run_in(self):
         with mynomad.stream(
             f"client/fs/logs/{self.tk.allocid}",
@@ -554,13 +562,19 @@ class TaskLogger(threading.Thread):
                 else:
                     # Nomad json stream periodically sends empty {}.
                     self.taskout([])
-                if self.startedtime_s is None:
-                    self.startedtime_s = time.time_ns()
-                    DB.send_empty_event()
-                if self.exittime_s:
-                    if self.exittime_s > time.time():
-                        DB.send_empty_event()
-                        break
+                #
+                # self.started is set shutdown_timeout seconds after receiving first message.
+                if self.startedtimer is None:
+                    self.startedtimer = threading.Timer(
+                        ARGS.shutdown_timeout, self.__set_started
+                    )
+                    self.startedtimer.start()
+                # If started and requested to exit, then exit.
+                if self.started and self.exitreq:
+                    break
+        # If the stream has ended by itself, also set started.
+        self.__set_started()
+        stream.raise_for_status()
 
     def run(self):
         """Listen to Nomad log stream and print the logs"""
@@ -588,10 +602,7 @@ class TaskLogger(threading.Thread):
             self.stop()
 
     def stop(self):
-        if self.exittime_s is None:
-            self.exittime_s = time.time() + ARGS.shutdown_timeout
-        if self.startedtime_s is None:
-            self.startedtime_s = time.time()
+        self.exitreq = True
 
 
 @dataclass
@@ -792,6 +803,9 @@ class NotifierWorker:
             for th in w.taskhandlers.values()
             for logger in th.loggers or []
         ]
+
+    def all_threads_started(self) -> bool:
+        return all(th.started for th in self.get_threads())
 
     def join(self):
         threads = self.get_threads()
@@ -1098,8 +1112,7 @@ class _NomadJobWatcherDetail(ABC):
                 isPurged=DB.job_purged(),
                 jobDead=self.job.is_dead() if self.job else None,
                 notifiers=[
-                    f"{th.name}={th.startedtime_s}"
-                    for th in self.notifier.get_threads()
+                    f"{th.name}={th.started}" for th in self.notifier.get_threads()
                 ],
             )
             eprint(f"LOOP: {strdict(info)}")
@@ -1125,7 +1138,7 @@ class _NomadJobWatcherDetail(ABC):
                 # Otherwise the events may be related to a previous job version.
                 (self.eval is None or not self.eval.is_pending_or_blocked())
                 # Make sure all the threads are started outputting logs.
-                and all(th.startedtime_s for th in self.notifier.get_threads())
+                and self.notifier.all_threads_started()
             ):
                 yield
             if ARGS.no_follow and time.time() > self.no_follow_timeend:
@@ -1472,7 +1485,8 @@ class NomadJobWatcherUntilFinished(NomadJobWatcher):
                 ARGS.purge
                 or (ARGS.purge_successful and self.job_finished_successfully())
             ):
-                self.stop_job(True)
+                if self.notifier.all_threads_started():
+                    self.stop_job(True)
             else:
                 log.info(self.job_dead_message())
                 return True
@@ -1706,7 +1720,7 @@ class Args(LogOptions, NotifyOptions):
         help="When using --lines the number of lines is best-efforted by ignoring lines for this specific time",
     )
     shutdown_timeout: float = clickdc.option(
-        default=2,
+        default=1,
         show_default=True,
         help="The time to wait to make sure task loggers received all logs when exiting.",
     )
