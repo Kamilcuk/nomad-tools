@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-import argparse
 import os
 import select
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from typing import Optional, TypeVar
@@ -29,17 +29,22 @@ class _TransferStatsFileno:
         self.pipe = os.pipe()
         self.thread = threading.Thread(target=self.__stats)
 
+    def __stats_in(self):
+        with self.lock:
+            size = self.size
+        duration = time.time() - self.start
+        speed: float = size / duration
+        durationstr = f"{int(duration / 3600)}:{int(duration / 60 % 60):02d}:{int(duration % 60):02d}"
+        print(
+            f"{sizeof_fmt(size)} {durationstr} [{sizeof_fmt(speed)}/s]",
+            file=sys.stderr,
+            flush=True,
+        )
+
     def __stats(self):
-        while not self.end.is_set():
-            with self.lock:
-                size = self.size
-            duration = time.time() - self.start
-            speed: float = size / duration
-            durationstr = f"{int(duration / 3600)}:{int(duration / 60 % 60):02d}:{int(duration % 60):02d}"
-            print(
-                f"{sizeof_fmt(size)} {durationstr} [{sizeof_fmt(speed)}/s]", flush=True
-            )
-            time.sleep(1)
+        while not self.end.wait(1):
+            self.__stats_in()
+        self.__stats_in()
 
     def run(self, fin: int, fout: int):
         self.thread.start()
