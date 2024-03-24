@@ -12,6 +12,7 @@ from typing import (
     IO,
     Any,
     BinaryIO,
+    Dict,
     Generic,
     Iterator,
     List,
@@ -461,7 +462,9 @@ def run(
         output = p.communicate(input)[0]
     if check:
         p.raise_for_returncode(output)
-    return CompletedProcess(cmd, p.returncode, output, None)
+    return CompletedProcess(
+        cmd, p.returncode if p.returncode is not None else 400, output, None
+    )
 
 
 ###############################################################################
@@ -573,7 +576,7 @@ if __name__ == "__main__":
             map = {"pipe": subprocess.PIPE, "null": subprocess.DEVNULL, "none": None}
             return map[txt.lower()] if txt.lower() in map else int(txt)
 
-        ppargs = dict(
+        ppargs: Dict[str, Any] = dict(
             allocid=allocid,
             task=args.task,
             args=args.cmd,
