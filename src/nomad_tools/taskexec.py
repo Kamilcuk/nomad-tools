@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import functools
+import io
 import json
 import logging
 import os
@@ -92,7 +93,7 @@ class FrameData(DataDict):
 
 
 class FrameResult(DataDict):
-    exit_code: Optional[int] = 0
+    exit_code: int = 0
 
 
 class ExecStreamingOutput(DataDict):
@@ -125,6 +126,7 @@ class TaskExec:
     def __reader(self) -> Iterator[bytes]:
         while self.ws.connected:
             line = self.ws.recv()
+            log.debug(f"R: {line}")
             if not line:
                 break
             frame = ExecStreamingOutput(json.loads(line))
@@ -317,7 +319,12 @@ class NomadPopen(Generic[T]):
             def writer():
                 try:
                     with fd as f:
-                        for buf in f:
+                        # Use read1 if available.
+                        for buf in (
+                            iter(f.read1, b"")
+                            if isinstance(f, io.BufferedIOBase)
+                            else f
+                        ):
                             self.np.write(buf)
                 except BrokenPipeError:
                     pass
