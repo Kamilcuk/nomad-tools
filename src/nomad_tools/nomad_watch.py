@@ -64,7 +64,7 @@ log = logging.getLogger(__name__)
 ARGS = argparse.Namespace()
 """Arguments passed to this program"""
 
-START_NS: int = 0
+START_S: float = 0
 """This program start time, assigned from cli()"""
 
 COLORS = colors.init()
@@ -457,23 +457,12 @@ class TaskLogger(threading.Thread):
         """task key"""
         self.stderr: bool = stderr
         """is this stderr or stdout logger"""
-        #
-        self.ignoredlines: List[str] = []
-        """In the case of --lines argument, this is a buffer of spare lines to output"""
-        self.first_line: bool = True
-        """Ignore input lines if printing only trailing lines."""
-        self.ignoretime_ns: int = START_NS + int(ARGS.lines_timeout * 10**9)
-        """If ignore time is in the past, it is no longer relevant anyway."""
-        #
         self.exitreq: bool = False
         """stop() was called"""
         self.started: bool = False
         """This logger is assumed to have started and printed logs"""
         self.startedtimer: Optional[threading.Timer] = None
         """A timer that will set self.stated"""
-        #
-        if ARGS.lines < 0 or self.ignoretime_ns < time.time_ns():
-            self.ignoretime_ns = 0
 
     @staticmethod
     def read_json_txt(stream: requests.Response) -> Iterator[str]:
@@ -505,28 +494,6 @@ class TaskLogger(threading.Thread):
                 ):
                     log.warn(f"error decoding json: {txt} {e}")
 
-    def taskout(self, lines: List[str]):
-        """Output the lines"""
-        # If ignoring and this is first received line or the ignoring time is still happenning.
-        if self.ignoretime_ns and (
-            self.first_line or time.time_ns() < self.ignoretime_ns
-        ):
-            # Accumulate args.lines into ignoredlines array.
-            self.first_line = False
-            self.ignoredlines = lines
-            self.ignoredlines = self.ignoredlines[: ARGS.lines]
-        else:
-            if self.ignoretime_ns:
-                # If not ignoring lines, flush the accumulated lines.
-                lines = self.ignoredlines + lines
-                self.ignoredlines.clear()
-                # Disable further accumulation of ignored lines.
-                self.ignoretime_ns = 0
-            # Print the log lines.
-            for line in lines:
-                line = line.rstrip()
-                self.tk.log_task(self.stderr, line)
-
     def __typestr(self):
         return "stderr" if self.stderr else "stdout"
 
@@ -535,14 +502,15 @@ class TaskLogger(threading.Thread):
         DB.send_empty_event()
 
     def __run_in(self):
+        usestart = ARGS.lines < 0 or START_S + ARGS.lines_timeout < time.time()
         with mynomad.stream(
             f"client/fs/logs/{self.tk.allocid}",
             params={
                 "task": self.tk.task,
                 "type": self.__typestr(),
                 "follow": True,
-                "origin": "end" if self.ignoretime_ns else "start",
-                "offset": 50000 if self.ignoretime_ns else 0,
+                "origin": "start" if usestart else "end",
+                "offset": 0 if usestart else 50000,
             },
         ) as stream:
             for event in self.read_json_stream(stream):
@@ -637,7 +605,7 @@ class TaskHandler:
                     msgtime_ns
                     and (
                         ARGS.lines < 0
-                        or msgtime_ns >= START_NS
+                        or msgtime_ns >= int(START_S * 10**9)
                         or len(self.messages) < ARGS.lines
                     )
                     and set_not_in_add(self.messages, msgtime_ns)
@@ -1815,8 +1783,8 @@ def cli(args: Args):
     ARGS = args
     assert not (ARGS.follow and ARGS.no_follow), "--follow and --no-follow conflict"
     #
-    global START_NS
-    START_NS = time.time_ns()
+    global START_S
+    START_S = time.time()
     init_logging()
 
 
