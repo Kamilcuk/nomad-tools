@@ -965,11 +965,19 @@ class _NomadJobWatcherDetail(ABC):
         )
         self.notifier = NotifierWorker()
         """Notification worker dispatching Nomad stream events"""
-        self.no_follow_timeend: float = time.time() + ARGS.no_follow_timeout
-        """If in --no-follow mode, exit after this time"""
+        self.no_follow_end: bool = False
+        """Flag that is set once no_follow timeout passes"""
+        if ARGS.no_follow:
+            th = threading.Timer(ARGS.no_follow_timeout, self.__no_follow_timer)
+            th.setDaemon(True)
+            th.start()
         #
         DB.start()
         InterruptTwice.install()
+
+    def __no_follow_timer(self):
+        self.no_follow_end = True
+        DB.send_empty_event()
 
     def __db_init_cb(self) -> List[Event]:
         """Db initialization callback"""
@@ -1123,12 +1131,10 @@ class _NomadJobWatcherDetail(ABC):
         """Thread entrypoint that handles events from Nomad event stream database"""
         untilstr = (
             "forever"
-            if ARGS.all
-            else (
-                f"for {ARGS.no_follow_timeout} seconds"
-                if ARGS.no_follow
-                else f"until it is {self.endstatusstr}"
-            )
+            if ARGS.follow
+            else f"for {ARGS.no_follow_timeout} seconds"
+            if ARGS.no_follow
+            else f"until it is {self.endstatusstr}"
         )
         log.info(f"Watching job {self.jobid}@{mynomad.namespace} {untilstr}")
         for events in DB.events():
@@ -1143,7 +1149,7 @@ class _NomadJobWatcherDetail(ABC):
                 and self.notifier.all_threads_started()
             ):
                 yield
-            if ARGS.no_follow and time.time() > self.no_follow_timeend:
+            if self.no_follow_end:
                 break
         log.debug(f"Watching job {self.jobid}@{mynomad.namespace} exiting")
 
