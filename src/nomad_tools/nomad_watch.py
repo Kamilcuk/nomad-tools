@@ -674,6 +674,8 @@ class AllocWorker:
         for taskname, task in alloc.get_taskstates().items():
             if ARGS.task and not ARGS.task.search(taskname):
                 continue
+            if ARGS.node and not ARGS.node.search(alloc.NodeName):
+                continue
             tk = TaskKey(
                 alloc.ID,
                 alloc.NodeName,
@@ -1745,6 +1747,10 @@ class Args(LogOptions, NotifyOptions):
         "-g",
         type=re.compile,
         help="Only watch group names matching this regex.",
+    )
+    node: Optional[re.Pattern] = clickdc.option(
+        type=re.compile,
+        help="Only watch tasks running on nodes whose names match this regex.",
     )
     polling: bool = clickdc.option(
         help="Instead of listening to Nomad event stream, periodically poll for events.",
