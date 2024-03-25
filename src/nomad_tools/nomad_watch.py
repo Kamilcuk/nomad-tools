@@ -1672,6 +1672,15 @@ class NotifyOptions:
     )
 
 
+def click_validate(check: Callable[[Any], bool], msg: str):
+    def validator(ctx, param, value):
+        if not check(value):
+            raise click.BadParameter(msg)
+        return value
+
+    return validator
+
+
 @dataclass
 class Args(LogOptions, NotifyOptions):
     all: bool = clickdc.option(
@@ -1717,14 +1726,16 @@ class Args(LogOptions, NotifyOptions):
              """,
     )
     lines_timeout: float = clickdc.option(
-        default=0.5,
+        default=1,
         show_default=True,
         help="When using --lines the number of lines is best-efforted by ignoring lines for this specific time",
+        callback=click_validate(lambda x: x >= 0, "timeout must be greater than 0"),
     )
     shutdown_timeout: float = clickdc.option(
         default=1,
         show_default=True,
         help="The time to wait to make sure task loggers received all logs when exiting.",
+        callback=click_validate(lambda x: x >= 0, "timeout must be greater than 0"),
     )
     follow: bool = clickdc.option(
         help="Never exit",
@@ -1735,8 +1746,8 @@ class Args(LogOptions, NotifyOptions):
     no_follow_timeout: float = clickdc.option(
         default=3,
         show_default=True,
-        type=float,
         help="The time to run in --no-follow mode.",
+        callback=click_validate(lambda x: x >= 0, "timeout must be greater than 0"),
     )
     task: Optional[re.Pattern] = clickdc.option(
         "-t",
