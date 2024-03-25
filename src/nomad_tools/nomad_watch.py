@@ -407,14 +407,27 @@ class Mylogger:
             message=message,
         )
 
+    @staticmethod
+    def __get_allocid_jobversion(allocid: str) -> Optional[int]:
+        alloc = DB.allocations.get(allocid)
+        return None if not alloc else DB.get_allocation_jobversion(alloc)
+
     @classmethod
     def log_alloc(cls, allocid: str, **kwargs):
-        return cls.__log(LogWhat.alloc, id=allocid, **kwargs)
+        return cls.__log(
+            what=LogWhat.alloc,
+            id=allocid,
+            jobversion=cls.__get_allocid_jobversion(allocid),
+            **kwargs,
+        )
 
     @classmethod
     def log_std(cls, stderr: bool, allocid: str, **kwargs):
         return cls.__log(
-            LogWhat.stderr if stderr else LogWhat.stdout, id=allocid, **kwargs
+            what=LogWhat.stderr if stderr else LogWhat.stdout,
+            id=allocid,
+            jobversion=cls.__get_allocid_jobversion(allocid),
+            **kwargs,
         )
 
 

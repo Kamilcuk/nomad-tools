@@ -207,7 +207,7 @@ def test_nomad_watch2_deploymulti():
             f"start -var ok=false {testjobs[job]}",
             output=[
                 "Failed due to unhealthy allocations - rolling back to job",
-                re.compile("E>[0-9a-fA-F]*>v2>web> .*response"),
+                re.compile("E>[0-9a-fA-F]*>v3>web> .*response"),
             ],
             check=False,
         )
