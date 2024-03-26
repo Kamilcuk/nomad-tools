@@ -1384,7 +1384,6 @@ class NomadJobWatcher(_NomadJobWatcherEvents):
         DB.stop()
         self.notifier.join()
         DB.join()
-        mynomad.session.close()
 
     def get_exitcode(self) -> int:
         assert DB.stopevent.is_set(), f"{self.stop_threads.__name__} not called"
@@ -2028,7 +2027,4 @@ def mode_stopped(jobid: str):
 ###############################################################################
 
 if __name__ == "__main__":
-    try:
-        cli.main()
-    finally:
-        mynomad.session.close()
+    cli.main()

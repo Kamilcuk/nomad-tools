@@ -3,6 +3,7 @@ import dataclasses
 import logging
 import os
 import ssl
+import atexit
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
 
@@ -70,8 +71,8 @@ class Requestor(ABC):
         raise NotImplementedError()
 
     def _reqjson(self, mode: str, *args, **kvargs):
-        rr = self.request(mode, *args, **kvargs)
-        return rr.json()
+        with self.request(mode, *args, **kvargs) as rr:
+            return rr.json()
 
     def get(self, *args, **kvargs):
         return self._reqjson("GET", *args, **kvargs)
@@ -142,6 +143,7 @@ class NomadConn(Requestor):
         self.namespace = namespace
         self.session: requests.Session = session or _default_session()
         self.variables = VariableConn(self, "var")
+        atexit.register(self.session.close)
 
     @cached_property
     def nomad_version(self) -> str:
