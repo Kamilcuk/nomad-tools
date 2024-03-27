@@ -1,9 +1,9 @@
+import atexit
 import base64
 import dataclasses
 import logging
 import os
 import ssl
-import atexit
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
 
@@ -206,7 +206,7 @@ class NomadConn(Requestor):
             url = req.url
             if code == 500 and text == "permission denied":
                 raise PermissionDenied(e) from e
-            elif code == 404 and text == "job not found":
+            elif code == 404 and text in ["job not found", "job versions not found"]:
                 raise JobNotFound(e) from e
             elif "/v1/var/" in url and code == 404 and text == "variable not found":
                 raise VariableNotFound(e) from e
