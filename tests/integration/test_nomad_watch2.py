@@ -35,7 +35,7 @@ def test_nomad_watch2_start():
     job = "test-start"
     mark = "7bc8413c-8619-48bf-a46d-f42727724632"
     exitstatus = 234
-    script = f"sleep 1; echo {mark} ; exit {exitstatus}"
+    script = f"echo {mark}; sleep 1; exit {exitstatus}"
     try:
         run_nomad_watch(f"start -var script={quote(script)} {testjobs[job]}")
         run_nomad_watch(f"started {job}", output=[mark])
@@ -43,6 +43,23 @@ def test_nomad_watch2_start():
             f"stop {job}",
             f"stopped {job}",
             f"--no-follow job {job}",
+        ]
+        for cmd in cmds:
+            run_nomad_watch(cmd, check=exitstatus, output=[mark])
+    finally:
+        run_nomad_watch(f"-o nolog stop {job}", check=exitstatus)
+    run_nomad_watch(f"-o nolog --purge stop {job}", check=exitstatus)
+
+
+def test_nomad_watch2_start2():
+    job = "test-start2"
+    mark = "7bc8413c-8619-48bf-a46d-f42727724632"
+    exitstatus = 234
+    script = f"echo {mark}; sleep 1; exit {exitstatus}"
+    try:
+        run_nomad_watch(f"start -var script={quote(script)} {testjobs[job]}")
+        run_nomad_watch(f"started {job}", output=[mark])
+        cmds = [
             f"--no-follow -o stdout job {job}",
             f"--no-follow -o stderr job {job}",
             f"--no-follow -o stdout,stderr job {job}",
@@ -51,8 +68,8 @@ def test_nomad_watch2_start():
         for cmd in cmds:
             run_nomad_watch(cmd, check=exitstatus, output=[mark])
     finally:
-        run_nomad_watch(f"-o none stop {job}", check=exitstatus)
-    run_nomad_watch(f"--purge stop {job}", check=exitstatus)
+        run_nomad_watch(f"-o nolog stop {job}", check=exitstatus)
+    run_nomad_watch(f"-o nolog --purge stop {job}", check=exitstatus)
 
 
 def test_nomad_watch2_okpurge():
@@ -62,7 +79,7 @@ def test_nomad_watch2_okpurge():
         run_nomad_watch(f"start -var ok=true {testjobs[job]}")
         run_nomad_watch(f"-x stop {job}")
     finally:
-        run_nomad_watch(f"--debug events -x purge {job}")
+        run_nomad_watch(f"-o nolog --debug events -x purge {job}")
 
 
 def test_nomad_watch2_canary():
@@ -84,7 +101,7 @@ def test_nomad_watch2_canary():
         )
         # This should fail and revert deployment.
         run_nomad_watch(
-            f"start -var ok=false {testjobs[job]}",
+            f"--shutdown-timeout 0 start -var ok=false {testjobs[job]}",
             output=[
                 "Failed due to unhealthy allocations - rolling back to job",
             ],
@@ -96,9 +113,9 @@ def test_nomad_watch2_canary():
             f"port -l {job}",
             output=[re.compile(r"[0-9\.]+ [0-9]+ http [^ ]* [^ ]*")],
         )
-        run_nomad_watch(f"-x stop {job}")
+        run_nomad_watch(f"-o nolog -x stop {job}")
     finally:
-        run_nomad_watch(f"-x purge {job}")
+        run_nomad_watch(f"-o nolog -x purge {job}")
 
 
 def test_nomad_watch2_blocked():
@@ -111,8 +128,8 @@ def test_nomad_watch2_blocked():
         try:
             for j in range(2):
                 run_nomad_watch(
-                    f"{i} -var block=true {testjobs[job]}",
-                    timeout=12,
+                    f"-o nolog {i} -var block=true {testjobs[job]}",
+                    timeout=5,
                     check=124,
                     output=[
                         "Placement Failures",
@@ -124,7 +141,7 @@ def test_nomad_watch2_blocked():
                     f"{i} -var block=false {testjobs[job]}", output=["+ true"]
                 )
         finally:
-            run_nomad_watch(f"-x purge {job}")
+            run_nomad_watch(f"-o nolog -x purge {job}")
 
 
 def test_nomad_watch2_maintask():

@@ -302,7 +302,7 @@ class LogOptions:
     log_none: Any = clickdc.alias_option("-0", aliased=dict(log_format=LOGFORMAT.ZERO))
     out: List[str] = clickdc.option(
         "-o",
-        type=CommaList("all alloc stdout stderr eval deploy none".split()),
+        type=CommaList("all alloc stdout stderr eval deploy nolog none".split()),
         default=["all"],
         show_default=True,
         help="""
@@ -313,9 +313,9 @@ class LogOptions:
 
 
 def init_logging():
-    LOGENABLED.deploy = any(s in "all deploy".split() for s in ARGS.out)
-    LOGENABLED.eval = any(s in "all eval".split() for s in ARGS.out)
-    LOGENABLED.alloc = any(s in "all alloc".split() for s in ARGS.out)
+    LOGENABLED.deploy = any(s in "all deploy nolog".split() for s in ARGS.out)
+    LOGENABLED.eval = any(s in "all eval nolog".split() for s in ARGS.out)
+    LOGENABLED.alloc = any(s in "all alloc nolog".split() for s in ARGS.out)
     LOGENABLED.stderr = any(s in "all stderr".split() for s in ARGS.out)
     LOGENABLED.stdout = any(s in "all stdout".split() for s in ARGS.out)
     #
@@ -1828,7 +1828,7 @@ class Args(LogOptions, NotifyOptions):
         callback=click_validate(lambda x: x >= 0, "timeout must be greater than 0"),
     )
     shutdown_timeout: float = clickdc.option(
-        default=3,
+        default=5,
         show_default=True,
         help="The time to wait to make sure task loggers received all logs when exiting.",
         callback=click_validate(lambda x: x >= 0, "timeout must be greater than 0"),
