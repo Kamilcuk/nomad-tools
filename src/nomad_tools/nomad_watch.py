@@ -590,7 +590,7 @@ class TaskLogger(threading.Thread):
         """stop() was called"""
         self.started: bool = False
         """This logger is assumed to have started and printed logs"""
-        self.startedtimer: Optional[threading.Timer] = None
+        self.startedtime: Optional[float] = None
         """A timer that will set self.stated"""
 
     @staticmethod
@@ -627,6 +627,7 @@ class TaskLogger(threading.Thread):
         return "stderr" if self.stderr else "stdout"
 
     def __set_started(self):
+        # log.debug(f"{self.name} started")
         self.started = True
         DB.send_empty_event()
 
@@ -657,13 +658,12 @@ class TaskLogger(threading.Thread):
                     if fileevent == "file deleted":
                         # Deleted means end of stream.
                         break
-                # Nomad json stream periodically sends empty {}.
+                # Nomad json stream every second sends empty {}.
                 # self.started is set shutdown_timeout seconds after receiving first message.
-                if self.startedtimer is None:
-                    self.startedtimer = threading.Timer(
-                        ARGS.shutdown_timeout, self.__set_started
-                    )
-                    self.startedtimer.start()
+                if self.startedtime is None:
+                    self.startedtime = time.time() + ARGS.shutdown_timeout
+                if self.startedtime < time.time():
+                    self.__set_started()
                 # If started and requested to exit, then exit.
                 if self.started and self.exitreq:
                     break
@@ -672,16 +672,16 @@ class TaskLogger(threading.Thread):
     def run(self):
         """Listen to Nomad log stream and print the logs"""
         try:
-            # Try getting the logs for 5 seconds, then give up.
-            tries: int = 5
+            # Try getting the logs for 2 seconds, then give up.
+            tries: int = int(ARGS.shutdown_timeout + 1)
             for tryno in range(tries):
                 try:
                     self.__run_in()
                     break
                 except nomadlib.LogNotFound:
-                    if tryno == tries - 1:
-                        raise
                     time.sleep(1)
+            else:
+                self.__run_in()
         except nomadlib.LogNotFound as e:
             # Gracefully handle missing logs errors from Nomad.
             # Logs are removed by garbage collector and when purging the job.
