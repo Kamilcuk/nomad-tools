@@ -15,6 +15,8 @@ def patched_init(self, *args, **kwargs):
     def patched_run(*args, **kw):
         try:
             original_run(*args, **kw)
+        except SystemExit:
+            os._exit(1)
         except BaseException:
             traceback.print_exc()
             os._exit(1)

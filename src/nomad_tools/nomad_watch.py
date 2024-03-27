@@ -25,6 +25,7 @@ from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from typing import (
     Any,
+    Callable,
     ClassVar,
     Dict,
     Iterator,
@@ -227,7 +228,7 @@ class LOGFORMAT:
     )
     """Logging format, first templated with f-string, then by logging."""
 
-    colors: Dict[LogWhat, str] = {
+    colors: Dict[str, str] = {
         LogWhat.deploy: COLORS.brightmagenta,
         LogWhat.eval: COLORS.magenta,
         LogWhat.alloc: COLORS.cyan,
@@ -236,7 +237,7 @@ class LOGFORMAT:
     }
     """Logs colors"""
 
-    marks: Dict[LogWhat, str] = {
+    marks: Dict[str, str] = {
         LogWhat.deploy: "deploy",
         LogWhat.eval: "eval",
         LogWhat.alloc: "A",
@@ -329,34 +330,36 @@ def init_logging():
         level=(
             logging.DEBUG
             if ARGS.verbose > 0
-            else (
-                logging.INFO
-                if ARGS.verbose == 0
-                else logging.WARN
-                if ARGS.verbose == 1
-                else logging.ERROR
-            )
+            else logging.INFO
+            if ARGS.verbose == 0
+            else logging.WARN
+            if ARGS.verbose == 1
+            else logging.ERROR
         ),
     )
 
 
-@dataclass(frozen=True)
-class Mylogger:
-    """Used to log from the various streams we want to log from"""
+@dataclass(frozen=True, order=True)
+class MyloggerLine:
+    """Represents a single line to log out"""
 
+    # Now has to be first for sorting order
+    now: datetime.datetime
     id: str
     message: str
     what: str
-    now: datetime.datetime = field(default_factory=datetime.datetime.now)
+    ModifyIndex: int
     nodename: Optional[str] = None
     jobversion: Optional[str] = None
     group: Optional[str] = None
     task: Optional[str] = None
 
-    def fmt(self):
+    def __post_init__(self):
         assert self.what in [
             e.value for e in LogWhat
         ], f"{self.what} value is not a valid what"
+
+    def __fmt(self):
         mark: str = LOGFORMAT.marks[self.what]
         color: str = LOGFORMAT.colors[self.what]
         reset: str = COLORS.reset if color else ""
@@ -369,13 +372,13 @@ class Mylogger:
             args=ARGS,
         )
 
-    @staticmethod
-    def __log(what: str, **kwargs):
-        mylogger = Mylogger(what=what, **kwargs)
+    def output(self):
         try:
-            out = mylogger.fmt()
+            out = self.__fmt()
         except KeyError:
-            log.exception(f"fmt={ARGS.log_format!r} params={ARGS}")
+            log.exception(
+                f"Could not format logging line. fmt={ARGS.log_format!r} params={ARGS}"
+            )
             raise
         try:
             print(out, flush=True)
@@ -386,38 +389,149 @@ class Mylogger:
             os.dup2(devnull, sys.stdout.fileno())
             sys.exit(1)  # Python exits with error code 1 on EPIPE
 
+
+class MyloggerDelayer:
+    """Delay outputting of logs for lines_timeout seconds"""
+
+    @dataclass(frozen=True, order=True)
+    class Key:
+        """The key used in cache as an object"""
+
+        what: str
+        id: str
+
+    def __init__(self):
+        self.old_ModifyIndex: Optional[int] = None
+        """There are new events and old events. Filter out old events"""
+        self.cache: Dict[MyloggerDelayer.Key, List[MyloggerLine]] = {}
+        """Cache of lines to output"""
+        self.newcache: List[MyloggerLine] = []
+        """Cache of lines to output which are newer than old_ModifyIndex"""
+        self.thread = threading.Thread(
+            name=self.__class__.__name__, target=self.__run, daemon=False
+        )
+        """Thread that after lines_timeout outputs log lines"""
+        self.lock = threading.Lock()
+        """Synchronize thread with log producer"""
+        self.finished: bool = False
+        """Set to true when thread is finished for speed"""
+
+    @staticmethod
+    def __split_integer(num: int, parts: int) -> List[int]:
+        """https://stackoverflow.com/a/58360873/9072753"""
+        c, r = divmod(num, parts)
+        return [c] * (parts - r) + [c + 1] * r
+
+    def __run(self):
+        assert ARGS.lines >= 0
+        assert ARGS.lines_timeout >= 0
+        log.debug(f"{self.thread.name} sleeping")
+        time.sleep(ARGS.lines_timeout)
+        log.debug(f"{self.thread.name} starting")
+        with self.lock:
+            try:
+                if ARGS.lines == 0 or len(self.cache) == 0:
+                    return
+                parts = self.__split_integer(ARGS.lines, len(self.cache))
+                tooutput: List[MyloggerLine] = []
+                for part, (key, values) in zip(parts, sorted(self.cache.items())):
+                    values.sort()
+                    tooutput.extend(values[-part:])
+                tooutput.sort()
+                for line in tooutput:
+                    line.output()
+                self.newcache.sort()
+                for line in self.newcache:
+                    line.output()
+            finally:
+                log.debug(
+                    f"{self.thread.name} finished {len(self.newcache)} {len(self.cache)} {ARGS.lines}"
+                )
+                self.newcache.clear()
+                self.cache.clear()
+                self.finished = True
+
+    def start(self, ModifyIndex: Optional[int]):
+        """Start the thread"""
+        self.old_ModifyIndex = ModifyIndex
+        self.thread.start()
+
+    def join(self):
+        """The only possible way the thread can get stuck is if print() output
+        is stuck, as if writing to a pipe."""
+        self.thread.join()
+
+    def log(self, line: MyloggerLine):
+        """Try to log the line. The line is either logged streight or added to cache"""
+        if ARGS.lines < 0 or self.finished:
+            line.output()
+            return
+        with self.lock:
+            if self.finished:
+                line.output()
+                return
+            if (
+                self.old_ModifyIndex is not None
+                and line.ModifyIndex > self.old_ModifyIndex
+            ):
+                self.newcache.append(line)
+            else:
+                self.cache.setdefault(self.Key(line.what, line.id), []).append(line)
+
+
+myloggerdelayer = MyloggerDelayer()
+
+
+class Mylogger:
+    """Used to log from the various streams we want to log from"""
+
+    @staticmethod
+    def __log(**kwargs):
+        line = MyloggerLine(**kwargs)
+        myloggerdelayer.log(line)
+
+    ###############################################################################
+
     @classmethod
     def log_eval(cls, eval: nomadlib.Eval, message: str):
         return cls.__log(
-            LogWhat.eval,
+            what=LogWhat.eval,
             id=eval.ID,
-            jobversion=DB.find_jobversion_from_modifyindex(eval.ModifyIndex),
             now=ns2dt(eval.ModifyTime),
+            jobversion=DB.find_jobversion_from_modifyindex(eval.ModifyIndex),
             message=message,
+            ModifyIndex=eval.ModifyIndex,
         )
 
     @classmethod
     def log_deploy(cls, deploy: nomadlib.Deploy, message: str):
         job = DB.jobversions.get(deploy.JobVersion)
         return cls.__log(
-            LogWhat.deploy,
+            what=LogWhat.deploy,
             id=deploy.ID,
-            jobversion=deploy.JobVersion,
             now=ns2dt(job.SubmitTime) if job else datetime.datetime.now(),
+            jobversion=deploy.JobVersion,
             message=message,
+            ModifyIndex=deploy.ModifyIndex,
         )
 
     @staticmethod
-    def __get_allocid_jobversion(allocid: str) -> Optional[int]:
+    def __add_allocdata(allocid: str) -> dict:
+        """Given an allocid, extracts ModifyIndex and finds job version"""
         alloc = DB.allocations.get(allocid)
-        return None if not alloc else DB.get_allocation_jobversion(alloc)
+        return dict(
+            ModifyIndex=alloc.ModifyIndex if alloc else None,
+            nodename=alloc.NodeName if alloc else None,
+            group=alloc.TaskGroup if alloc else None,
+            jobversion=None if not alloc else DB.get_allocation_jobversion(alloc),
+        )
 
     @classmethod
     def log_alloc(cls, allocid: str, **kwargs):
         return cls.__log(
             what=LogWhat.alloc,
             id=allocid,
-            jobversion=cls.__get_allocid_jobversion(allocid),
+            **cls.__add_allocdata(allocid),
             **kwargs,
         )
 
@@ -426,22 +540,24 @@ class Mylogger:
         return cls.__log(
             what=LogWhat.stderr if stderr else LogWhat.stdout,
             id=allocid,
-            jobversion=cls.__get_allocid_jobversion(allocid),
+            **cls.__add_allocdata(allocid),
             **kwargs,
         )
 
 
 @dataclass(frozen=True)
 class TaskKey:
-    """Represent data to uniquely identify a task"""
+    """
+    Represent data to uniquely identify a task.
+    TaskKey stores allocation ID. Altough we have to do a search later,
+    the allocation data itself change often and in parallel to this object.
+    """
 
     allocid: str
-    nodename: str
-    group: str
     task: str
 
     def __str__(self):
-        return f"{self.allocid:.6}:{self.group}:{self.task}"
+        return f"{self.allocid:.6}:{self.task}"
 
     def asdict(self):
         return asdict(self)
@@ -535,15 +651,13 @@ class TaskLogger(threading.Thread):
                             .decode(errors="replace")
                             .splitlines()
                         )
-                        self.taskout(lines)
+                        for line in lines:
+                            self.tk.log_task(self.stderr, line.strip())
                     fileevent: Optional[str] = event.get("FileEvent")
                     if fileevent == "file deleted":
                         # Deleted means end of stream.
                         break
-                else:
-                    # Nomad json stream periodically sends empty {}.
-                    self.taskout([])
-                #
+                # Nomad json stream periodically sends empty {}.
                 # self.started is set shutdown_timeout seconds after receiving first message.
                 if self.startedtimer is None:
                     self.startedtimer = threading.Timer(
@@ -657,12 +771,7 @@ class AllocWorker:
                 continue
             if ARGS.node and not ARGS.node.search(alloc.NodeName):
                 continue
-            tk = TaskKey(
-                alloc.ID,
-                alloc.NodeName,
-                alloc.TaskGroup,
-                taskname,
-            )
+            tk = TaskKey(allocid=alloc.ID, task=taskname)
             self.taskhandlers.setdefault(tk, TaskHandler()).notify(tk, task)
 
 
@@ -797,6 +906,7 @@ class NotifierWorker:
         log.debug(
             f"Joining {len(self.workers)} allocations with {thcnt} taskhandlers and {len(threads)} loggers"
         )
+        myloggerdelayer.join()
         timeend = time.time() + ARGS.shutdown_timeout
         timeout = None
         for thread in threads:
@@ -822,20 +932,20 @@ class NotifierWorker:
         if unfinished_tasks:
             return ExitcodeRet(
                 ExitCode.any_unfinished_tasks,
-                f"there were {len(unfinished_tasks)} unfinished tasks",
+                f"There were {len(unfinished_tasks)} unfinished tasks",
             )
         only_one_task = len(tasks_exitcodes) == 1
         if only_one_task:
             assert tasks_exitcodes[0] is not None
             return ExitcodeRet(
                 tasks_exitcodes[0],
-                f"single task exited with {tasks_exitcodes[0]} exit status",
+                f"Single task exited with {tasks_exitcodes[0]} exit status",
             )
         failed_tasks = [v for v in tasks_exitcodes if v != 0]
         if len(failed_tasks) == len(tasks_exitcodes):
             return ExitcodeRet(
                 ExitCode.all_failed_tasks,
-                f"all {len(tasks_exitcodes)} tasks exited with nonzero exit status",
+                f"All {len(tasks_exitcodes)} tasks exited with nonzero exit status",
             )
         if failed_tasks:
             return ExitcodeRet(
@@ -844,7 +954,7 @@ class NotifierWorker:
             )
         return ExitcodeRet(
             ExitCode.success,
-            f"all {len(tasks_exitcodes)} tasks exited with zero exit status",
+            f"All {len(tasks_exitcodes)} tasks exited with zero exit status",
         )
 
     def exitcode(self) -> int:
@@ -955,6 +1065,7 @@ class _NomadJobWatcherDetail(ABC):
         #
         DB.start()
         InterruptTwice.install()
+        myloggerdelayer.start(self.eval.ModifyIndex if self.eval else None)
 
     def __no_follow_timer(self):
         self.no_follow_end = True
@@ -1309,7 +1420,7 @@ class _NomadJobWatcherEvents(_NomadJobWatcherDetail):
                 f" taskstates={sum(alloc.TaskStates is None for alloc in allocations)}",
             )
             return False
-        #
+        # Check if there are tasks running for all Groups.
         groupmsgs: List[str] = []
         for group in self.job.TaskGroups:
             groupallocs: List[nomadlib.Alloc] = [
@@ -1364,8 +1475,18 @@ class _NomadJobWatcherEvents(_NomadJobWatcherDetail):
             groupmsgs.append(
                 f"allocations {groupallocsidsstr} running group {group.Name!r} with {len(maintasks)} main tasks"
             )
-        log.info(f"Job {self.job.description()} started " + andjoin(groupmsgs) + ".")
         self.started = True
+        msg = f"Job {self.job.description()} started " + andjoin(groupmsgs)
+        # If we are running in eval mode, we can check the associated deployment for failure.
+        if self.eval and self.eval.DeploymentID:
+            deploy = DB.deployments.get(self.eval.DeploymentID)
+            if deploy and deploy.Status in [
+                nomadlib.DeploymentStatus.cancelled,
+                nomadlib.DeploymentStatus.failed,
+            ]:
+                msg += f", but deployment failed: {deploy.StatusDescription!r}"
+                self.started = False
+        log.info(msg + ".")
         return True
 
 
@@ -1704,7 +1825,7 @@ class Args(LogOptions, NotifyOptions):
     )
     lines: int = clickdc.option(
         "-n",
-        default=10,
+        default=30,
         show_default=True,
         help="""
              Sets the tail location in best-efforted number of lines relative to the end of logs.

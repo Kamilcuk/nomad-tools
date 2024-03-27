@@ -133,7 +133,7 @@ def test_nomad_watch_run_multiple():
     """
     print(spec)
     output = run_nomad_watch(
-        "--shutdown-timeout 30 --purge run -", input=spec, stdout=1
+        "--shutdown-timeout 3 --purge run -", input=spec, stdout=1
     ).stdout
     for i in hastohave:
         assert output.count(i) == 2, f"{output}.count({i}) != 2"
