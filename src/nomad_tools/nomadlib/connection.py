@@ -71,8 +71,8 @@ class Requestor(ABC):
         raise NotImplementedError()
 
     def _reqjson(self, mode: str, *args, **kvargs):
-        with self.request(mode, *args, **kvargs) as rr:
-            return rr.json()
+        rr = self.request(mode, *args, **kvargs)
+        return rr.json()
 
     def get(self, *args, **kvargs):
         return self._reqjson("GET", *args, **kvargs)

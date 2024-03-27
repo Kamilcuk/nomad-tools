@@ -667,8 +667,6 @@ class TaskLogger(threading.Thread):
                 # If started and requested to exit, then exit.
                 if self.started and self.exitreq:
                     break
-        # If the stream has ended by itself, also set started.
-        self.__set_started()
         stream.raise_for_status()
 
     def run(self):
@@ -694,7 +692,8 @@ class TaskLogger(threading.Thread):
                 f"Error getting {self.__typestr()} logs: {code} {text!r}",
             )
         finally:
-            self.stop()
+            # If the stream has ended by itself, also set started.
+            self.__set_started()
 
     def stop(self):
         self.exitreq = True
@@ -1233,13 +1232,9 @@ class _NomadJobWatcherDetail(ABC):
             for event in events:
                 self.__handle_event(event)
             self.__loop_debug(events)
-            if (
-                # If we started with an evaluation, it has to be finished.
-                # Otherwise the events may be related to a previous job version.
-                (self.eval is None or not self.eval.is_pending_or_blocked())
-                # Make sure all the threads are started outputting logs.
-                and self.notifier.all_threads_started()
-            ):
+            # If we started with an evaluation, it has to be finished.
+            # Otherwise the events may be related to a previous job version.
+            if self.eval is None or not self.eval.is_pending_or_blocked():
                 yield
             if self.no_follow_end:
                 break
@@ -1839,7 +1834,7 @@ class Args(LogOptions, NotifyOptions):
         callback=click_validate(lambda x: x >= 0, "timeout must be greater than 0"),
     )
     shutdown_timeout: float = clickdc.option(
-        default=1,
+        default=2,
         show_default=True,
         help="The time to wait to make sure task loggers received all logs when exiting.",
         callback=click_validate(lambda x: x >= 0, "timeout must be greater than 0"),
