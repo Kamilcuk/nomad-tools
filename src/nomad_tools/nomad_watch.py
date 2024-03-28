@@ -1821,7 +1821,7 @@ class Args(LogOptions, NotifyOptions):
         callback=click_validate(lambda x: x >= 0, "timeout must be greater than 0"),
     )
     shutdown_timeout: float = clickdc.option(
-        default=2,
+        default=3,
         show_default=True,
         help="The time to wait to make sure task loggers received all logs when exiting.",
         callback=click_validate(lambda x: x >= 0, "timeout must be greater than 0"),
