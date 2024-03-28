@@ -586,12 +586,13 @@ class TaskLogger(threading.Thread):
         """task key"""
         self.stderr: bool = stderr
         """is this stderr or stdout logger"""
-        self.exitreq: bool = False
+        self.exitreqtime: Optional[float] = None
         """stop() was called"""
         self.started: bool = False
         """This logger is assumed to have started and printed logs"""
         self.startedtime: Optional[float] = None
         """A timer that will set self.stated"""
+        self.stopped: bool = False
 
     @staticmethod
     def read_json_txt(stream: requests.Response) -> Iterator[str]:
@@ -626,11 +627,6 @@ class TaskLogger(threading.Thread):
     def __typestr(self):
         return "stderr" if self.stderr else "stdout"
 
-    def __set_started(self):
-        # log.debug(f"{self.name} started")
-        self.started = True
-        DB.send_empty_event()
-
     def __run_in(self):
         usestart = ARGS.lines < 0 or START_S + ARGS.lines_timeout < time.time()
         with mynomad.stream(
@@ -647,11 +643,8 @@ class TaskLogger(threading.Thread):
                 if event:
                     line64: Optional[str] = event.get("Data")
                     if line64:
-                        lines = (
-                            base64.b64decode(line64.encode())
-                            .decode(errors="replace")
-                            .splitlines()
-                        )
+                        linebytes = base64.b64decode(line64.encode())
+                        lines = linebytes.decode(errors="replace").splitlines()
                         for line in lines:
                             self.tk.log_task(self.stderr, line.strip())
                     fileevent: Optional[str] = event.get("FileEvent")
@@ -659,14 +652,10 @@ class TaskLogger(threading.Thread):
                         # Deleted means end of stream.
                         break
                 # Nomad json stream every second sends empty {}.
-                # self.started is set shutdown_timeout seconds after receiving first message.
-                if self.startedtime is None:
-                    self.startedtime = time.time() + ARGS.shutdown_timeout
-                if self.startedtime < time.time():
-                    self.__set_started()
-                # If started and requested to exit, then exit.
-                if self.started and self.exitreq:
-                    break
+                # If requested to exit, then exit.
+                if self.exitreqtime is not None:
+                    if self.exitreqtime <= time.time():
+                        break
         stream.raise_for_status()
 
     def run(self):
@@ -692,11 +681,14 @@ class TaskLogger(threading.Thread):
                 f"Error getting {self.__typestr()} logs: {code} {text!r}",
             )
         finally:
-            # If the stream has ended by itself, also set started.
-            self.__set_started()
+            log.debug(f"{self} stopped")
+            self.stopped = True
+            DB.send_empty_event()
 
     def stop(self):
-        self.exitreq = True
+        if self.exitreqtime is None:
+            log.debug(f"{self} stoppping")
+            self.exitreqtime = time.time() + ARGS.shutdown_timeout
 
 
 @dataclass
@@ -746,6 +738,7 @@ class TaskHandler:
         ):
             self.loggers = self._create_loggers(tk)
         if taskstate.State == "dead":
+            # log.debug(f"Task {tk} dead")
             self.stop()
         if self.exitcode is None and taskstate.State == "dead":
             terminatedevent = taskstate.find_event("Terminated")
@@ -895,8 +888,8 @@ class NotifierWorker:
             for logger in th.loggers or []
         ]
 
-    def all_threads_started(self) -> bool:
-        return all(th.started for th in self.get_threads())
+    def all_threads_stopped(self) -> bool:
+        return all(th.stopped for th in self.get_threads())
 
     def join(self):
         threads = self.get_threads()
@@ -1583,7 +1576,7 @@ class NomadJobWatcherUntilFinished(NomadJobWatcher):
                 ARGS.purge
                 or (ARGS.purge_successful and self.job_finished_successfully())
             ):
-                if self.notifier.all_threads_started():
+                if self.notifier.all_threads_stopped():
                     self.stop_job(True)
             else:
                 log.info(self.job_dead_message())
@@ -1828,7 +1821,7 @@ class Args(LogOptions, NotifyOptions):
         callback=click_validate(lambda x: x >= 0, "timeout must be greater than 0"),
     )
     shutdown_timeout: float = clickdc.option(
-        default=5,
+        default=2,
         show_default=True,
         help="The time to wait to make sure task loggers received all logs when exiting.",
         callback=click_validate(lambda x: x >= 0, "timeout must be greater than 0"),
