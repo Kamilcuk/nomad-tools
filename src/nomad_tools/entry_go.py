@@ -552,6 +552,7 @@ def cli(args: Args, notifyargs: nomad_watch.NotifyOptions, verbose: bool):
             "--attach",
             "--json",
             "-0",
+            "--lines=-1",
             *clickdc.to_args(notifyargs),
             "start" if args.detach else "run",
             "-",

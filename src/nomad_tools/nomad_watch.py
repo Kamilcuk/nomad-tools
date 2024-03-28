@@ -454,16 +454,21 @@ class MyloggerDelayer:
     def start(self, ModifyIndex: Optional[int]):
         """Start the thread"""
         self.old_ModifyIndex = ModifyIndex
-        self.thread.start()
+        if ARGS.lines < 0:
+            # If args is lower than 0, we set finished right away.
+            self.finished = True
+        else:
+            self.thread.start()
 
     def join(self):
         """The only possible way the thread can get stuck is if print() output
         is stuck, as if writing to a pipe."""
-        self.thread.join()
+        if ARGS.lines >= 0:
+            self.thread.join()
 
     def log(self, line: MyloggerLine):
         """Try to log the line. The line is either logged streight or added to cache"""
-        if ARGS.lines < 0 or self.finished:
+        if self.finished:
             line.output()
             return
         with self.lock:
@@ -1821,7 +1826,7 @@ class Args(LogOptions, NotifyOptions):
         callback=click_validate(lambda x: x >= 0, "timeout must be greater than 0"),
     )
     shutdown_timeout: float = clickdc.option(
-        default=3,
+        default=2,
         show_default=True,
         help="The time to wait to make sure task loggers received all logs when exiting.",
         callback=click_validate(lambda x: x >= 0, "timeout must be greater than 0"),
