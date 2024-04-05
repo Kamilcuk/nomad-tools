@@ -225,7 +225,7 @@ run_nomad_cp = prefixed_run(
     "python3 -m nomad_tools.entrypoint cp -vv --no-stats --no-pv"
 )
 run_nomad_watch = prefixed_run(
-    "python3 -m nomad_tools.entrypoint watch -v --lines -1 --shutdown-timeout 10"
+    "python3 -m nomad_tools.entrypoint watch -v --lines -1 --shutdown-timeout 5"
 )
 run_nomad_vardir = prefixed_run("python3 -m nomad_tools.entrypoint vardir -v")
 run_nomad_dockers = prefixed_run("python3 -m nomad_tools.entrypoint dockers -v")

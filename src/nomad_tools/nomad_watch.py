@@ -12,6 +12,7 @@ import inspect
 import itertools
 import json
 import logging
+import math
 import os
 import re
 import shlex
@@ -416,12 +417,6 @@ class MyloggerDelayer:
         self.finished: bool = False
         """Set to true when thread is finished for speed"""
 
-    @staticmethod
-    def __split_integer(num: int, parts: int) -> List[int]:
-        """https://stackoverflow.com/a/58360873/9072753"""
-        c, r = divmod(num, parts)
-        return [c] * (parts - r) + [c + 1] * r
-
     def __run(self):
         assert ARGS.lines >= 0
         assert ARGS.lines_timeout >= 0
@@ -432,12 +427,11 @@ class MyloggerDelayer:
             try:
                 if ARGS.lines == 0 or len(self.cache) == 0:
                     return
-                parts = self.__split_integer(ARGS.lines, len(self.cache))
-                tooutput: List[MyloggerLine] = []
-                for part, (key, values) in zip(parts, sorted(self.cache.items())):
+                for values in self.cache.values():
                     values.sort()
-                    tooutput.extend(values[-part:])
-                tooutput.sort()
+                tooutput: List[MyloggerLine] = sorted(
+                    chunker(list(self.cache.values()), ARGS.lines)
+                )
                 for line in tooutput:
                     line.output()
                 self.newcache.sort()
@@ -690,10 +684,12 @@ class TaskLogger(threading.Thread):
             self.stopped = True
             DB.send_empty_event()
 
-    def stop(self):
-        if self.exitreqtime is None:
-            log.debug(f"{self} stoppping")
-            self.exitreqtime = time.time() + ARGS.shutdown_timeout
+    def stop(self, delay: bool):
+        if self.exitreqtime is None or (
+            delay is True and self.exitreqtime > time.time()
+        ):
+            log.debug(f"{self} stoppping delay={delay}")
+            self.exitreqtime = time.time() + delay * ARGS.shutdown_timeout
 
 
 @dataclass
@@ -744,15 +740,15 @@ class TaskHandler:
             self.loggers = self._create_loggers(tk)
         if taskstate.State == "dead":
             # log.debug(f"Task {tk} dead")
-            self.stop()
+            self.stop(True)
         if self.exitcode is None and taskstate.State == "dead":
             terminatedevent = taskstate.find_event("Terminated")
             if terminatedevent:
                 self.exitcode = terminatedevent.ExitCode
 
-    def stop(self):
+    def stop(self, delay: bool = False):
         for ll in self.loggers or []:
-            ll.stop()
+            ll.stop(delay)
 
 
 @dataclass
@@ -1820,7 +1816,7 @@ class Args(LogOptions, NotifyOptions):
              """,
     )
     lines_timeout: float = clickdc.option(
-        default=1,
+        default=3,
         show_default=True,
         help="When using --lines the number of lines is best-efforted by ignoring lines for this specific time",
         callback=click_validate(lambda x: x >= 0, "timeout must be greater than 0"),
