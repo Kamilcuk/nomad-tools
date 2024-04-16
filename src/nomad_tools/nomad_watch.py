@@ -12,7 +12,6 @@ import inspect
 import itertools
 import json
 import logging
-import math
 import os
 import re
 import shlex
@@ -360,6 +359,11 @@ class MyloggerLine:
             e.value for e in LogWhat
         ], f"{self.what} value is not a valid what"
 
+    @property
+    def known_time(self):
+        """Is the time of the message known or guessed?"""
+        return self.what not in [LogWhat.stdout, LogWhat.stderr]
+
     def __fmt(self):
         mark: str = LOGFORMAT.marks[self.what]
         color: str = LOGFORMAT.colors[self.what]
@@ -398,8 +402,7 @@ class MyloggerDelayer:
     class Key:
         """The key used in cache as an object"""
 
-        what: str
-        id: str
+        known_time: bool
 
     def __init__(self):
         self.old_ModifyIndex: Optional[int] = None
@@ -427,13 +430,17 @@ class MyloggerDelayer:
             try:
                 if ARGS.lines == 0 or len(self.cache) == 0:
                     return
-                for values in self.cache.values():
-                    values.sort()
-                tooutput: List[MyloggerLine] = sorted(
-                    chunker(list(self.cache.values()), ARGS.lines)
-                )
-                for line in tooutput:
+                #
+                lines = ARGS.lines
+                knowntimelines = sorted(self.cache.get(self.Key(True), []))[-lines:]
+                for line in knowntimelines:
                     line.output()
+                lines -= len(knowntimelines)
+                if lines:
+                    unknowntimelines = self.cache.get(self.Key(False), [])[-lines:]
+                    for line in unknowntimelines:
+                        line.output()
+                #
                 self.newcache.sort()
                 for line in self.newcache:
                     line.output()
@@ -475,7 +482,7 @@ class MyloggerDelayer:
             ):
                 self.newcache.append(line)
             else:
-                self.cache.setdefault(self.Key(line.what, line.id), []).append(line)
+                self.cache.setdefault(self.Key(line.known_time), []).append(line)
 
 
 myloggerdelayer = MyloggerDelayer()
