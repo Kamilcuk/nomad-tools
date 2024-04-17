@@ -14,16 +14,14 @@ args = parser.parse_args()
 DIR: Path = Path(__file__).parent.parent
 
 if not args.version:
-    cmdstr: str = "nomad-tools downloadrelease --showversion nomad"
+    cmdstr: str = "python -m nomad_tools.entrypoint downloadrelease --showversion nomad"
     cmd: List[str] = split(cmdstr)
     print(f"+ {cmdstr}")
     args.version = subprocess.check_output(cmd, text=True).strip()
 
 exe: Path = DIR / f"build/bin/nomad{args.version}"
 if not exe.exists():
-    cmdstr = (
-        f"nomad-tools downloadrelease -p {quote(args.version)} nomad {quote(str(exe))}"
-    )
+    cmdstr = f"python -m nomad_tools.entrypoint downloadrelease -p {quote(args.version)} nomad {quote(str(exe))}"
     cmd = split(cmdstr)
     print(f"+ {cmdstr}")
     subprocess.check_call(cmd)

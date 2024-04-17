@@ -69,5 +69,10 @@ cli.add_command(nomad_port.cli)
 cli.add_command(nomad_vardir.cli)
 cli.add_command(nomad_watch.cli)
 
+
+def main():
+    cli(max_content_width=9999)
+
+
 if __name__ == "__main__":
-    cli()
+    main()

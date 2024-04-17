@@ -23,7 +23,7 @@ repository = "https://github.com/Kamilcuk/nomad-tools"
 documentation = "https://github.com/Kamilcuk/nomad-tools"
 
 [project.scripts]
-nomad-tools = "nomad_tools:entrypoint.cli"
+nomadtools = "nomad_tools:entrypoint.main"
 
 [tool.setuptools.package-data]
 "*" = ["*/*.sh", "*.sh"]

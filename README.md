@@ -1,4 +1,4 @@
-# nomad-tools
+# nomadtools
 
 Set of tools and utilities to ease interacting with HashiCorp Nomad scheduling solution.
 
@@ -31,7 +31,7 @@ This is a bundle of executables packages together in a PyPY package. Install
 using `pipx` project.
 
 ```
-pipx install nomad-tools
+pipx install nomadtools
 ```
 
 ## Shell completion
@@ -41,7 +41,7 @@ completion installation instruction.
 
 # Usage
 
-This module installs command line tool `nomad-tools` with several modes of
+This module installs command line tool `nomadtools` with several modes of
 operation:
 
 ## watch
@@ -81,7 +81,7 @@ Mimics operation of `docker run`, it is built on top of `watch` mode to
 execute a single Nomad job created dynamically from command line arguments.
 
 ```
-$ nomad-tools onerun --rm alpine apk add bash
+$ nomadtools onerun --rm alpine apk add bash
 INFO:nomad_tools.nomad_watch:Watching job nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984@default until it is finished
 eval>f3f3ea>v0> Allocation 8356bdb6-830b-5b05-11bc-fb29a4d47794 started on leonidas
 A>8356bd>v0>nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984> Received Task received by client
@@ -111,18 +111,18 @@ Prints out the ports allocated for a particular Nomad job or
 allocation. It is meant to mimic `docker port` command.
 
 ```
-$ nomad-tools port httpd
+$ nomadtools port httpd
 192.168.0.5:31076
-$ nomad-tools port -l httpd
+$ nomadtools port -l httpd
 192.168.0.5 31076 http httpd.listen[0] d409e855-bf13-a342-fe7a-6fb579d2de85
-$ nomad-tools port --alloc d409e855
+$ nomadtools port --alloc d409e855
 192.168.0.5:31076
 ```
 
 Further argument allows to filter for port label.
 
 ```
-$ nomad-tools port httpd http
+$ nomadtools port httpd http
 192.168.0.5:31076
 ```
 
@@ -137,11 +137,11 @@ Example execution of putting a `passwordfile.txt` into `nomad/jobs/nginx`
 Nomad variable:
 
 ```
-$ nomad-tools vardir -j nginx put ./passwordfile.txt 
+$ nomadtools vardir -j nginx put ./passwordfile.txt 
 nomad_vardir: Putting var nomad/jobs/nginx@default with keys: passwordfile.txt
-$ nomad-tools vardir -j nginx cat passwordfile.txt 
+$ nomadtools vardir -j nginx cat passwordfile.txt 
 secretpassword
-$ nomad-tools vardir -j nginx ls
+$ nomadtools vardir -j nginx ls
 nomad_vardir: Listing Nomad variable at nomad/jobs/nginx@default
 key              size
 passwordfile.txt 15
@@ -150,10 +150,10 @@ passwordfile.txt 15
 You can then remove the `passwordfile.txt` key from the Nomad variable:
 
 ```
-$ nomad-tools vardir -j nginx rm passwordfile.txt 
+$ nomadtools vardir -j nginx rm passwordfile.txt 
 nomad_vardir: Removing passwordfile.txt
 nomad_vardir: Removing empty var nomad/jobs/nginx@default
-$ nomad-tools vardir -j nginx ls
+$ nomadtools vardir -j nginx ls
 nomad_vardir: Nomad variable not found at nomad/jobs/nginx@default
 ```
 
@@ -163,7 +163,7 @@ This is a copy of the `docker cp` command. The syntax is meant to be the
 same with docker. The rules of copying a file vs directory are meant to be
 in-line with `docker cp` documentation.
 
-`nomad-tools cp` uses some special syntax for specifying from which allocation/task
+`nomadtools cp` uses some special syntax for specifying from which allocation/task
 exactly do you want to copy by using colon `:`. The number of colons in the
 arguments determines the format. The colon can be escaped with slash `\` in
 the path if needed.
@@ -190,9 +190,9 @@ inside the allocation it is coping to/from. It has to be available there.
 Example:
 
 ```
-$ nomad-tools cp -v nginx:/etc/nginx/nginx.conf ./nginx.conf
+$ nomadtools cp -v nginx:/etc/nginx/nginx.conf ./nginx.conf
 INFO nomad_cp.py:copy_mode:487: File :d409e855-bf13-a342-fe7a-6fb579d2de85:listen:/etc/nginx/nginx.conf -> ./nginx.conf
-$ nomad-tools cp -v alpine:/etc/. ./etc/
+$ nomadtools cp -v alpine:/etc/. ./etc/
 INFO nomad_cp.py:copy_mode:512: New mkdir :d409e855-bf13-a342-fe7a-6fb579d2de85:listen:/etc/. -> /home/kamil/tmp/etc2/
 ```
 
@@ -212,16 +212,16 @@ This program does _not_ run the `gitlab-runner` itself in Nomad. Rather, the
 schedule Nomad jobs to execute using the script as an executor. These jobs will
 execute the CI/CD from Gitlab inside Nomad cluster.
 
-More on it can be read on [github wiki](https://github.com/Kamilcuk/nomad-tools/wiki/gitlab%E2%80%90runner).
+More on it can be read on [github wiki](https://github.com/Kamilcuk/nomadtools/wiki/gitlab%E2%80%90runner).
 
 ## nomad-dockers
 
 Lists docker images referenced in Nomad job file or a running Nomad job.
 
 ```
-$ nomad-tools dockers ./httpd.nomad.hcl
+$ nomadtools dockers ./httpd.nomad.hcl
 busybox:stable
-$ nomad-tools dockers --job httpd
+$ nomadtools dockers --job httpd
 busybox:stable
 ```
 
@@ -231,13 +231,13 @@ Program for downloading specific Nomad release binary from their release page.
 I use it for testing and checking new Nomad versions.
 
 ```
-$ nomad-tools downloadrelease nomad
+$ nomadtools downloadrelease nomad
 INFO:nomad_tools.nomad_downloadrelease:Downloading https://releases.hashicorp.com/nomad/1.7.3/nomad_1.7.3_linux_amd64.zip to nomad
 INFO:nomad_tools.nomad_downloadrelease:https://releases.hashicorp.com/nomad/1.7.3/nomad_1.7.3_linux_amd64.zip -> -rwxr-xr-x 105.7MB nomad
-$ nomad-tools downloadrelease consul
+$ nomadtools downloadrelease consul
 INFO:nomad_tools.nomad_downloadrelease:Downloading https://releases.hashicorp.com/consul/1.9.9/consul_1.9.9_linux_amd64.zip to consul
 INFO:nomad_tools.nomad_downloadrelease:https://releases.hashicorp.com/consul/1.9.9/consul_1.9.9_linux_amd64.zip -> -rwxr-xr-x 105.8MB consul
-$ nomad-tools downloadrelease -p 1.6.3 nomad ./nomad1.6.3
+$ nomadtools downloadrelease -p 1.6.3 nomad ./nomad1.6.3
 INFO:nomad_tools.nomad_downloadrelease:Downloading https://releases.hashicorp.com/nomad/1.6.3/nomad_1.6.3_linux_amd64.zip to nomad1.6.3
 INFO:nomad_tools.nomad_downloadrelease:https://releases.hashicorp.com/nomad/1.6.3/nomad_1.6.3_linux_amd64.zip -> -rwxr-xr-x 101.8MB nomad1.6.3
 
@@ -254,7 +254,7 @@ represents models for Nomad API data documentation.
 # History
 
 This module once installed bunch of separate tools, like `nomad-watch` or
-`nomad-gitlab-runner`. That became unmaintainable. It is one `nomad-tools`
+`nomad-gitlab-runner`. That became unmaintainable. It is one `nomadtools`
 executable with several sub-commands.
 
 # Contributing
