@@ -7,4 +7,4 @@ websocket-client==1.6.1
 clickdc==0.0.5
 clickforward==0.0.1
 python-dotenv==0.21.1
-packaging==24.0
+packaging>=16.1
