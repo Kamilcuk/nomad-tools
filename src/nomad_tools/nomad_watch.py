@@ -445,8 +445,13 @@ class MyloggerDelayer:
                 for line in self.newcache:
                     line.output()
             finally:
+                cachetxt = [
+                    len(self.cache.get(self.Key(True), "")),
+                    len(self.cache.get(self.Key(False), "")),
+                ]
                 log.debug(
-                    f"{self.thread.name} finished {len(self.newcache)} {len(self.cache)} {ARGS.lines}"
+                    f"{self.thread.name} finished"
+                    f" len(newcache)={len(self.newcache)} len(cache)={cachetxt} -n={ARGS.lines}"
                 )
                 self.newcache.clear()
                 self.cache.clear()
