@@ -1489,19 +1489,6 @@ class NomadJobWatcher(_NomadJobWatcherEvents):
     def _loop_end_cb(self):
         raise NotImplementedError()
 
-    def stop_threads(self):
-        log.debug(f"stopping {self.__class__.__name__}")
-        self.notifier.stop()
-        DB.stop()
-        self.notifier.join()
-        DB.join()
-
-    def get_exitcode(self) -> int:
-        assert DB.stopevent.is_set(), f"{self.stop_threads.__name__} not called"
-        if InterruptTwice.received:
-            return ExitCode.interrupted
-        return self._get_exitcode_cb()
-
     def run_and_exit(self, stopit: bool = False):
         try:
             for _ in self.loop():
@@ -1535,8 +1522,15 @@ class NomadJobWatcher(_NomadJobWatcherEvents):
                 if not ARGS.follow and self._loop_end_cb():
                     break
         finally:
-            self.stop_threads()
-        exit(self.get_exitcode())
+            log.debug(f"stopping {self.__class__.__name__}")
+            self.notifier.stop()
+            DB.stop()
+            if not isinstance(sys.exc_info()[1], SystemExit):
+                self.notifier.join()
+                DB.join()
+        exit(
+            ExitCode.interrupted if InterruptTwice.received else self._get_exitcode_cb()
+        )
 
     def job_is_finished(self):
         return (
@@ -1823,7 +1817,7 @@ class Args(LogOptions, NotifyOptions):
              """,
     )
     lines_timeout: float = clickdc.option(
-        default=3,
+        default=2,
         show_default=True,
         help="When using --lines the number of lines is best-efforted by ignoring lines for this specific time",
         callback=click_validate(lambda x: x >= 0, "timeout must be greater than 0"),
