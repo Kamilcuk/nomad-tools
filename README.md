@@ -31,7 +31,7 @@ This is a bundle of executables packages together in a PyPY package. Install
 using `pipx` project.
 
 ```
-pipx install nomadtools
+pipx install nomad-tools
 ```
 
 After installation the executable `nomadtools` should be available.
