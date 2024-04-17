@@ -1418,6 +1418,24 @@ class _NomadJobWatcherEvents(_NomadJobWatcherDetail):
         # Check if there are tasks running for all Groups.
         groupmsgs: List[str] = []
         for group in self.job.TaskGroups:
+            previousrunningallocs: List[nomadlib.Alloc] = [
+                alloc
+                for alloc in allocations
+                if alloc.TaskGroup == group.Name
+                and alloc.is_pending_or_running()
+                and (
+                    DB.get_allocation_jobmodifyindex(alloc, -1) < self.minjobmodifyindex
+                    or DB.get_allocation_jobversion(alloc, -1) < self.job.Version
+                )
+            ]
+            # Allocations related to previous job version have to be stopped.
+            if previousrunningallocs:
+                flagdebug.logdebug(
+                    "started",
+                    f"There are still allocations running for previous job version: {previousrunningallocs}",
+                )
+                return False
+            #
             groupallocs: List[nomadlib.Alloc] = [
                 alloc
                 for alloc in allocations
