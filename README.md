@@ -10,7 +10,7 @@ Set of tools and utilities to ease interacting with HashiCorp Nomad scheduling s
     * [Shell completion](#shell-completion)
 * [Usage](#usage)
     * [watch](#watch)
-    * [onerun](#onerun)
+    * [go](#go)
     * [port](#port)
     * [vardir](#vardir)
     * [cp](#cp)
@@ -34,9 +34,15 @@ using `pipx` project.
 pipx install nomadtools
 ```
 
+After installation the executable `nomadtools` should be available.
+
+```
+nomadtools --help
+```
+
 ## Shell completion
 
-After installation, see `watch --autocomplete-info` for shell
+After installation, see `nomadtools watch --autocomplete-info` for shell
 completion installation instruction.
 
 # Usage
@@ -46,7 +52,7 @@ operation:
 
 ## watch
 
-`watch` is meant to watch over a job change that you type in
+`nomadtools watch` is meant to watch over a job change that you type in
 terminal. It prints all relevant messages - messages about allocation,
 evaluation, deployment and stdout and stderr logs from all the
 processes. Depending on the mode of operation, the tool waits until an
@@ -75,33 +81,35 @@ status (if there is one task).
 
 Internally, watch uses Nomad event stream to get the events in real time.
 
-## onerun
+## go
 
 Mimics operation of `docker run`, it is built on top of `watch` mode to
 execute a single Nomad job created dynamically from command line arguments.
+It creates a Nomad job specification from command line arguments and then
+"watches" over the execution of the job.
 
 ```
-$ nomadtools onerun --rm alpine apk add bash
-INFO:nomad_tools.nomad_watch:Watching job nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984@default until it is finished
-eval>f3f3ea>v0> Allocation 8356bdb6-830b-5b05-11bc-fb29a4d47794 started on leonidas
-A>8356bd>v0>nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984> Received Task received by client
-A>8356bd>v0>nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984> Task Setup Building Task Directory
-A>8356bd>v0>nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984> Driver Downloading image
-A>8356bd>v0>nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984> Started Task started by client
-O>8356bd>v0>nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984> fetch https://dl-cdn.alpinelinux.org/alpine/v3.19/main/x86_64/APKINDEX.tar.gz
-O>8356bd>v0>nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984> fetch https://dl-cdn.alpinelinux.org/alpine/v3.19/community/x86_64/APKINDEX.tar.gz
-O>8356bd>v0>nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984> (1/4) Installing ncurses-terminfo-base (6.4_p20231125-r0)
-O>8356bd>v0>nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984> (2/4) Installing libncursesw (6.4_p20231125-r0)
-O>8356bd>v0>nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984> (3/4) Installing readline (8.2.1-r2)
-O>8356bd>v0>nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984> (4/4) Installing bash (5.2.21-r0)
-O>8356bd>v0>nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984> Executing bash-5.2.21-r0.post-install
-O>8356bd>v0>nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984> Executing busybox-1.36.1-r15.trigger
-O>8356bd>v0>nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984> OK: 10 MiB in 19 packages
-A>8356bd>v0>nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984> Terminated Exit Code: 0
-eval>f3f3ea>v0> Allocation 8356bdb6-830b-5b05-11bc-fb29a4d47794 finished
-INFO:nomad_tools.nomad_watch:Job nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984#0@default started allocations 8356bd running group 'nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984' with 1 main tasks.
-INFO:nomad_tools.nomad_watch:Purging job nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984
-INFO:nomad_tools.nomad_watch:Job nomadt_onerun_2568b8d0-b112-4051-92f7-1c67b0d64984#0@default purged with no active allocations, evaluations nor deployments. Exiting.
+$ nomadtools go --rm alpine apk add bash
+INFO:nomad_tools.nomad_watch:Watching job nomad_tools_go_5305da8f-b376-4c35-9a05-71027aadd587@default until it is finished
+Allocation 70c4ac9d-0e03-53d7-6e34-9c86cf8ee768 started on leonidas
+Received Task received by client
+Task Setup Building Task Directory
+Driver Downloading image
+Started Task started by client
+INFO:nomad_tools.nomad_watch:Job nomad_tools_go_5305da8f-b376-4c35-9a05-71027aadd587#0@default started allocations 70c4ac running group 'nomad_tools_go_5305da8f-b376-4c35-9a05-71027aadd587' with 1 main tasks.
+fetch https://dl-cdn.alpinelinux.org/alpine/v3.19/main/x86_64/APKINDEX.tar.gz
+fetch https://dl-cdn.alpinelinux.org/alpine/v3.19/community/x86_64/APKINDEX.tar.gz
+(1/4) Installing ncurses-terminfo-base (6.4_p20231125-r0)
+(2/4) Installing libncursesw (6.4_p20231125-r0)
+(3/4) Installing readline (8.2.1-r2)
+(4/4) Installing bash (5.2.21-r0)
+Terminated Exit Code: 0
+Allocation 70c4ac9d-0e03-53d7-6e34-9c86cf8ee768 finished
+Executing bash-5.2.21-r0.post-install
+Executing busybox-1.36.1-r15.trigger
+OK: 10 MiB in 19 packages
+INFO:nomad_tools.nomad_watch:Purging job nomad_tools_go_5305da8f-b376-4c35-9a05-71027aadd587
+INFO:nomad_tools.nomad_watch:Job nomad_tools_go_5305da8f-b376-4c35-9a05-71027aadd587#0@default purged with no active allocations, evaluations nor deployments. Exiting.
 INFO:nomad_tools.nomad_watch:Single task exited with 0 exit status. Exit code is 0.
 ```
 
