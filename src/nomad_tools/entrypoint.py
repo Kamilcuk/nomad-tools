@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import click
 import clickforward
 from click.shell_completion import BashComplete
@@ -13,7 +15,7 @@ from . import (
     nomad_vardir,
     nomad_watch,
 )
-from .common_click import common_options, main_options
+from .common_click import EPILOG, common_options, main_options
 from .common_nomad import namespace_option
 
 clickforward.init()
@@ -23,13 +25,15 @@ clickforward.init()
 # Pass COMP_POINT as environment variable.
 BashComplete.source_template = r"""\
     %(complete_func)s() {
-        if [[ $(type -t __reassemble_comp_words_by_ref) != function ]]; then
-            return -1
-        fi
         local cword words=()
-        __reassemble_comp_words_by_ref "=:" words cword
+        if [[ $(type -t __reassemble_comp_words_by_ref) == function ]]; then
+            __reassemble_comp_words_by_ref "=:" words cword
+        else
+            words=("${COMP_WORDS[@]}")
+            cword=${COMP_CWORD}
+        fi
         local IFS=$'\n'
-        response=$(env COMP_POINT=$COMP_POINT COMP_WORDS="${words[*]}" COMP_CWORD="$cword" %(complete_var)s=bash_complete $1)
+        response=$(COMP_POINT=$COMP_POINT COMP_WORDS="${words[*]}" COMP_CWORD="$cword" %(complete_var)s=bash_complete $1)
         for completion in $response; do
             IFS=',' read type value <<< "$completion"
             case $type in
@@ -48,11 +52,9 @@ BashComplete.source_template = r"""\
 
 
 @click.group(
-    "nomadt",
-    help="Nomad tools - collection of tools I find usefull when working with HashiCorp Nomad.",
-    epilog="""
-Written by Kamil Cukrowski 2023. Licensed under GNU GPL version or later.
-""",
+    "nomadtools",
+    help="Collection of useful tools for HashiCorp Nomad.",
+    epilog=EPILOG,
 )
 @namespace_option()
 @common_options()
