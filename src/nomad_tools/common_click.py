@@ -1,9 +1,12 @@
+import logging
 import os
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 import click
 
 from .common_base import composed, print_version, shell_completion
+
+EPILOG = "Written by Kamil Cukrowski 2024. Licensed under GNU GPL version or later."
 
 
 def complete_set_namespace(ctx: click.Context):
@@ -71,6 +74,32 @@ def main_options():
 def common_options():
     return composed(
         click.help_option("-h", "--help"),
+    )
+
+
+def verbose_option():
+    return click.option(
+        "-v",
+        "--verbose",
+        count=True,
+        expose_value=False,
+        is_eager=True,
+        callback=lambda v, *_: logging.root.setLevel(
+            max(logging.DEBUG, logging.root.level - 10)
+        ),
+    )
+
+
+def quiet_option():
+    return click.option(
+        "-q",
+        "--quiet",
+        count=True,
+        expose_value=False,
+        is_eager=True,
+        callback=lambda v, *_: logging.root.setLevel(
+            min(logging.CRITICAL, logging.root.level + 10)
+        ),
     )
 
 

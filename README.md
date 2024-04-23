@@ -11,6 +11,7 @@ Set of tools and utilities to ease interacting with HashiCorp Nomad scheduling s
 * [Usage](#usage)
     * [watch](#watch)
     * [go](#go)
+    * [constrainteval](#constrainteval)
     * [port](#port)
     * [vardir](#vardir)
     * [cp](#cp)
@@ -112,6 +113,26 @@ INFO:nomad_tools.nomad_watch:Purging job nomad_tools_go_5305da8f-b376-4c35-9a05-
 INFO:nomad_tools.nomad_watch:Job nomad_tools_go_5305da8f-b376-4c35-9a05-71027aadd587#0@default purged with no active allocations, evaluations nor deployments. Exiting.
 INFO:nomad_tools.nomad_watch:Single task exited with 0 exit status. Exit code is 0.
 ```
+
+## constrainteval
+
+Evaluate a constraint and show all nodes that match the constraint. In
+addition to the node names, it also shows all attributes referenced while
+evaluating the constraint given on command line arguments. Useful for
+searching for which hosts contain what value of a attribute.
+
+```
+$ nomadtools constrainteval attr.cpu.arch is_set
+name   attr.cpu.arch
+-----  ---------------
+node1  amd64
+node2  amd64
+```
+
+This mode uses a cache in `~/.cache/nomadtools/nodes.json` for caching all the
+attributes of nodes downloaded from Nomad. This is used to speed up. The
+program needs to make one query for every single node in Nomad, which for a
+lot of nodes is costly.
 
 ## port
 
