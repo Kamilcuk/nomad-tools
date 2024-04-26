@@ -72,9 +72,7 @@ OPERATORS: Dict[str, Callable[[Context], bool]] = {
     ">=": lambda c: c.attribute >= c.value,
     "<": lambda c: c.attribute < c.value,
     "<=": lambda c: c.attribute <= c.value,
-    "distinct_hosts": notimplemented,
-    "distinct_property": notimplemented,
-    "regexp": lambda c: bool(re.search(c.attribute, c.value)),
+    "regexp": lambda c: bool(re.search(c.value, c.attribute)),
     "set_contains": lambda c: c.value in c.attribute.split(","),
     "set_contains_any": lambda c: any(
         v in c.attribute.split(",") for v in c.value.split(",")
