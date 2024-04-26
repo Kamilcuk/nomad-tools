@@ -20,10 +20,12 @@ def test_constrainteval_2():
 
 def test_constrainteval_3():
     pp = run_nomadt(
-        "constrainteval --json nfdsafsafdasfd is_set", stdout=subprocess.PIPE
+        "constrainteval --json nfdsafsafdasfd is_set",
+        stdout=subprocess.PIPE,
+        check=2,
     )
-    assert pp.stdout
-    assert len(json.loads(pp.stdout)) == 0, f"{pp}"
+    assert pp.stdout is not None
+    assert pp.stdout == ""
 
 
 def test_constrainteval_prefix():
