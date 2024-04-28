@@ -21,9 +21,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: setup python ${{ matrix.python }}
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
           cache: 'pip'
@@ -35,7 +35,7 @@ jobs:
       - name: install test requirements
         run: pip install -r ./requirements-test.txt
       - name: run pyright
-        uses: jakebailey/pyright-action@v1
+        uses: jakebailey/pyright-action@v2
       - name: run unit tests
         run: ./unit_tests.sh --durations=10 -n auto
       - name: install nomad server
@@ -43,7 +43,7 @@ jobs:
       - name: run nomad server
         run: bash ./tests/provision.sh nomad_start
       - name: run integration tests
-        run: ./integration_tests.sh --durations=10 --cov=nomad_tools -n auto
+        run: ./integration_tests.sh --durations=10 --cov=nomad_tools -n 3
 
 
   pypi-publish:
@@ -60,7 +60,7 @@ jobs:
       id-token: write  # IMPORTANT: this permission is mandatory for trusted publishing
     steps:
       - name: checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: install build python package
         run: pip install --upgrade build
       - name: build the package
