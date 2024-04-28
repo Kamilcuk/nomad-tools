@@ -21,3 +21,25 @@ def test_go_exit_24():
 
 def test_go_exit_2():
     run_nomadt("go --rm busybox:stable sh -xc 'exit 2'", check=2)
+
+
+def test_go_identy():
+    run_nomadt(
+        """
+        go --rm
+        --identity '{"name": "example", "aud": ["oidc.example.com"], "file": true, "change_mode": "signal", "change_signal": "SIGHUP", "TTL": "1h"}'
+        --driver raw_exec echo hello
+        """
+    )
+
+
+def test_go_identities():
+    run_nomadt(
+        """
+        go --rm
+        --identity '{"name": "example", "aud": ["oidc.example.com"], "file": true, "change_mode": "signal", "change_signal": "SIGHUP", "TTL": "1h"}'
+        --identity '{"name": "example", "aud": ["oidc.example.com"], "file": true, "change_mode": "signal", "change_signal": "SIGHUP", "TTL": "1h"}'
+        --identity '{"name": "example", "aud": ["oidc.example.com"], "file": true, "change_mode": "signal", "change_signal": "SIGHUP", "TTL": "1h"}'
+        --driver raw_exec echo hello
+        """
+    )
