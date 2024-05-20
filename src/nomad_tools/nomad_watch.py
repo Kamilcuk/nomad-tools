@@ -973,7 +973,7 @@ class NotifierWorker:
 
 def __nomad_job_run(args: List[str]) -> str:
     """Call nomad job run to start a Nomad job using nomad job run call with specified arguments"""
-    cmd: List[str] = "nomad job run -detach -verbose".split() + args
+    cmd: List[str] = [*"nomad job run -detach -verbose".split(), *args]
     log.info(f"+ {' '.join(shlex.quote(x) for x in cmd)}")
     try:
         output = subprocess.check_output(cmd, text=True, stdin=sys.stdin)
@@ -1934,7 +1934,7 @@ cli_jobid = click.argument(
 )
 
 
-def cli_jobfile(name: str, help: str):
+def cli_jobfile_disabled(name: str, help: str):
     # Disabled, because maintenance.
     nomad_job_run_flags = [
         click.option("-check-index", type=int),
@@ -1969,16 +1969,16 @@ def cli_jobfile(name: str, help: str):
     )
 
 
-def cli_command_run_nomad_job_run(name: str, help: str):
-    """Command that forwards all arguments to 'nomad job run' command."""
+def cli_jobfile_command(name: str, where: str, help: str):
+    f"""Command that forwards all arguments to 'nomad job {where}' command."""
     return composed(
         cli.command(
             name,
             help=help.rstrip()
-            + """
+            + f"""
 
-            All following arguments are forwarded to 'nomad job run' command.
-            Note that 'nomad job run' has arguments starting with a single dash.
+            All following arguments are forwarded to 'nomad {where}' command.
+            Note that 'nomad job {where}' has arguments starting with a single dash.
             """,
             context_settings=dict(ignore_unknown_options=True),
         ),
@@ -2029,11 +2029,12 @@ def mode_eval(evalid):
     NomadJobWatcherUntilFinished(None, nomadlib.Eval(evaluation[0])).run_and_exit()
 
 
-@cli_command_run_nomad_job_run(
+@cli_jobfile_command(
+    "run",
     "run",
     help="Run a Nomad job and then act like stopped mode.",
 )
-def mode_run(args: Tuple[str], jobfile: str):
+def mode_run(args: Tuple[str, ...], jobfile: str):
     evaluation = nomad_start_job(list(args) + [jobfile])
     NomadJobWatcherUntilFinished(None, evaluation).run_and_exit()
 
@@ -2048,10 +2049,10 @@ def mode_job(jobid: str):
     NomadJobWatcherUntilFinished(jobid).run_and_exit()
 
 
-@cli_command_run_nomad_job_run(
-    "start", help="Start a Nomad job file and then act like started command."
+@cli_jobfile_command(
+    "start", "run", help="Start a Nomad job file and then act like started command."
 )
-def mode_start(args: Tuple[str], jobfile: str):
+def mode_start(args: Tuple[str, ...], jobfile: str):
     evaluation = nomad_start_job(list(args) + [jobfile])
     NomadJobWatcherUntilStarted(None, evaluation).run_and_exit()
 
@@ -2150,6 +2151,23 @@ In any case, exit with the following exit status:
 def mode_stopped(jobid: str):
     jobid = nomad_find_job(jobid)
     NomadJobWatcherUntilFinished(jobid).run_and_exit()
+
+
+@cli_jobfile_command(
+    "plan",
+    "plan",
+    help=f"""
+    This is an alias to nomad job plan for ease of typing.
+    """,
+)
+def mode_plan(args: Tuple[str, ...], jobfile: str):
+    cmd: List[str] = [*"nomad job plan".split(), *args, jobfile]
+    log.info(f"+ {' '.join(shlex.quote(x) for x in cmd)}")
+    try:
+        output = subprocess.check_call(cmd, text=True)
+    except subprocess.CalledProcessError as e:
+        # nomad will print its error, we can just exit
+        exit(e.returncode)
 
 
 ###############################################################################
