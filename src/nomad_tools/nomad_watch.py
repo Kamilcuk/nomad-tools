@@ -657,7 +657,7 @@ class TaskLogger(threading.Thread):
                         linebytes = base64.b64decode(line64.encode())
                         lines = linebytes.decode(errors="replace").splitlines()
                         for line in lines:
-                            self.tk.log_task(self.stderr, line.strip())
+                            self.tk.log_task(self.stderr, line.rstrip())
                     fileevent: Optional[str] = event.get("FileEvent")
                     if fileevent == "file deleted":
                         # Deleted means end of stream.
