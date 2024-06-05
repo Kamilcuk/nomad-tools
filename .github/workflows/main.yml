@@ -10,18 +10,49 @@ env:
 jobs:
   test:
     strategy:
-      max-parallel: 1
+      max-parallel: 2
       matrix:
         include:
+          - nomad: 1.8.0
+            python: 3.12
           - nomad: 1.7.5
             python: 3.12
-          - nomad: 1.6.8
-            python: 3.7
+          #- nomad: 1.6.8
+            #python: 3.7
     name: Test
     runs-on: ubuntu-latest
     steps:
       - name: checkout
         uses: actions/checkout@v4
+      - name: test
+        run: |
+          set -x
+          if [[ ! -e /opt/cni/bin ]]; then
+            sudo mkdir -vp /opt/cni/bin
+            wget -q https://github.com/containernetworking/plugins/releases/download/v1.5.0/cni-plugins-linux-amd64-v1.5.0.tgz
+            sudo tar xafvp cni-plugins*.tgz -C /opt/cni/bin 
+            sudo rm cni-plugins*.tgz
+          fi
+          if [[ "${{matrix.nomad}}" == "1.8.0" ]]; then
+            v=https://releases.hashicorp.com/nomad/1.8.0/nomad_1.8.0_linux_amd64.zip
+          else
+            v=https://releases.hashicorp.com/nomad/1.7.7/nomad_1.7.7_linux_amd64.zip
+          fi
+          wget -q "$v"
+          unzip *.zip
+          export PATH=$PWD:$PATH
+          chmod +x ./nomad
+          nomad --version
+          sudo ./nomad agent -dev -config ./tests/nomad.hcl &
+          sleep 10
+          exec 0<&-
+          nomad operator api /v1/nodes |
+            jq -r '.[].ID' |
+            xargs -t -i nomad operator api /v1/node/{} |
+            jq
+          sudo killall nomad
+          sleep 10
+          exit 1
       - name: setup python ${{ matrix.python }}
         uses: actions/setup-python@v5
         with:
