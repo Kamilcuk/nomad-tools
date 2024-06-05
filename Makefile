@@ -28,3 +28,7 @@ integration_tests:
 
 paralell_integration_tests:
 	./integration_tests.sh -n auto $(ARGS)
+
+importtime:
+	python -X importtime -c 'import nomad_tools.entrypoint' 2>build/importtime.log
+	tuna build/importtime.log
