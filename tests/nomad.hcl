@@ -14,6 +14,7 @@ client {
     force              = true
     ignore_system_jobs = false
   }
+  cni_path = "/opt/cni/bin:/usr/lib/cni"
 }
 limits {
   http_max_conns_per_client = 10000

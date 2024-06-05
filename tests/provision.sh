@@ -24,6 +24,13 @@ nomad_install() {
 	fi
 }
 
+cni_install() {
+	sudo mkdir -vp /opt/cni/bin
+	wget -q https://github.com/containernetworking/plugins/releases/download/v1.5.0/cni-plugins-linux-amd64-v1.5.0.tgz
+	sudo tar xafvp cni-plugins*.tgz -C /opt/cni/bin
+	sudo rm cni-plugins*.tgz
+}
+
 nomad_start() {
 	local pid now endtime
 	if pid=$(pgrep nomad); then
@@ -72,7 +79,7 @@ vagrant() {
 }
 
 case "$1" in
-nomad_install | nomad_start | nomad_restart | vagrant)
+cni_install | nomad_install | nomad_start | nomad_restart | vagrant)
 	"$@"
 	;;
 *)

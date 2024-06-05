@@ -10,10 +10,10 @@ env:
 jobs:
   test:
     strategy:
-      max-parallel: 1
+      max-parallel: 2
       matrix:
         include:
-          - nomad: 1.7.5
+          - nomad: 1.8.0
             python: 3.12
           - nomad: 1.6.8
             python: 3.7
@@ -27,9 +27,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           cache: 'pip'
-          cache-dependency-path:
-            ./requirements.txt
-            ./requirements-test.txt
+          cache-dependency-path: ./requirements*.txt
       - name: install editable package
         run: pip install -e .
       - name: install test requirements
@@ -38,6 +36,8 @@ jobs:
         uses: jakebailey/pyright-action@v2
       - name: run unit tests
         run: ./unit_tests.sh --durations=10 -n auto
+      - name: install cni
+        run: bash ./tests/provision.sh cni_install
       - name: install nomad server
         run: bash ./tests/provision.sh nomad_install ${{ matrix.nomad }}
       - name: run nomad server
