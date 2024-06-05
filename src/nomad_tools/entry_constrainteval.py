@@ -50,11 +50,13 @@ def op_version(c: Context):
         "<": lambda aa, bb: aa < bb,
         "<=": lambda aa, bb: aa <= bb,
     }
+    if not c.attribute:
+        return False
     ver = Version(c.attribute)
     for part in c.value.split(","):
-        for op, val in part.split():
-            if not ops[op](ver, Version(val)):
-                return False
+        op, val = part.split()
+        if not ops[op](ver, Version(val)):
+            return False
     return True
 
 

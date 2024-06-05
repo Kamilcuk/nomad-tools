@@ -6,7 +6,7 @@ from shlex import quote
 from textwrap import dedent
 from typing import Dict, List
 
-from tests.testlib import NamedTemporaryFileContent, get_testname, run
+from tests.testlib import NamedTemporaryFileContent, get_testname, run, run_nomadt
 
 
 @dataclasses.dataclass
@@ -90,6 +90,9 @@ docker_config = {
     }
 }
 
+
+def test_nomad_gitlab_runner_nomad_supports_bridge():
+    run_nomadt("constrainteval '${attr.plugins.cni.version.bridge}' semver '>= 0.4.0'")
 
 def test_nomad_gitlab_runner_raw_exec():
     cycle(raw_exec_config, "echo hello world")
