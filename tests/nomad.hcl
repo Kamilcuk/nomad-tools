@@ -1,5 +1,5 @@
 # Example nomad server configuration used for testing this project.
-bind_addr            = "0.0.0.0"
+bind_addr            = "127.0.0.1"
 disable_update_check = true
 server {
   enabled          = true
