@@ -11,6 +11,7 @@ jobs:
           set -x
           sudo mkdir -vp /opt/cni
           sudo ln -sv /usr/lib/cni /opt/cni/bin
+          /opt/cni/bin/bridge --version
           v=https://releases.hashicorp.com/nomad/1.8.0/nomad_1.8.0_linux_amd64.zip
           wget -q "$v"
           unzip *.zip
