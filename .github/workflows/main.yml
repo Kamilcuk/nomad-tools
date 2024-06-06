@@ -11,7 +11,11 @@ jobs:
           set -x
           sudo mkdir -vp /opt/cni
           sudo ln -sv /usr/lib/cni /opt/cni/bin
-          /opt/cni/bin/bridge --version
+          for i in /opt/cni/bin/*; do
+            "$i" --help || true
+            "$i" --version || true
+          done
+          apt list -a containernetworking-plugins
           v=https://releases.hashicorp.com/nomad/1.8.0/nomad_1.8.0_linux_amd64.zip
           wget -q "$v"
           unzip *.zip
