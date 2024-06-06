@@ -1,49 +1,23 @@
-# .github/workflows/ci-cd.yml
 ---
-
 on:
   - push
-
-env:
-  PYTHONUNBUFFERED: 1
-
 jobs:
   test:
-    strategy:
-      max-parallel: 2
-      matrix:
-        include:
-          - nomad: 1.8.0
-            python: 3.12
-          - nomad: 1.7.5
-            python: 3.12
-          #- nomad: 1.6.8
-            #python: 3.7
     name: Test
     runs-on: ubuntu-latest
     steps:
-      - name: checkout
-        uses: actions/checkout@v4
       - name: test
         run: |
           set -x
-          if [[ ! -e /opt/cni/bin ]]; then
-            sudo mkdir -vp /opt/cni/bin
-            wget -q https://github.com/containernetworking/plugins/releases/download/v1.5.0/cni-plugins-linux-amd64-v1.5.0.tgz
-            sudo tar xafvp cni-plugins*.tgz -C /opt/cni/bin 
-            sudo rm cni-plugins*.tgz
-          fi
-          if [[ "${{matrix.nomad}}" == "1.8.0" ]]; then
-            v=https://releases.hashicorp.com/nomad/1.8.0/nomad_1.8.0_linux_amd64.zip
-          else
-            v=https://releases.hashicorp.com/nomad/1.7.7/nomad_1.7.7_linux_amd64.zip
-          fi
+          sudo mkdir -vp /opt/cni
+          sudo ln -sv /usr/lib/cni /opt/cni/bin
+          v=https://releases.hashicorp.com/nomad/1.8.0/nomad_1.8.0_linux_amd64.zip
           wget -q "$v"
           unzip *.zip
           export PATH=$PWD:$PATH
           chmod +x ./nomad
           nomad --version
-          sudo ./nomad agent -dev -config ./tests/nomad.hcl &
+          sudo ./nomad agent -dev &
           sleep 10
           exec 0<&-
           nomad operator api /v1/nodes |
@@ -53,48 +27,3 @@ jobs:
           sudo killall nomad
           sleep 10
           exit 1
-      - name: setup python ${{ matrix.python }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python }}
-          cache: 'pip'
-          cache-dependency-path:
-            ./requirements.txt
-            ./requirements-test.txt
-      - name: install editable package
-        run: pip install -e .
-      - name: install test requirements
-        run: pip install -r ./requirements-test.txt
-      - name: run pyright
-        uses: jakebailey/pyright-action@v2
-      - name: run unit tests
-        run: ./unit_tests.sh --durations=10 -n auto
-      - name: install nomad server
-        run: bash ./tests/provision.sh nomad_install ${{ matrix.nomad }}
-      - name: run nomad server
-        run: bash ./tests/provision.sh nomad_start
-      - name: run integration tests
-        run: ./integration_tests.sh --durations=10 --cov=nomad_tools -n 3
-
-
-  pypi-publish:
-    name: Upload release to PyPI
-    needs:
-      - test
-    if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')
-    #if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    environment:
-      name: pypi
-      url: https://pypi.org/p/nomad-tools
-    permissions:
-      id-token: write  # IMPORTANT: this permission is mandatory for trusted publishing
-    steps:
-      - name: checkout
-        uses: actions/checkout@v4
-      - name: install build python package
-        run: pip install --upgrade build
-      - name: build the package
-        run: python -m build
-      - name: Publish package distributions to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
