@@ -3,12 +3,12 @@ import uuid
 
 import pytest
 
-from nomad_tools.nomad_vardir import human_size
-from tests.testlib import nomad_vardir_test, run_bash
+from nomad_tools.entry_vardir import human_size
+from tests.testlib import entry_vardir_test, run_bash
 
 
-def test_nomad_vardir_test():
-    with nomad_vardir_test() as t:
+def test_entry_vardir_test():
+    with entry_vardir_test() as t:
         val = str(uuid.uuid4())
         # putting works?
         t.run("ls", output=[re.compile("^$")])
@@ -25,8 +25,8 @@ def test_nomad_vardir_test():
         t.run("diff a")
 
 
-def test_nomad_vardir_test2():
-    with nomad_vardir_test() as t:
+def test_entry_vardir_test2():
+    with entry_vardir_test() as t:
         t.run("put a", check=False)
         t.run("diff", check=False)
         t.run("get a", check=False)

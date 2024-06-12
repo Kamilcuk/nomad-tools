@@ -4,41 +4,41 @@ import time
 from typing import Dict, List
 
 from nomad_tools import nomadlib
-from tests.testlib import caller, gen_job, job_exists, nomad_has_docker, run_nomad_watch
+from tests.testlib import caller, gen_job, job_exists, nomad_has_docker, run_entry_watch
 
 
-def test_nomad_watch_run_0():
+def test_entry_watch_run_0():
     """Watch a simple jow that outputs hello world"""
     job = gen_job(script="echo hello world")
-    run_nomad_watch(
+    run_entry_watch(
         "--purge run -json -", input=json.dumps(job), output=["hello world"]
     )
 
 
-def test_nomad_watch_run():
+def test_entry_watch_run():
     """Run a simple job, then purge it. Check if we have our uuid on output"""
     mark = "5581c3a0-cd72-4b84-8b95-799d1aebe1cd"
     exitstatus = 123
     job = gen_job(script=f"echo {mark}; exit {exitstatus}")
     jobid = job["Job"]["ID"]
-    run_nomad_watch(f"-x purge {jobid}")
-    run_nomad_watch(
+    run_entry_watch(f"-x purge {jobid}")
+    run_entry_watch(
         "run -json -",
         input=json.dumps(job),
         check=exitstatus,
         output=[mark],
     )
-    run_nomad_watch(f"purge {jobid}", check=exitstatus)
+    run_entry_watch(f"purge {jobid}", check=exitstatus)
 
 
-def test_nomad_watch_start():
+def test_entry_watch_start():
     mark = "7bc8413c-8619-48bf-a46d-f42727724632"
     exitstatus = 234
     job = gen_job(script=f"sleep 2; echo {mark} ; exit {exitstatus}")
     jobid = job["Job"]["ID"]
     try:
-        run_nomad_watch("start -json -", input=json.dumps(job))
-        assert mark in run_nomad_watch(f"started {jobid}", stdout=1).stdout
+        run_entry_watch("start -json -", input=json.dumps(job))
+        assert mark in run_entry_watch(f"started {jobid}", stdout=1).stdout
         cmds = [
             f"stop {jobid}",
             f"stopped {jobid}",
@@ -49,13 +49,13 @@ def test_nomad_watch_start():
             f"--no-follow -o all job {jobid}",
         ]
         for cmd in cmds:
-            assert mark in run_nomad_watch(cmd, check=exitstatus, stdout=1).stdout
+            assert mark in run_entry_watch(cmd, check=exitstatus, stdout=1).stdout
     finally:
-        run_nomad_watch(f"-o none stop {jobid}", check=exitstatus)
-    run_nomad_watch(f"-o none --purge stop {jobid}", check=exitstatus)
+        run_entry_watch(f"-o none stop {jobid}", check=exitstatus)
+    run_entry_watch(f"-o none --purge stop {jobid}", check=exitstatus)
 
 
-def test_nomad_watch_run_short():
+def test_entry_watch_run_short():
     name = caller()
     spec = f"""
         job "{name}" {{
@@ -79,14 +79,14 @@ def test_nomad_watch_run_short():
         """
     print(spec)
     try:
-        output = run_nomad_watch("-n -1 run -", input=spec, stdout=1).stdout
+        output = run_entry_watch("-n -1 run -", input=spec, stdout=1).stdout
         assert output.count("sleep 0.123") == 5
         assert output.count("MARK ") == 10
     finally:
-        run_nomad_watch(f"-x purge {name}")
+        run_entry_watch(f"-x purge {name}")
 
 
-def test_nomad_watch_run_multiple():
+def test_entry_watch_run_multiple():
     name = caller()
     now = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
     hastohave: List[str] = []
@@ -132,30 +132,30 @@ def test_nomad_watch_run_multiple():
     }
     """
     print(spec)
-    output = run_nomad_watch(
+    output = run_entry_watch(
         "--shutdown-timeout 3 --purge run -", input=spec, stdout=1
     ).stdout
     for i in hastohave:
         assert output.count(i) == 2, f"{output}.count({i}) != 2"
 
 
-def test_nomad_watch_purge_successful_0():
+def test_entry_watch_purge_successful_0():
     job = gen_job("exit 0")
     jobid = job["Job"]["ID"]
-    run_nomad_watch("--purge-successful run -json -", input=json.dumps(job), check=[0])
+    run_entry_watch("--purge-successful run -json -", input=json.dumps(job), check=[0])
     assert not job_exists(jobid)
 
 
-def test_nomad_watch_purge_successful_123():
+def test_entry_watch_purge_successful_123():
     job = gen_job("exit 123")
     jobid = job["Job"]["ID"]
     try:
-        run_nomad_watch(
+        run_entry_watch(
             "--purge-successful run -json -", input=json.dumps(job), check=[123]
         )
         assert job_exists(jobid)
     finally:
-        run_nomad_watch(f"-x --purge stop {jobid}")
+        run_entry_watch(f"-x --purge stop {jobid}")
         assert not job_exists(jobid)
 
 
@@ -168,7 +168,7 @@ def gen_task(name: str, script: str, add: dict = {}):
     }
 
 
-def test_nomad_watch_starting_with_preinit_tasks():
+def test_entry_watch_starting_with_preinit_tasks():
     jobid = caller()
     job = {
         "Job": {
@@ -211,7 +211,7 @@ def test_nomad_watch_starting_with_preinit_tasks():
         }
     }
     try:
-        run_nomad_watch("start -json -", input=json.dumps(job))
+        run_entry_watch("start -json -", input=json.dumps(job))
         assert job_exists(jobid)
         allocs = [
             nomadlib.Alloc(x)
@@ -233,7 +233,7 @@ def test_nomad_watch_starting_with_preinit_tasks():
         assert not states["poststop"].was_started()
         #
     finally:
-        run_nomad_watch(f"-x stop {jobid}")
+        run_entry_watch(f"-x stop {jobid}")
     assert job_exists(jobid)
     allocs = [
         nomadlib.Alloc(x) for x in nomadlib.NomadConn().get(f"job/{jobid}/allocations")
@@ -246,5 +246,5 @@ def test_nomad_watch_starting_with_preinit_tasks():
     tmp = [f"name={n} finishedat={s.FinishedAt}" for n, s in states.items()]
     assert all([s.FinishedAt for s in states.values()]), f"{states} | {tmp}"
     #
-    run_nomad_watch(f"-xn0 --purge stop {jobid}")
+    run_entry_watch(f"-xn0 --purge stop {jobid}")
     assert not job_exists(jobid)

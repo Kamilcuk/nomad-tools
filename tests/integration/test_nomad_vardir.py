@@ -1,7 +1,7 @@
 import tempfile
 
 from nomad_tools.common import mynomad
-from tests.testlib import caller, run, run_nomad_vardir
+from tests.testlib import caller, run, run_entry_vardir
 
 
 class VardirCaller:
@@ -9,7 +9,7 @@ class VardirCaller:
         self.name = name
 
     def __call__(self, cmd, **kvargs):
-        return run_nomad_vardir(f"{self.name} {cmd}", **kvargs)
+        return run_entry_vardir(f"{self.name} {cmd}", **kvargs)
 
     def __enter__(self):
         return self
@@ -18,7 +18,7 @@ class VardirCaller:
         run(f" nomad var purge {self.name}", check=None)
 
 
-def test_nomad_vardir_1():
+def test_entry_vardir_1():
     with VardirCaller(caller()) as vardir:
         with tempfile.TemporaryDirectory() as d:
             #
@@ -47,7 +47,7 @@ def test_nomad_vardir_1():
             vardir("rm c", cwd=d)
 
 
-def test_nomad_vardir_setrm():
+def test_entry_vardir_setrm():
     with VardirCaller(caller()) as vardir:
         vardir("set a avalue")
         vardir("cat a", output="avalue")

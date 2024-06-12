@@ -21,7 +21,7 @@ import clickdc
 import clickforward
 import dotenv
 
-from . import nomad_watch, taskexec
+from . import entry_watch, taskexec
 from .common_base import NOMAD_NAMESPACE, quotearr
 from .common_click import EPILOG, common_options
 from .common_nomad import namespace_option
@@ -636,9 +636,9 @@ Examples:
 @common_options()
 @namespace_option()
 @clickdc.adddc("args", Args)
-@clickdc.adddc("notifyargs", nomad_watch.NotifyOptions)
+@clickdc.adddc("notifyargs", entry_watch.NotifyOptions)
 @click.option("-v", "--verbose", is_flag=True)
-def cli(args: Args, notifyargs: nomad_watch.NotifyOptions, verbose: bool):
+def cli(args: Args, notifyargs: entry_watch.NotifyOptions, verbose: bool):
     global ARGS
     ARGS = args
     if args.command[0].startswith("-"):
@@ -674,7 +674,7 @@ def cli(args: Args, notifyargs: nomad_watch.NotifyOptions, verbose: bool):
             cmd = [f"--notifyfdstarted={wfd}", *cmd]
         with redirect_stdin_str(jobjson):
             log.debug(f"+ {quotearr(cmd)}")
-            nomad_watch.cli.main(args=cmd)
+            entry_watch.cli.main(args=cmd)
 
 
 if __name__ == "__main__":
