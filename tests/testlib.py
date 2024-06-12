@@ -221,14 +221,14 @@ def prefixed_run(prefix: str):
     return inner
 
 
-run_nomad_cp = prefixed_run(
+run_entry_cp = prefixed_run(
     "python3 -m nomad_tools.entrypoint cp -vv --no-stats --no-pv"
 )
-run_nomad_watch = prefixed_run(
+run_entry_watch = prefixed_run(
     "python3 -m nomad_tools.entrypoint watch -v --lines -1 --shutdown-timeout 5"
 )
-run_nomad_vardir = prefixed_run("python3 -m nomad_tools.entrypoint vardir -v")
-run_nomad_dockers = prefixed_run("python3 -m nomad_tools.entrypoint dockers -v")
+run_entry_vardir = prefixed_run("python3 -m nomad_tools.entrypoint vardir -v")
+run_entry_dockers = prefixed_run("python3 -m nomad_tools.entrypoint dockers -v")
 run_downloadrelease = prefixed_run("python3 -m nomad_tools.entrypoint downloadrelease")
 run_nomadt = prefixed_run("python3 -m nomad_tools.entrypoint")
 
@@ -254,7 +254,7 @@ class TestNomadVardir:
         input: Optional[str] = None,
         **kwargs,
     ):
-        return run_nomad_vardir(
+        return run_entry_vardir(
             f"{self.prefix} {cmds}",
             check=check,
             text=text,
@@ -275,7 +275,7 @@ def Chdir(where: Union[Path, str]):
 
 
 @contextlib.contextmanager
-def nomad_vardir_test():
+def entry_vardir_test():
     with tempfile.TemporaryDirectory() as d:
         with Chdir(d):
             with tempfile.NamedTemporaryFile() as testf:

@@ -19,7 +19,7 @@ from typing import Callable, Dict, List, Optional, Union
 import click
 import yaml
 
-from . import nomad_watch, nomadlib, taskexec
+from . import entry_watch, nomadlib, taskexec
 from .common import (
     cached_property,
     common_options,
@@ -38,7 +38,7 @@ log = logging.getLogger(NAME)
 
 
 def get_gitlab_runner_package_script(file: str):
-    return get_package_file(f"nomad_gitlab_runner/{file}")
+    return get_package_file(f"entry_gitlab_runner/{file}")
 
 
 def get_CUSTOM_ENV() -> Dict[str, str]:
@@ -536,12 +536,12 @@ class Config(DataDict):
 ###############################################################################
 
 
-def run_nomad_watch(cmd: str):
+def run_entry_watch(cmd: str):
     cmdarr = ["-T", *split(cmd)]
     cmd = quotearr(cmdarr)
     log.debug(f"+ nomad-watch {cmd}")
     try:
-        return nomad_watch.cli.main(cmdarr, standalone_mode=False)
+        return entry_watch.cli.main(cmdarr, standalone_mode=False)
     except SystemExit as e:
         if not (e.code is None or e.code == 0):
             raise
@@ -556,7 +556,7 @@ def purge_previous_nomad_job(jobname: str):
     assert (
         job.Stop is True or job.Status == "dead"
     ), f"Job {job.description()} already exists and is not stopped or not dead. Bailing out"
-    run_nomad_watch(f"--purge -xn0 stop {quote(jobname)}")
+    run_entry_watch(f"--purge -xn0 stop {quote(jobname)}")
 
 
 ###############################################################################
@@ -759,7 +759,7 @@ def mode_prepare():
     with tempfile.NamedTemporaryFile("w+") as f:
         f.write(jobjson)
         f.flush()
-        run_nomad_watch(f"--json start {f.name}")
+        run_entry_watch(f"--json start {f.name}")
 
 
 @cli.command("run", help="https://docs.gitlab.com/runner/executors/custom.html#run")
@@ -797,7 +797,7 @@ def mode_run(script: str, stage: str):
 @executor_exit
 def mode_cleanup():
     je = Jobenv()
-    run_nomad_watch(
+    run_entry_watch(
         f" {'--purge' if config.purge else ''}"
         f" {'--purge-successful' if config.purge_successful and config.purge is None else ''}"
         f" -x -n0 stop {quote(je.jobname)}"

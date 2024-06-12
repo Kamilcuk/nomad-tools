@@ -1,82 +1,61 @@
 #!/usr/bin/env python3
+import os
+import sys
 
-import click
-import clickforward
-from click.shell_completion import BashComplete
+NOMAD_HELP = """
+Usage: nomad [-version] [-help] [-autocomplete-(un)install] <command> [args]
 
-from . import (
-    entry_constrainteval,
-    entry_go,
-    nomad_cp,
-    nomad_dockers,
-    nomad_downloadrelease,
-    nomad_gitlab_runner,
-    nomad_port,
-    nomad_vardir,
-    nomad_watch,
-)
-from .common_click import EPILOG, common_options, main_options
-from .common_nomad import namespace_option
+Common commands:
+    run         Run a new job or update an existing job
+    stop        Stop a running job
+    status      Display the status output for a resource
+    alloc       Interact with allocations
+    job         Interact with jobs
+    node        Interact with nodes
+    agent       Runs a Nomad agent
 
-clickforward.init()
-
-# Fix bash splitting completion on colon.
-# Use __reassemble_comp_words_by_ref from bash-completion.
-# Pass COMP_POINT as environment variable.
-BashComplete.source_template = r"""\
-    %(complete_func)s() {
-        local cword words=()
-        if [[ $(type -t __reassemble_comp_words_by_ref) == function ]]; then
-            __reassemble_comp_words_by_ref "=:" words cword
-        else
-            words=("${COMP_WORDS[@]}")
-            cword=${COMP_CWORD}
-        fi
-        local IFS=$'\n'
-        response=$(COMP_POINT=$COMP_POINT COMP_WORDS="${words[*]}" COMP_CWORD="$cword" %(complete_var)s=bash_complete $1)
-        for completion in $response; do
-            IFS=',' read type value <<< "$completion"
-            case $type in
-            dir) COMPREPLY=(); compopt -o dirnames; ;;
-            file) COMPREPLY=(); compopt -o default; ;;
-            plain) COMPREPLY+=("$value"); ;;
-            nospace) compopt -o nospace; ;;
-            esac
-        done
-    }
-    %(complete_func)s_setup() {
-        complete -o nosort -F %(complete_func)s %(prog_name)s
-    }
-    %(complete_func)s_setup;
+Other commands:
+    acl                 Interact with ACL policies and tokens
+    action              Run a pre-defined command from a given context
+    agent-info          Display status information about the local agent
+    config              Interact with configurations
+    deployment          Interact with deployments
+    eval                Interact with evaluations
+    exec                Execute commands in task
+    fmt                 Rewrites Nomad config and job files to canonical format
+    license             Interact with Nomad Enterprise License
+    login               Login to Nomad using an auth method
+    monitor             Stream logs from a Nomad agent
+    namespace           Interact with namespaces
+    operator            Provides cluster-level tools for Nomad operators
+    plugin              Inspect plugins
+    quota               Interact with quotas
+    recommendation      Interact with the Nomad recommendation endpoint
+    scaling             Interact with the Nomad scaling endpoint
+    sentinel            Interact with Sentinel policies
+    server              Interact with servers
+    service             Interact with registered services
+    setup               Interact with setup helpers
+    system              Interact with the system API
+    tls                 Generate Self Signed TLS Certificates for Nomad
+    ui                  Open the Nomad Web UI
+    var                 Interact with variables
+    version             Prints the Nomad version
+    volume              Interact with volumes
 """
 
 
-@click.group(
-    "nomadtools",
-    help="Collection of useful tools for HashiCorp Nomad.",
-    epilog=EPILOG,
-)
-@namespace_option()
-@common_options()
-@main_options()
-def cli():
-    pass
-
-
-cli.add_command(entry_constrainteval.cli)
-cli.add_command(entry_go.cli)
-cli.add_command(nomad_cp.cli)
-cli.add_command(nomad_dockers.cli)
-cli.add_command(nomad_downloadrelease.cli)
-cli.add_command(nomad_gitlab_runner.cli)
-cli.add_command(nomad_port.cli)
-cli.add_command(nomad_vardir.cli)
-cli.add_command(nomad_watch.cli)
+def get_nomad_subcommands():
+    return set(x.split()[0] for x in NOMAD_HELP.splitlines() if x.startswith("    "))
 
 
 def main():
-    cli(max_content_width=9999)
+    if len(sys.argv) > 1:
+        if sys.argv[1] in get_nomad_subcommands():
+            os.execvp("nomad", ["nomad", *sys.argv[1:]])
+    from . import entry
 
+    entry.main()
 
 if __name__ == "__main__":
     main()

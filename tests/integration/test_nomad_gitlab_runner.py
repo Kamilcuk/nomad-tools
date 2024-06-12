@@ -32,10 +32,10 @@ class GitlabState:
         for k, v in defaults.items():
             self.env.setdefault(k, v)
 
-    def nomad_gitlab_runner(self, cmd: str, check: List[int], **kwargs):
+    def entry_gitlab_runner(self, cmd: str, check: List[int], **kwargs):
         # [0, self.build_failure, self.system_failure],
         return run(
-            f"python3 -m nomad_tools.nomad_gitlab_runner -v -c {quote(self.configfile)} {cmd}",
+            f"python3 -m nomad_tools.entry_gitlab_runner -v -c {quote(self.configfile)} {cmd}",
             env=self.env,
             check=check,
             **kwargs,
@@ -43,7 +43,7 @@ class GitlabState:
 
     def stage_config(self):
         driverconfig = json.loads(
-            self.nomad_gitlab_runner("config", check=[0], stdout=1).stdout
+            self.entry_gitlab_runner("config", check=[0], stdout=1).stdout
         )
         assert isinstance(driverconfig["builds_dir"], str)
         assert isinstance(driverconfig["cache_dir"], str)
@@ -53,15 +53,15 @@ class GitlabState:
         self.env.update(driverenv)
 
     def stage_prepare(self):
-        return self.nomad_gitlab_runner("prepare", check=[0])
+        return self.entry_gitlab_runner("prepare", check=[0])
 
     def stage_script(self, scriptfile: str, stage: str):
-        return self.nomad_gitlab_runner(
+        return self.entry_gitlab_runner(
             f"run {quote(scriptfile)} {quote(stage)}", check=[0]
         )
 
     def stage_cleanup(self):
-        return self.nomad_gitlab_runner("cleanup", check=[0])
+        return self.entry_gitlab_runner("cleanup", check=[0])
 
 
 def cycle(config: dict, script: str, env: Dict[str, str] = {}):
@@ -91,14 +91,14 @@ docker_config = {
 }
 
 
-def test_nomad_gitlab_runner_nomad_supports_bridge():
+def test_entry_gitlab_runner_nomad_supports_bridge():
     run_nomadt("constrainteval '${attr.plugins.cni.version.bridge}' semver '>= 0.4.0'")
 
-def test_nomad_gitlab_runner_raw_exec():
+def test_entry_gitlab_runner_raw_exec():
     cycle(raw_exec_config, "echo hello world")
 
 
-def test_nomad_gitlab_runner_docker():
+def test_entry_gitlab_runner_docker():
     cycle(docker_config, "echo hello world ")
 
 
@@ -107,7 +107,7 @@ docker_test_script = (
 )
 
 
-def test_nomad_gitlab_runner_dockerd_tls():
+def test_entry_gitlab_runner_dockerd_tls():
     cycle(
         docker_config,
         docker_test_script,
@@ -121,7 +121,7 @@ def test_nomad_gitlab_runner_dockerd_tls():
     )
 
 
-def test_nomad_gitlab_runner_dockerd_notls():
+def test_entry_gitlab_runner_dockerd_notls():
     cycle(
         docker_config,
         docker_test_script,
@@ -133,7 +133,7 @@ def test_nomad_gitlab_runner_dockerd_notls():
     )
 
 
-def test_nomad_gitlab_runner_alias():
+def test_entry_gitlab_runner_alias():
     cycle(
         {
             "default": {

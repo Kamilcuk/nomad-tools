@@ -3,21 +3,21 @@ import logging
 import shutil
 
 from nomad_tools import taskexec
-from tests.testlib import get_templatejob, run_nomad_watch
+from tests.testlib import get_templatejob, run_entry_watch
 
 
 @contextlib.contextmanager
 def run_temp_job():
     hcl = get_templatejob(script="exec sleep 60")
     jobid = hcl.id
-    run_nomad_watch(f"-q -o none -x purge {jobid}")
+    run_entry_watch(f"-q -o none -x purge {jobid}")
     try:
-        run_nomad_watch("-q -o none start -", input=hcl.hcl)
+        run_entry_watch("-q -o none start -", input=hcl.hcl)
         taskexec.log.setLevel(level=logging.DEBUG)
         yield jobid
     finally:
         taskexec.log.setLevel(level=logging.INFO)
-        run_nomad_watch(f"-q -o none -x purge {jobid}")
+        run_entry_watch(f"-q -o none -x purge {jobid}")
 
 
 def test_taskexec_noutf():

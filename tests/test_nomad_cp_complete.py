@@ -3,7 +3,7 @@
 import argparse
 import os
 
-from nomad_tools.nomad_cp import ArgPath
+from nomad_tools.entry_cp import ArgPath
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-d", "--debug", action="store_true")
