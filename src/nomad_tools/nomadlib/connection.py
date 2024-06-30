@@ -10,6 +10,7 @@ from typing import Any, Dict, Optional
 import requests.adapters
 import requests.auth
 import websocket
+import urllib3
 
 from ..common_base import cached_property
 from . import types
@@ -23,6 +24,9 @@ NOMAD_SKIP_VERIFY = "NOMAD_SKIP_VERIFY"
 NOMAD_CACERT = "NOMAD_CACERT"
 NOMAD_CLIENT_CERT = "NOMAD_CLIENT_CERT"
 NOMAD_CLIENT_KEY = "NOMAD_CLIENT_KEY"
+
+if NOMAD_SKIP_VERIFY in os.environ:
+    urllib3.disable_warnings()
 
 
 def _default_session():
