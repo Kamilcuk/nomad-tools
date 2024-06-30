@@ -17,13 +17,16 @@ from . import types
 
 log = logging.getLogger(__name__)
 
+NOMAD_ADDR = "NOMAD_ADDR"
 NOMAD_NAMESPACE = "NOMAD_NAMESPACE"
 NOMAD_TOKEN = "NOMAD_TOKEN"
 NOMAD_HTTP_AUTH = "NOMAD_HTTP_AUTH"
-NOMAD_SKIP_VERIFY = "NOMAD_SKIP_VERIFY"
-NOMAD_CACERT = "NOMAD_CACERT"
 NOMAD_CLIENT_CERT = "NOMAD_CLIENT_CERT"
 NOMAD_CLIENT_KEY = "NOMAD_CLIENT_KEY"
+NOMAD_CACERT = "NOMAD_CACERT"
+NOMAD_CAPATH = "NOMAD_CACPATH"
+NOMAD_SKIP_VERIFY = "NOMAD_SKIP_VERIFY"
+NOMAD_TLS_SERVER_NAME = "NOMAD_TLS_SERVER_NAME"
 
 if NOMAD_SKIP_VERIFY in os.environ:
     urllib3.disable_warnings()
@@ -159,7 +162,7 @@ class NomadConn(Requestor):
 
     @staticmethod
     def addr() -> str:
-        return os.environ.get("NOMAD_ADDR", "http://127.0.0.1:4646")
+        return os.environ.get(NOMAD_ADDR, "http://127.0.0.1:4646")
 
     def request(
         self,
@@ -193,6 +196,8 @@ class NomadConn(Requestor):
                 if NOMAD_SKIP_VERIFY in os.environ
                 else os.environ[NOMAD_CACERT]
                 if NOMAD_CACERT in os.environ
+                else os.environ[NOMAD_CAPATH]
+                if NOMAD_CAPATH in os.environ
                 else True
             ),
             cert=(
