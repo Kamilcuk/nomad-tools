@@ -4,13 +4,14 @@ import dataclasses
 import logging
 import os
 import ssl
+import sys
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
 
 import requests.adapters
 import requests.auth
-import websocket
 import urllib3
+import websocket
 
 from ..common_base import cached_property
 from . import types
@@ -24,7 +25,7 @@ NOMAD_HTTP_AUTH = "NOMAD_HTTP_AUTH"
 NOMAD_CLIENT_CERT = "NOMAD_CLIENT_CERT"
 NOMAD_CLIENT_KEY = "NOMAD_CLIENT_KEY"
 NOMAD_CACERT = "NOMAD_CACERT"
-NOMAD_CAPATH = "NOMAD_CACPATH"
+NOMAD_CAPATH = "NOMAD_CAPATH"
 NOMAD_SKIP_VERIFY = "NOMAD_SKIP_VERIFY"
 NOMAD_TLS_SERVER_NAME = "NOMAD_TLS_SERVER_NAME"
 
@@ -33,16 +34,30 @@ if NOMAD_SKIP_VERIFY in os.environ:
 
 
 def _default_session():
-    s = requests.Session()
+    session = requests.Session()
+    # Override SNI if requested.
+    if NOMAD_TLS_SERVER_NAME in os.environ:
+        try:
+            from requests_toolbelt.adapters.host_header_ssl import HostHeaderSSLAdapter
+        except ImportError:
+            print(
+                "nomadtools: install requests_toolbelt to use NOMAD_TLS_SERVER_NAME",
+                file=sys.stderr,
+            )
+            raise
+
+        obj = HostHeaderSSLAdapter
+    else:
+        obj = requests.adapters.HTTPAdapter
     # Increase the number of connections.
-    a = requests.adapters.HTTPAdapter(
+    adapter = obj(
         pool_connections=1000,
         pool_maxsize=1000,
         max_retries=requests.adapters.Retry(3),
     )
-    s.mount("http://", a)
-    s.mount("https://", a)
-    return s
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
 
 
 class APIException(requests.HTTPError):
@@ -176,29 +191,47 @@ class NomadConn(Requestor):
         params.setdefault(
             "namespace", self.namespace or os.environ.get(NOMAD_NAMESPACE, "*")
         )
+        print(
+            False
+            if NOMAD_SKIP_VERIFY in os.environ
+            else (
+                os.environ[NOMAD_CACERT]
+                if NOMAD_CACERT in os.environ
+                else (os.environ[NOMAD_CAPATH] if NOMAD_CAPATH in os.environ else True)
+            )
+        )
         req = self.session.request(
             method,
             self.addr() + "/v1/" + url,
             *args,
             auth=(
-                requests.auth.HTTPBasicAuth(*os.environ[NOMAD_HTTP_AUTH].split(":", 2))
+                requests.auth.HTTPBasicAuth(*os.environ[NOMAD_HTTP_AUTH].split(":", 1))
                 if NOMAD_HTTP_AUTH in os.environ
                 else None
             ),
-            headers=(
-                {"X-Nomad-Token": os.environ[NOMAD_TOKEN]}
-                if NOMAD_TOKEN in os.environ
-                else None
-            ),
+            headers={
+                **(
+                    {"X-Nomad-Token": os.environ[NOMAD_TOKEN]}
+                    if NOMAD_TOKEN in os.environ
+                    else {}
+                ),
+                **(
+                    {"Host": os.environ[NOMAD_TLS_SERVER_NAME]}
+                    if NOMAD_TLS_SERVER_NAME in os.environ
+                    else {}
+                ),
+            },
             params=params,
             verify=(
                 False
                 if NOMAD_SKIP_VERIFY in os.environ
-                else os.environ[NOMAD_CACERT]
-                if NOMAD_CACERT in os.environ
-                else os.environ[NOMAD_CAPATH]
-                if NOMAD_CAPATH in os.environ
-                else True
+                else (
+                    os.environ[NOMAD_CACERT]
+                    if NOMAD_CACERT in os.environ
+                    else (
+                        os.environ[NOMAD_CAPATH] if NOMAD_CAPATH in os.environ else True
+                    )
+                )
             ),
             cert=(
                 (os.environ[NOMAD_CLIENT_CERT], os.environ[NOMAD_CLIENT_KEY])

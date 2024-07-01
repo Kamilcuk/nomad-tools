@@ -5,6 +5,7 @@ server {
   enabled          = true
   bootstrap_expect = 1
 }
+
 client {
   enabled                  = true
   gc_disk_usage_threshold  = 100
@@ -16,14 +17,17 @@ client {
   }
   cni_path = "/opt/cni/bin:/usr/lib/cni"
 }
+
 limits {
   http_max_conns_per_client = 10000
 }
+
 plugin "raw_exec" {
   config {
     enabled = true
   }
 }
+
 plugin "docker" {
   config {
     allow_privileged = true
@@ -35,6 +39,7 @@ plugin "docker" {
     }
   }
 }
+
 consul {
   client_auto_join = false
   server_auto_join = false
