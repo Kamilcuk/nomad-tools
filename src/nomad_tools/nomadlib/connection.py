@@ -191,15 +191,6 @@ class NomadConn(Requestor):
         params.setdefault(
             "namespace", self.namespace or os.environ.get(NOMAD_NAMESPACE, "*")
         )
-        print(
-            False
-            if NOMAD_SKIP_VERIFY in os.environ
-            else (
-                os.environ[NOMAD_CACERT]
-                if NOMAD_CACERT in os.environ
-                else (os.environ[NOMAD_CAPATH] if NOMAD_CAPATH in os.environ else True)
-            )
-        )
         req = self.session.request(
             method,
             self.addr() + "/v1/" + url,
@@ -309,7 +300,7 @@ def create_websocket_connection(path: str) -> websocket.WebSocket:
         sslopt["check_hostname"] = False
     cacert = os.environ.get(NOMAD_CACERT)
     if cacert:
-        sslopt["ca_cert"] = cacert
+        sslopt["ca_certs"] = cacert
     else:
         capath = os.environ.get(NOMAD_CAPATH)
         if capath:

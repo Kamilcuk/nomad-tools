@@ -31,28 +31,41 @@ cni_install() {
 	sudo rm cni-plugins*.tgz
 }
 
-nomad_start() {
+wait_for() {
+	now=$(date +%s)
+	endtime=$((now + 30))
+	while ! "$@" >/dev/null; do
+		sleep 0.5
+		now=$(date +%s)
+		if ((now > endtime)); then
+			fatal "did not start $*"
+		fi
+		if ! kill -0 "$NOMADPID"; then
+			fatal "$* exited"
+		fi
+	done
+	"$@"
+}
+
+# shellcheck disable=2120
+nomad_run() {
 	local pid now endtime
 	if pid=$(pgrep nomad); then
 		echo "nomad already running: $(xargs ps aux "$pid")"
 		return
 	fi
-	sudo nomad agent -dev -config ./tests/nomad.hcl &
-	NOMADPID=$!
-	# Wait for nomad
-	now=$(date +%s)
-	endtime=$((now + 30))
-	while ! nomad status >/dev/null; do
-		sleep 0.5
-		now=$(date +%s)
-		if ((now > endtime)); then
-			fatal "did not start nomad"
-		fi
-		if ! kill -0 "$NOMADPID"; then
-			fatal "nomad exited"
-		fi
-	done
-	nomad status
+	sudo nomad agent -dev -config ./tests/nomad.d/nomad.hcl "$@" &
+	declare -g NOMADPID=$!
+}
+
+nomad_start() {
+	nomad_run
+	wait_for nomad status
+}
+
+nomad_start_tls() {
+	nomad_run -config ./tests/nomad.d/tls.hcl
+	wait_for ./tests/tls_env.bash tls -- nomad status
 }
 
 nomad_restart() {
@@ -79,10 +92,10 @@ vagrant() {
 }
 
 case "$1" in
-cni_install | nomad_install | nomad_start | nomad_restart | vagrant)
+cni_install | nomad_install | nomad_start | nomad_start_tls | nomad_restart | vagrant)
 	"$@"
 	;;
 *)
-	fatal ""
+	fatal "Unknown command: $1"
 	;;
 esac
