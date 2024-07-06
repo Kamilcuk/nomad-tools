@@ -309,7 +309,11 @@ def create_websocket_connection(path: str) -> websocket.WebSocket:
         sslopt["check_hostname"] = False
     cacert = os.environ.get(NOMAD_CACERT)
     if cacert:
-        sslopt["ca_cert_path"] = cacert
+        sslopt["ca_cert"] = cacert
+    else:
+        capath = os.environ.get(NOMAD_CAPATH)
+        if capath:
+            sslopt["ca_cert_path"] = capath
     cert = os.environ.get(NOMAD_CLIENT_CERT)
     key = os.environ.get(NOMAD_CLIENT_KEY)
     if cert and key:
