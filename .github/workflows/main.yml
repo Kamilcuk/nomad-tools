@@ -45,11 +45,28 @@ jobs:
       - name: run integration tests
         run: ./integration_tests.sh --durations=10 --cov=nomad_tools -n 3
 
+  test_ssl:
+    name: Test ssl
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+      - name: upgrade pip
+        run: pip install --upgrade pip
+      - name: install editable package
+        run: pip install -e .
+      - name: install nomad server
+        run: bash ./tests/provision.sh nomad_install 1.8.0
+      - name: run nomad server tls
+        run: bash ./tests/provision.sh nomad_start_tls
+      - name: test tls connection
+        run: ./tests/tls_env.bash testall
 
   pypi-publish:
     name: Upload release to PyPI
     needs:
       - test
+      - test_ssl
     if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')
     #if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
