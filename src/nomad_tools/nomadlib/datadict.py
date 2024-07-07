@@ -89,7 +89,13 @@ class DataDict:
         # Copy default values from class.
         for akey, atype in annotations.items():
             if akey in self.__class__.__dict__:
-                self.__dict__[akey] = copy.deepcopy(self.__class__.__dict__[akey])
+                try:
+                    self.__dict__[akey] = copy.deepcopy(self.__class__.__dict__[akey])
+                except TypeError:
+                    log.exception(
+                        f"DATADICT:ERROR: Error when constructing {self.__class__.__name__}: cannot deepcopy {akey} default value"
+                    )
+                    raise
         # Intialize values from dictionary.
         for key, val in data.items():
             if key in annotations:

@@ -9,6 +9,7 @@ from . import (
     entry_cp,
     entry_dockers,
     entry_downloadrelease,
+    entry_githubrunner,
     entry_gitlab_runner,
     entry_port,
     entry_vardir,
@@ -67,6 +68,7 @@ cli.add_command(entry_go.cli)
 cli.add_command(entry_cp.cli)
 cli.add_command(entry_dockers.cli)
 cli.add_command(entry_downloadrelease.cli)
+cli.add_command(entry_githubrunner.cli)
 cli.add_command(entry_gitlab_runner.cli)
 cli.add_command(entry_port.cli)
 cli.add_command(entry_vardir.cli)
