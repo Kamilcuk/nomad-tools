@@ -16,7 +16,7 @@ nomad_install() {
 	version="${1:-1.6.3}"
 	if ! hash nomad 2>/dev/null; then
 		# pin to version 1.6.3
-		python -m nomad_tools.entrypoint downloadrelease -p "$version" nomad /usr/local/bin/nomad
+		python3 -m nomad_tools.entrypoint downloadrelease -p "$version" nomad /usr/local/bin/nomad
 		if [[ ! -e /opt/cni/bin && -e /usr/lib/cni/ ]]; then
 			mkdir -vp /opt/cni
 			ln -vs /usr/lib/cni/ /opt/cni/bin

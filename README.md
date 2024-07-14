@@ -7,21 +7,22 @@ Set of tools and utilities to ease interacting with HashiCorp Nomad scheduling s
 <!-- vim-markdown-toc GFM -->
 
 * [Installation](#installation)
-    * [Shell completion](#shell-completion)
+  * [Shell completion](#shell-completion)
 * [Usage](#usage)
-    * [watch](#watch)
-    * [go](#go)
-    * [constrainteval](#constrainteval)
-    * [port](#port)
-    * [vardir](#vardir)
-    * [cp](#cp)
-    * [gitlab-runner](#gitlab-runner)
-    * [nomad-dockers](#nomad-dockers)
-    * [downloadrelease](#downloadrelease)
-    * [import nomad_tools](#import-nomad_tools)
+  * [watch](#watch)
+  * [go](#go)
+  * [constrainteval](#constrainteval)
+  * [port](#port)
+  * [vardir](#vardir)
+  * [cp](#cp)
+  * [gitlab-runner](#gitlab-runner)
+  * [githubrunner](#githubrunner)
+  * [nomad-dockers](#nomad-dockers)
+  * [downloadrelease](#downloadrelease)
+  * [import nomad_tools](#import-nomad_tools)
 * [History](#history)
 * [Contributing](#contributing)
-    * [Running tests](#running-tests)
+  * [Running tests](#running-tests)
 * [License](#license)
 
 <!-- vim-markdown-toc -->
@@ -241,7 +242,17 @@ This program does _not_ run the `gitlab-runner` itself in Nomad. Rather, the
 schedule Nomad jobs to execute using the script as an executor. These jobs will
 execute the CI/CD from Gitlab inside Nomad cluster.
 
-More on it can be read on [github wiki](https://github.com/Kamilcuk/nomadtools/wiki/gitlab%E2%80%90runner).
+More on it can be read on github wiki
+[https://github.com/Kamilcuk/nomadtools/wiki/gitlab%E2%80%90runner](https://github.com/Kamilcuk/nomadtools/wiki/gitlab%E2%80%90runner) .
+
+## githubrunner
+
+The program watches new runs on github and if there are any schedules a github-runner
+to receive and dispatch the job.
+
+More on it can be read on github wiki:
+[https://github.com/Kamilcuk/nomad-tools/wiki/githubrunner](https://github.com/Kamilcuk/nomadtools/wiki/gitlab%E2%80%90runner) .
+
 
 ## nomad-dockers
 

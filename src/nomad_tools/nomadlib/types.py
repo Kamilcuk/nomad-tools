@@ -96,12 +96,24 @@ class JobStatus(MyStrEnum):
     """Dead means all evaluation's and allocations are terminal"""
 
 
-class Job(DataDict):
+class _BothJobAndJobsJob(DataDict):
+    ID: str
+    Status: str
+
+    def is_dead(self):
+        return self.Status == JobStatus.dead
+
+    def is_pending(self):
+        return self.Status == JobStatus.pending
+
+    def is_running(self):
+        return self.Status == JobStatus.running
+
+
+class Job(_BothJobAndJobsJob):
     """Returned aby job/<id> API. DO NOT mix with JobsJob"""
 
-    ID: str
     Version: int
-    Status: str
     Namespace: Optional[str]
     ModifyIndex: int
     JobModifyIndex: int
@@ -109,9 +121,6 @@ class Job(DataDict):
     Stop: bool
     Meta: Optional[Dict[str, str]]
     SubmitTime: int
-
-    def is_dead(self):
-        return self.Status == JobStatus.dead
 
     def description(self):
         return f"{self.ID}#{self.Version}@{self.Namespace}"
@@ -128,11 +137,13 @@ class Job(DataDict):
         return out
 
 
-class JobsJob(DataDict):
+class JobsJob(_BothJobAndJobsJob):
     """Returned aby jobs API. DO NOT mix with Job"""
 
     Namespace: Optional[str]
-    ID: str
+    Stop: bool
+    Meta: Optional[Dict[str, str]] = None
+    JobSummary: JobSummary
 
 
 class NodeScoreMeta(DataDict):
@@ -392,6 +403,11 @@ class Alloc(DataDict):
     def is_running(self):
         return self.ClientStatus == AllocClientStatus.running
 
+    def is_running_started(self):
+        return self.is_running() and any(
+            taskstate.was_started() for taskstate in self.get_taskstates().values()
+        )
+
     def is_finished(self):
         return not self.is_pending_or_running()
 
@@ -612,6 +628,16 @@ class JobSummarySummary(DataDict):
         for k in set(self.asdict()) | set(o.asdict()):
             self[k] = self.get(k, 0) + o.get(k, 0)
         return self
+
+    def only_completed(self):
+        return (
+            self.Queued == 0
+            and self.Complete != 0
+            and self.Failed == 0
+            and self.Running == 0
+            and self.Starting == 0
+            and self.Lost == 0
+        )
 
 
 class JobSummary(DataDict):
