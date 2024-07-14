@@ -1621,23 +1621,12 @@ class NomadJobWatcher(_NomadJobWatcherEvents):
             and self.has_no_active_allocations_nor_evaluations_nor_deployments()
         )
 
-    def job_get_summary(self):
+    def job_finished_successfully(self):
         s: nomadlib.JobSummarySummary = nomadlib.JobSummary(
             mynomad.get(f"job/{self.jobid}/summary")
         ).get_sum_summary()
         log.debug(f"{s}")
-        return s
-
-    def job_finished_successfully(self):
-        s = self.job_get_summary()
-        return (
-            s.Queued == 0
-            and s.Complete != 0
-            and s.Failed == 0
-            and s.Running == 0
-            and s.Starting == 0
-            and s.Lost == 0
-        )
+        return s.only_completed()
 
     def job_dead_message(self):
         assert self.job
