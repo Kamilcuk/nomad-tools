@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 import requests.adapters
 import requests.auth
 import urllib3
+import urllib.parse
 import websocket
 
 from ..common_base import cached_property
@@ -58,6 +59,10 @@ def _default_session():
     session.mount("http://", adapter)
     session.mount("https://", adapter)
     return session
+
+
+def urlquote(txt: str) -> str:
+    return urllib.parse.quote_plus(txt)
 
 
 class APIException(requests.HTTPError):
@@ -261,16 +266,16 @@ class NomadConn(Requestor):
 
     def stop_job(self, jobid: str, purge: bool = False):
         assert self.namespace
-        resp: dict = self.delete(f"job/{jobid}", params={"purge": purge})
+        resp: dict = self.delete(f"job/{urlquote(jobid)}", params={"purge": purge})
         assert resp["EvalID"], f"Stopping {jobid} did not trigger evaluation: {resp}"
         return resp
 
     def find_last_not_stopped_job(self, jobid: str) -> dict:
         assert self.namespace
-        jobinit = self.get(f"job/{jobid}")
+        jobinit = self.get(f"job/{urlquote(jobid)}")
         if jobinit["Stop"]:
             # Find last job version that is not stopped.
-            versions = self.get(f"job/{jobid}/versions")
+            versions = self.get(f"job/{urlquote(jobid)}/versions")
             notstopedjobs = [job for job in versions["Versions"] if not job["Stop"]]
             if notstopedjobs:
                 notstopedjobs.sort(key=lambda job: -job["ModifyIndex"])
