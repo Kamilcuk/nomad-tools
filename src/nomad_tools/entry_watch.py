@@ -3,12 +3,12 @@
 
 from __future__ import annotations
 
-import argparse
 import base64
 import contextlib
 import datetime
 import enum
 import inspect
+import io
 import itertools
 import json
 import logging
@@ -33,6 +33,7 @@ from typing import (
     Optional,
     Pattern,
     Set,
+    TextIO,
     Tuple,
     TypeVar,
 )
@@ -62,7 +63,7 @@ log = logging.getLogger(__name__)
 
 ###############################################################################
 
-ARGS = argparse.Namespace()
+ARGS: "Args"
 """Arguments passed to this program"""
 
 START_S: float = 0
@@ -609,10 +610,11 @@ class TaskLogger(threading.Thread):
     def read_json_txt(stream: requests.Response) -> Iterator[str]:
         txt: str = ""
         for dataorbytes in stream.iter_content(decode_unicode=True):
+            data: str
             try:
-                data: str = dataorbytes.decode()
+                data = dataorbytes.decode()
             except (UnicodeDecodeError, AttributeError):
-                data: str = dataorbytes
+                data = dataorbytes
             for c in data:
                 txt += c
                 # Nomad happens to be consistent, the jsons are flat.
@@ -674,7 +676,7 @@ class TaskLogger(threading.Thread):
         try:
             # Try getting the logs for 2 seconds, then give up.
             tries: int = int(ARGS.shutdown_timeout + 1)
-            for tryno in range(tries):
+            for _ in range(tries):
                 try:
                     self.__run_in()
                     break
@@ -928,7 +930,7 @@ class NotifierWorker:
             th.exitcode for w in self.workers.values() for th in w.taskhandlers.values()
         ]
         if flagdebug.debug("exitcode"):
-            for allocid, w in self.workers.items():
+            for _, w in self.workers.items():
                 for taskkey, taskhandler in w.taskhandlers.items():
                     eprint(f"EXITCODE: {taskkey} {taskhandler.exitcode}")
         if len(tasks_exitcodes) == 0:
@@ -1219,7 +1221,8 @@ class _NomadJobWatcherDetail(ABC):
             eprint(f"LOOP: {strdict(info)}")
 
     def loop(self) -> Iterator[None]:
-        """Thread entrypoint that handles events from Nomad event stream database"""
+        """Thread entrypoint that handles events from Nomad event stream database.
+        Main event loop."""
         untilstr = (
             "forever"
             if ARGS.follow
@@ -1296,25 +1299,28 @@ class _NomadJobWatcherEvents(_NomadJobWatcherDetail):
         """Return true if we sent a request to stop the job"""
         self.job_started: bool = False
         """If set to True, means that the job has started all main tasks"""
-        self.notifyfd = sorted(list(set(ARGS.notifyfd)))
-        self.notifyfdstarted = sorted(list(set(ARGS.notifyfdstarted)))
+        self.notify: list[TextIO] = [
+            open(int(x) if x.isdigit() else x) for x in sorted(list(set(ARGS.notify)))
+        ]
+        self.notifystarted: list[TextIO] = [
+            open(int(x) if x.isdigit() else x)
+            for x in sorted(list(set(ARGS.notifystarted)))
+        ]
 
-    def __notifyfd(self, arg: List[str], fdlist: List[int]):
-        if fdlist:
-            for fd in list(fdlist):
-                line: str = json.dumps(arg)
-                assert line.count("\n") == 0
-                linebytes: bytes = f"{line}\n".encode()
-                flagdebug.logdebug("notify", f"notifyfd {fd} {line!r}")
+    def __notifyfile(self, arg: List[str], files: list[TextIO]):
+        for file in files:
+            line: str = json.dumps(arg)
+            assert line.count("\n") == 0
+            flagdebug.logdebug("notify", f"notifyfd {file.name} {line!r}")
+            try:
+                file.write(line)
+            except (BrokenPipeError, IOError) as e:
+                flagdebug.logdebug("notify", f"{e}")
                 try:
-                    os.write(fd, linebytes)
-                except (BrokenPipeError, IOError) as e:
-                    flagdebug.logdebug("notify", f"{e}")
-                    try:
-                        os.close(fd)
-                    except Exception:
-                        pass
-                    fdlist.remove(fd)
+                    file.close()
+                except Exception:
+                    pass
+                files.remove(file)
 
     def __notifyuser(self, event: NotifyEvent):
         flagdebug.logdebug("notify", f"notify {event}")
@@ -1323,15 +1329,15 @@ class _NomadJobWatcherEvents(_NomadJobWatcherDetail):
             cmd = shlex.split(exe) + arg
             flagdebug.logdebug("notify", f"notifyexe {cmd}")
             subprocess.check_call(cmd)
-        self.__notifyfd(arg, self.notifyfd)
+        self.__notifyfile(arg, self.notify)
         if event == NotifyEvent.started:
             for exe in ARGS.notifyexestarted:
                 cmd = shlex.split(exe)
                 flagdebug.logdebug("notify", f"notifyexestarted {cmd}")
                 subprocess.check_call(cmd)
-            self.__notifyfd(arg, self.notifyfdstarted)
-            for fd in self.notifyfdstarted:
-                os.close(fd)
+            self.__notifyfile(arg, self.notifystarted)
+            for file in self.notifystarted:
+                file.close()
 
     @override
     def loop(self) -> Iterator[None]:
@@ -1762,26 +1768,26 @@ class JobPath:
 class NotifyOptions:
     notifyexe: Tuple[str, ...] = clickdc.option(
         help=f"""
-             When state changes execute this shlex.split command with two arguments:
-             the watched jobid and one of {NotifyEvent.txt()}.
-             """,
+            Command to execute that will shlex.split whenver state changes
+            with two arguments:
+            the watched jobid and one of {NotifyEvent.txt()}.
+            """,
         multiple=True,
     )
-    notifyfd: Tuple[int, ...] = clickdc.option(
-        type=int,
+    notify: Tuple[str, ...] = clickdc.option(
         help=f"""
-             When state changes write to this file descriptor a JSON array with two elements:
-             the watched jobid and one of {NotifyEvent.txt()}.
-             """,
+            Pathname of the file or an integer file desriptor that whenever state changes
+            will receive a JSON array with two elements:
+            the watched jobid and one of {NotifyEvent.txt()}.
+            """,
         multiple=True,
     )
     notifyexestarted: Tuple[str, ...] = clickdc.option(
         help="Execute this shlex.split command once the job is started.",
         multiple=True,
     )
-    notifyfdstarted: Tuple[int, ...] = clickdc.option(
-        type=int,
-        help="Send a single line message to this fiole descriptor when the job is started.",
+    notifystarted: Tuple[str, ...] = clickdc.option(
+        help="Send a single line message to this file or file descriptor when the job is started.",
         multiple=True,
     )
 
@@ -2156,7 +2162,7 @@ def mode_stopped(jobid: str):
 @cli_jobfile_command(
     "plan",
     "plan",
-    help=f"""
+    help="""
     This is an alias to nomad job plan for ease of typing.
     """,
 )
@@ -2164,7 +2170,7 @@ def mode_plan(args: Tuple[str, ...], jobfile: str):
     cmd: List[str] = [*"nomad job plan".split(), *args, jobfile]
     log.info(f"+ {' '.join(shlex.quote(x) for x in cmd)}")
     try:
-        output = subprocess.check_call(cmd, text=True)
+        subprocess.check_call(cmd, text=True)
     except subprocess.CalledProcessError as e:
         # nomad will print its error, we can just exit
         exit(e.returncode)

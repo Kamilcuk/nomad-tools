@@ -671,7 +671,7 @@ def cli(args: Args, notifyargs: entry_watch.NotifyOptions, verbose: bool):
         if args.interactive:
             assert not args.detach, "interactive with detach doesn't make sense"
             wfd = Interactive(par).setup()
-            cmd = [f"--notifyfdstarted={wfd}", *cmd]
+            cmd = [f"--notifystarted={wfd}", *cmd]
         with redirect_stdin_str(jobjson):
             log.debug(f"+ {quotearr(cmd)}")
             entry_watch.cli.main(args=cmd)
