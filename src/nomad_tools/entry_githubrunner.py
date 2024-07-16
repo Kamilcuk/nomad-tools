@@ -37,9 +37,8 @@ import requests
 import yaml
 
 from . import nomadlib
-from .nomadlib.connection import urlquote
-
 from .common import mynomad
+from .nomadlib.connection import urlquote
 from .nomadlib.datadict import DataDict
 
 log = logging.getLogger(__name__)
@@ -154,6 +153,7 @@ class LimitConfig(DataDict):
     max: int = -1
     """Maximum number of running runners"""
 
+
 class Config(DataDict):
     """Configuration"""
 
@@ -258,6 +258,28 @@ class IncAtomicInt:
     def __add__(self, o: IncAtomicInt):
         with self.lock:
             return self.v + o.get()
+
+
+@dataclass
+class AtomicIncIntSet:
+    data: set[int] = field(default_factory=set)
+    lock: threading.Lock = field(default_factory=threading.Lock)
+
+    def get_free(self) -> int:
+        with self.lock:
+            for i in range(sorted(list(self.data or [0]))[-1] + 1):
+                if i not in self.data:
+                    self.data.add(i)
+                    return i
+        assert False, "This is not possible"
+
+    def add(self, x: int):
+        with self.lock:
+            assert x not in self.data
+            self.data.add(x)
+
+    def clear(self):
+        self.data.clear()
 
 
 class Counters:
@@ -793,17 +815,18 @@ class TemplateContext:
     @staticmethod
     def make_from_github_job(gj: GithubJob):
         return TemplateContext(
-            JOB_NAME=urllib.parse.quote(
+            JOB_NAME=re.sub(
+                r"[^a-zA-Z0-9_.-]",
+                "",
                 "-".join(
                     str(x)
                     for x in [
                         CONFIG.nomad.jobprefix,
                         COUNTERS.cnt.inc(),
-                        gj.repo.replace("/", "-").strip("-"),
+                        gj.repo,
                         gj.labelsstr(),
                     ]
                 ),
-                safe="",
             )[:64],
             ACCESS_TOKEN=CONFIG.github.token or "",
             REPO=gj.repo,
@@ -934,7 +957,7 @@ class Todo:
                     log.info(resp)
 
 
-@dataclass
+@dataclass(frozen=True)
 class RepoState:
     """Represents state of one repository.
     Currently this program supports only github-runners bound to one repo"""
@@ -949,6 +972,8 @@ class RepoState:
             assert gj.repo_url() == self.repo_url
         for nr in self.nomadrunners:
             assert nr.repo_url() == self.repo_url
+        for k, v in collections.Counter(nr.ID for nr in self.nomadrunners).items():
+            assert v == 1, f"Repeated runner: {k}"
 
     def __find_free_githubjob(self, labelsstr: str, todo: Todo) -> GithubJob:
         used_job_urls = set(
@@ -969,11 +994,13 @@ class RepoState:
             return picked
         return random.choice(tuple(gjobs))
 
-    def gen_runners_to_stop(self) -> Generator[NomadRunner]:
+    def gen_runners_to_stop(self, labelsstr: str) -> Generator[NomadRunner]:
         """Generate runners to stop."""
         # To stop runner it can't be alredy stopped
         notdeadnotstop = [
-            nr for nr in self.nomadrunners if not nr.is_dead() and not nr.Stop
+            nr
+            for nr in self.nomadrunners
+            if nr.labelsstr() == labelsstr and not nr.is_dead() and not nr.Stop
         ]
         # First stop pending ones.
         for nr in notdeadnotstop:
@@ -1037,7 +1064,10 @@ class RepoState:
                 # Generator to evaluate only those that needed.
                 # Diff id negative.
                 todo.tostop.extend(
-                    x.ID for x in itertools.islice(self.gen_runners_to_stop(), -diff)
+                    x.ID
+                    for x in itertools.islice(
+                        self.gen_runners_to_stop(labelsstr), -diff
+                    )
                 )
         #
         if CONFIG.nomad.purge:
