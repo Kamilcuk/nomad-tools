@@ -43,7 +43,7 @@ def busybox() -> Iterator[Tuple[str, str]]:
             "go",
             "--purge",
             f"--name={name}",
-            f"--notifyfdstarted={pipe[1]}",
+            f"--notifystarted={pipe[1]}",
             "--kill-signal=SIGKILL",
             "--init",
             "busybox:stable",
