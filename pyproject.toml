@@ -12,6 +12,7 @@ readme = "README.md"
 authors = [{name = "Kamil Cukrowski"}]
 license = {text = "GPL-3.0-or-later"}
 dynamic = ["version", "dependencies", "optional-dependencies"]
+requires-python = ">3.7"
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}
