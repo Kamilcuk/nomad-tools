@@ -3,12 +3,12 @@
 
 from __future__ import annotations
 
+import jinja2
 import base64
 import contextlib
 import datetime
 import enum
 import inspect
-import io
 import itertools
 import json
 import logging
@@ -63,16 +63,8 @@ log = logging.getLogger(__name__)
 
 ###############################################################################
 
-ARGS: "Args"
-"""Arguments passed to this program"""
-
 START_S: float = 0
 """This program start time, assigned from cli()"""
-
-COLORS = colors.init()
-
-DB: NomadDbJob
-"""Database listening to Nomad stream"""
 
 T = TypeVar("T")
 
@@ -188,20 +180,101 @@ class LOGENABLED:
     stderr: bool = True
 
 
-class LOGFORMAT:
+@dataclass(frozen=True, order=True)
+class LogLine:
+    """Represents a single line to log out"""
+
+    # Now has to be first for sorting order
+    now: datetime.datetime
+    """The timestamp when the log line was created or received"""
+    id: str
+    """The id of allocation or evaluation or deployment"""
+    message: str
+    """The actual message"""
+    what: LogWhat
+    """Where does the log line comes from? Allocation or deployment or evaluation or stdout or stderr"""
+    ModifyIndex: int
+    """The modify index associated with the id"""
+    nodename: Optional[str] = None
+    """nodename, extracted from allocation"""
+    jobversion: Optional[str] = None
+    """The job version, best efforted extracted from data or from job history"""
+    group: Optional[str] = None
+    """The task group, for stdout and stderr logs"""
+    task: Optional[str] = None
+    """The task name, for stdout and stderr logs"""
+
+    def __post_init__(self):
+        assert self.what in [
+            e.value for e in LogWhat
+        ], f"{self.what} value is not a valid what"
+
+    @property
+    def mark(self):
+        """Log source as one character"""
+        marks: Dict[LogWhat, str] = {
+            LogWhat.deploy: "deploy",
+            LogWhat.eval: "eval",
+            LogWhat.alloc: "A",
+            LogWhat.stderr: "E",
+            LogWhat.stdout: "O",
+        }
+        return marks[self.what]
+
+    @property
+    def color(self):
+        """The color pallete I use for logs"""
+        colors: Dict[LogWhat, str] = {
+            LogWhat.deploy: COLORS.brightmagenta,
+            LogWhat.eval: COLORS.magenta,
+            LogWhat.alloc: COLORS.cyan,
+            LogWhat.stderr: COLORS.orange,
+            LogWhat.stdout: "",
+        }
+        return colors[self.what]
+
+    @property
+    def colorreset(self):
+        """Empty string, if there were no colors used"""
+        return COLORS.reset if self.color else ""
+
+    @property
+    def known_time(self):
+        """Is the time of the message known or guessed?"""
+        return self.what not in [LogWhat.stdout, LogWhat.stderr]
+
+    def json(self):
+        """Serialize the object to JSON"""
+        tmp = asdict(self)
+        tmp = {k: v for k, v in tmp.items() if v is not None}
+        tmp["now"] = tmp["now"].isoformat(sep="T")
+        return json.dumps(tmp)
+
+
+class LogFormatter:
     """Logging output format specification templates using f-string. Very poor mans templating langauge."""
 
-    pre = "{color}{now.strftime(args.log_time_format) + '>' if ARGS.log_time else ''}"
-    mark = "{mark}>"
-    post = "{message}{reset}"
-    task = "{task + '>' if task else ''}"
+    JINJA2_LIB = """"""
+
+    pre = (
+        "{{log.color}}{{log.now.strftime(args.log_time_format) + '>' if args.log_time}}"
+    )
+    mark = "{{log.mark}}>"
+    post = "{{log.message}}{{log.colorreset}}"
+    task = "{{log.task + '>' if log.task}}"
 
     DEFAULT = (
-        pre + mark + "{id:.{args.log_id_len}}>v{str(jobversion)}>" + task + " " + post
+        pre
+        + mark
+        + "{{log.id[:args.log_id_len]}}>"
+        + "v{{log.jobversion}}>"
+        + task
+        + " "
+        + post
     )
     """
     Default log format. The log is templated with f-string using eval() below.
-        O>45fbbd>v0>group1>task1> hello world
+        O>45fbbd>v0>task1> hello world
     """
 
     ONE = pre + mark + task + " " + post
@@ -219,38 +292,45 @@ class LOGFORMAT:
         hello world
     """
 
-    LOGGING = (
-        COLORS.brightblue
-        + "{'%(asctime)s>' if ARGS.log_time else ''}"
-        + "{'watch' if ARGS.verbose <= 0 else '%(module)s'}>"
-        + "%(lineno)03d>"
-        + " %(levelname)s %(message)s"
-        + COLORS.reset
-    )
-    """Logging format, first templated with f-string, then by logging."""
-
-    colors: Dict[str, str] = {
-        LogWhat.deploy: COLORS.brightmagenta,
-        LogWhat.eval: COLORS.magenta,
-        LogWhat.alloc: COLORS.cyan,
-        LogWhat.stderr: COLORS.orange,
-        LogWhat.stdout: "",
-    }
-    """Logs colors"""
-
-    marks: Dict[str, str] = {
-        LogWhat.deploy: "deploy",
-        LogWhat.eval: "eval",
-        LogWhat.alloc: "A",
-        LogWhat.stderr: "E",
-        LogWhat.stdout: "O",
-    }
-    """Logs marks"""
+    JSON = "{{log.json()}}"
 
     @staticmethod
-    def render(fmt: str, **kwargs) -> str:
-        locals().update(kwargs)
-        return eval(f"f{fmt!r}")
+    def logging():
+        """Logging format"""
+        return (
+            COLORS.brightblue
+            + (
+                "%(asctime)s"
+                + (".%(msecs)06d" if ARGS.log_time_format.endswith(".%f") else "")
+                + ">"
+                if ARGS.log_time
+                else ""
+            )
+            + ("watch>" if ARGS.verbose <= 0 else "%(module)s>")
+            + ("%(lineno)03d>" if ARGS.verbose else "")
+            + " %(levelname)s %(message)s"
+            + COLORS.reset
+        )
+
+    def __init__(self, fmt: str):
+        self.tmpl = jinja2.Environment(loader=jinja2.BaseLoader()).from_string(
+            self.JINJA2_LIB + fmt
+        )
+
+    def output(self, logline: LogLine):
+        try:
+            out: str = self.tmpl.render(args=ARGS, log=logline, colors=COLORS)
+        except KeyError:
+            log.exception(f"Could not format logging line. ARGS={ARGS} LOG={log}")
+            raise
+        try:
+            print(out, flush=True)
+        except BrokenPipeError:
+            # Python flushes standard streams on exit; redirect remaining output
+            # to devnull to avoid another BrokenPipeError at shutdown
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, sys.stdout.fileno())
+            sys.exit(1)  # Python exits with error code 1 on EPIPE
 
 
 @dataclass
@@ -279,14 +359,17 @@ class LogOptions:
     log_time_us: Any = clickdc.alias_option(
         "-U",
         aliased=dict(
-            log_time_format="%H:%M:%S.%f",
             log_time=True,
         ),
     )
     log_format: str = clickdc.option(
-        default=LOGFORMAT.DEFAULT,
+        default=LogFormatter.DEFAULT,
         show_default=True,
-        help="The format to use when printing job logs",
+        help="""
+            The format to use when printing job logs.
+            Templated with jinja2 template.
+            See documentation.
+            """,
     )
     log_id_len: int = clickdc.option(
         default=6,
@@ -295,12 +378,15 @@ class LogOptions:
     )
     log_id_long: Any = clickdc.alias_option("-l", aliased=dict(log_id_len=36))
     log_only_task: Any = clickdc.alias_option(
-        "-1", aliased=dict(log_format=LOGFORMAT.ONE)
+        "-1", aliased=dict(log_format=LogFormatter.ONE)
     )
     log_only_mark: Any = clickdc.alias_option(
-        aliased=dict(log_format=LOGFORMAT.ONLYMARK)
+        aliased=dict(log_format=LogFormatter.ONLYMARK)
     )
-    log_none: Any = clickdc.alias_option("-0", aliased=dict(log_format=LOGFORMAT.ZERO))
+    log_none: Any = clickdc.alias_option(
+        "-0", aliased=dict(log_format=LogFormatter.ZERO)
+    )
+    log_json: bool = clickdc.alias_option(aliased=dict(log_format=LogFormatter.JSON))
     out: List[str] = clickdc.option(
         "-o",
         type=CommaList("all alloc stdout stderr eval deploy nolog none".split()),
@@ -320,14 +406,23 @@ def init_logging():
     LOGENABLED.stderr = any(s in "all stderr".split() for s in ARGS.out)
     LOGENABLED.stdout = any(s in "all stdout".split() for s in ARGS.out)
     #
+    if ARGS.log_time_us:
+        ARGS.log_time_format += ".%f"
+    #
     ARGS.verbose -= ARGS.quiet
     if ARGS.verbose > 1:
         from http import client as http_client
 
         http_client.HTTPConnection.debuglevel = 1
+    global LOGFORMAT
+    LOGFORMAT = LogFormatter(ARGS.log_format)
+    global COLORS
+    COLORS = colors.init()
     logging.basicConfig(
-        format=LOGFORMAT.render(LOGFORMAT.LOGGING),
-        datefmt=ARGS.log_time_format,
+        format=LOGFORMAT.logging(),
+        datefmt=ARGS.log_time_format[:-3]
+        if ARGS.log_time_format.endswith(".%f")
+        else ARGS.log_time_format,
         level=(
             logging.DEBUG
             if ARGS.verbose > 0
@@ -338,62 +433,6 @@ def init_logging():
             else logging.ERROR
         ),
     )
-
-
-@dataclass(frozen=True, order=True)
-class MyloggerLine:
-    """Represents a single line to log out"""
-
-    # Now has to be first for sorting order
-    now: datetime.datetime
-    id: str
-    message: str
-    what: str
-    ModifyIndex: int
-    nodename: Optional[str] = None
-    jobversion: Optional[str] = None
-    group: Optional[str] = None
-    task: Optional[str] = None
-
-    def __post_init__(self):
-        assert self.what in [
-            e.value for e in LogWhat
-        ], f"{self.what} value is not a valid what"
-
-    @property
-    def known_time(self):
-        """Is the time of the message known or guessed?"""
-        return self.what not in [LogWhat.stdout, LogWhat.stderr]
-
-    def __fmt(self):
-        mark: str = LOGFORMAT.marks[self.what]
-        color: str = LOGFORMAT.colors[self.what]
-        reset: str = COLORS.reset if color else ""
-        return LOGFORMAT.render(
-            ARGS.log_format,
-            **asdict(self),
-            mark=mark,
-            color=color,
-            reset=reset,
-            args=ARGS,
-        )
-
-    def output(self):
-        try:
-            out = self.__fmt()
-        except KeyError:
-            log.exception(
-                f"Could not format logging line. fmt={ARGS.log_format!r} params={ARGS}"
-            )
-            raise
-        try:
-            print(out, flush=True)
-        except BrokenPipeError:
-            # Python flushes standard streams on exit; redirect remaining output
-            # to devnull to avoid another BrokenPipeError at shutdown
-            devnull = os.open(os.devnull, os.O_WRONLY)
-            os.dup2(devnull, sys.stdout.fileno())
-            sys.exit(1)  # Python exits with error code 1 on EPIPE
 
 
 class MyloggerDelayer:
@@ -408,9 +447,9 @@ class MyloggerDelayer:
     def __init__(self):
         self.old_ModifyIndex: Optional[int] = None
         """There are new events and old events. Filter out old events"""
-        self.cache: Dict[MyloggerDelayer.Key, List[MyloggerLine]] = {}
+        self.cache: Dict[MyloggerDelayer.Key, List[LogLine]] = {}
         """Cache of lines to output"""
-        self.newcache: List[MyloggerLine] = []
+        self.newcache: List[LogLine] = []
         """Cache of lines to output which are newer than old_ModifyIndex"""
         self.thread = threading.Thread(
             name=self.__class__.__name__, target=self.__run, daemon=False
@@ -435,16 +474,16 @@ class MyloggerDelayer:
                 lines = ARGS.lines
                 knowntimelines = sorted(self.cache.get(self.Key(True), []))[-lines:]
                 for line in knowntimelines:
-                    line.output()
+                    LOGFORMAT.output(line)
                 lines -= len(knowntimelines)
                 if lines:
                     unknowntimelines = self.cache.get(self.Key(False), [])[-lines:]
                     for line in unknowntimelines:
-                        line.output()
+                        LOGFORMAT.output(line)
                 #
                 self.newcache.sort()
                 for line in self.newcache:
-                    line.output()
+                    LOGFORMAT.output(line)
             finally:
                 cachetxt = [
                     len(self.cache.get(self.Key(True), "")),
@@ -473,14 +512,14 @@ class MyloggerDelayer:
         if ARGS.lines >= 0:
             self.thread.join()
 
-    def log(self, line: MyloggerLine):
+    def log(self, line: LogLine):
         """Try to log the line. The line is either logged streight or added to cache"""
         if self.finished:
-            line.output()
+            LOGFORMAT.output(line)
             return
         with self.lock:
             if self.finished:
-                line.output()
+                LOGFORMAT.output(line)
                 return
             if (
                 self.old_ModifyIndex is not None
@@ -499,7 +538,7 @@ class Mylogger:
 
     @staticmethod
     def __log(**kwargs):
-        line = MyloggerLine(**kwargs)
+        line = LogLine(**kwargs)
         myloggerdelayer.log(line)
 
     ###############################################################################
@@ -1901,24 +1940,24 @@ logs. Depending on command, wait for a specific event to happen to finish
 watching. This program is intended to help debugging issues with running
 jobs in Nomad and for synchronizing with execution of batch jobs in Nomad.
 
-Logs are printed in the format: 'mark>id>vversion>group>task> message'.
+Logs are printed in the format: 'mark>id>vversion>task> message'.
 The mark in the log lines is equal to: 'deploy' for messages printed as
 a result of deployment, 'eval' for messages printed from evaluations,
 'A' from allocation, 'E' for stderr logs of a task and 'O' from stdout
 logs of a task.
-
-\b
-Examples:
-    watch run ./some-job.nomad.hcl
-    watch job some-job
-    watch alloc af94b2
-    watch -N services --task redis -1f job redis
 """,
     epilog="""
-    Written by Kamil Cukrowski 2023. Licensed under GNU GPL version 3 or later.
-    """,
+\b
+Examples:
+    nomadtools watch run ./some-job.nomad.hcl
+    nomadtools watch job some-job
+    nomadtools watch alloc af94b2
+    nomadtools watch -N services --task redis -1f job redis
+
+Written by Kamil Cukrowski 2023. Licensed under GNU GPL version 3 or later.
+""",
 )
-@flagdebug.click_debug_option("NOMAD_WATCH_DEBUG")
+@flagdebug.click_debug_option("NOMADTOOLS_DEBUG")
 @clickdc.adddc("args", Args)
 @namespace_option()
 @common_options()
@@ -2077,10 +2116,10 @@ Main tasks are all tasks without lifetime property or sidecar prestart tasks or 
 
 \b
 Exit with the following status:
-  {ExitCode.success    }  when all tasks of the job have started running,
-  {ExitCode.exception  }  when python exception was thrown,
+  {ExitCode.success}  when all tasks of the job have started running,
+  {ExitCode.exception}  when python exception was thrown,
   {ExitCode.interrupted}  when process was interrupted,
-  {ExitCode.failed     }  when job was stopped or job deployment was reverted.
+  {ExitCode.failed}  when job was stopped or job deployment was reverted.
 """,
 )
 @cli_jobid
@@ -2140,17 +2179,17 @@ no active deployments and no active evaluations.
 
 \b
 If the option --no-preserve-status is given, then exit with the following status:
-  {ExitCode.success           }    when the job was stopped.
+  {ExitCode.success}    when the job was stopped.
 Otherwise, exit with the following status:
-  {'?'                        }    when the job has one task, with that task exit status,
-  {ExitCode.success           }    when all tasks of the job exited with 0 exit status,
-  {ExitCode.any_failed_tasks    }  when any of the job tasks have failed,
-  {ExitCode.all_failed_tasks    }  when all job tasks have failed,
+  {"?"}    when the job has one task, with that task exit status,
+  {ExitCode.success}    when all tasks of the job exited with 0 exit status,
+  {ExitCode.any_failed_tasks}  when any of the job tasks have failed,
+  {ExitCode.all_failed_tasks}  when all job tasks have failed,
   {ExitCode.any_unfinished_tasks}  when any tasks are still running,
-  {ExitCode.no_allocations      }  when job has no started tasks.
+  {ExitCode.no_allocations}  when job has no started tasks.
 In any case, exit with the following exit status:
-  {ExitCode.exception         }    when python exception was thrown,
-  {ExitCode.interrupted       }    when the process was interrupted.
+  {ExitCode.exception}    when python exception was thrown,
+  {ExitCode.interrupted}    when the process was interrupted.
 """,
 )
 @cli_jobid
