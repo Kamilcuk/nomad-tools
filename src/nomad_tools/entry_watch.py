@@ -472,7 +472,10 @@ class MyloggerDelayer:
                     return
                 #
                 lines = ARGS.lines
-                knowntimelines = sorted(self.cache.get(self.Key(True), []))[-lines:]
+                knowntimelines = sorted(
+                    self.cache.get(self.Key(True), []),
+                    key=lambda x: x.now,
+                )[-lines:]
                 for line in knowntimelines:
                     LOGFORMAT.output(line)
                 lines -= len(knowntimelines)
@@ -481,7 +484,7 @@ class MyloggerDelayer:
                     for line in unknowntimelines:
                         LOGFORMAT.output(line)
                 #
-                self.newcache.sort()
+                self.newcache.sort(key=lambda x: x.now)
                 for line in self.newcache:
                     LOGFORMAT.output(line)
             finally:
@@ -530,7 +533,7 @@ class MyloggerDelayer:
                 self.cache.setdefault(self.Key(line.known_time), []).append(line)
 
 
-myloggerdelayer = MyloggerDelayer()
+MYLOGGERDELAYER = MyloggerDelayer()
 
 
 class Mylogger:
@@ -539,7 +542,7 @@ class Mylogger:
     @staticmethod
     def __log(**kwargs):
         line = LogLine(**kwargs)
-        myloggerdelayer.log(line)
+        MYLOGGERDELAYER.log(line)
 
     ###############################################################################
 
@@ -952,7 +955,7 @@ class NotifierWorker:
         log.debug(
             f"Joining {len(self.workers)} allocations with {thcnt} taskhandlers and {len(threads)} loggers"
         )
-        myloggerdelayer.join()
+        MYLOGGERDELAYER.join()
         timeend = time.time() + ARGS.shutdown_timeout
         timeout = None
         for thread in threads:
@@ -1111,7 +1114,7 @@ class _NomadJobWatcherDetail(ABC):
         #
         DB.start()
         InterruptTwice.install()
-        myloggerdelayer.start(self.eval.ModifyIndex if self.eval else None)
+        MYLOGGERDELAYER.start(self.eval.ModifyIndex if self.eval else None)
 
     def __no_follow_timer(self):
         self.no_follow_end = True
