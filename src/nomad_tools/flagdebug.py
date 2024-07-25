@@ -17,7 +17,7 @@ def __log(name: str, txt: str):
 
 def add(txt: str):
     if txt:
-        __log("flagdebug", txt)
+        # __log("FLAGDEBUG", txt)
         DEBUGFLAGS.update(txt.lower().split(","))
 
 
