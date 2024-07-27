@@ -1967,7 +1967,7 @@ Examples:
     nomadtools watch alloc af94b2
     nomadtools watch -N services --task redis -1f job redis
 
-Written by Kamil Cukrowski 2023. Licensed under GNU GPL version 3 or later.
+Written by Kamil Cukrowski 2024. Licensed under GNU GPL version 3 or later.
 """,
 )
 @flagdebug.click_debug_option("NOMADTOOLS_DEBUG")
