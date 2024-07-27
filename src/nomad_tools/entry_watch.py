@@ -92,26 +92,33 @@ def print_all_threads_stacktrace(*_):
 ###############################################################################
 
 
-class InterruptTwice:
+@dataclass
+class InterruptCounter:
     """Exit on the second time after sending a signal"""
 
-    received: int = 0
+    max = 5
+    cnt: dict[signal.Signals, int] = field(default_factory=dict)
     """The number of last signal received"""
 
-    @classmethod
-    def install(cls):
+    def install(self):
         # Installed after DB initialization.
-        signal.signal(signal.SIGINT, cls.__handler)
-        signal.signal(signal.SIGTERM, cls.__handler)
+        assert DB
+        assert ARGS
+        signal.signal(signal.SIGINT, self.__handler)
+        signal.signal(signal.SIGTERM, self.__handler)
 
-    @classmethod
-    def __handler(cls, signum: int, frame):
-        log.error(f"Interrupted with {signal.Signals(signum).name}")
-        if cls.received:
+    def __handler(self, signum: int, frame):
+        sig = signal.Signals(signum)
+        cur = self.cnt[sig] = self.cnt.setdefault(sig, 0) + 1
+        doexit = cur >= self.max if self.max > 0 else False if ARGS.attach else True
+        stat = f" {cur}/{self.max}" if ARGS.attach else ""
+        post = " Exiting!" if doexit else ""
+        log.error(f"Interrupted with {sig.name}{stat}{post}")
+        if doexit:
             exit(ExitCode.interrupted)
         else:
-            cls.received = signum
             # Initialized in NomadWatch object.
+            # Send empty event to trigger main event loop.
             DB.send_empty_event()
 
 
@@ -1107,13 +1114,14 @@ class _NomadJobWatcherDetail(ABC):
         """Notification worker dispatching Nomad stream events"""
         self.no_follow_end: bool = False
         """Flag that is set once no_follow timeout passes"""
+        #
+        self.interruptcounter = InterruptCounter()
         if ARGS.no_follow:
             th = threading.Timer(ARGS.no_follow_timeout, self.__no_follow_timer)
             th.setDaemon(True)
             th.start()
-        #
         DB.start()
-        InterruptTwice.install()
+        self.interruptcounter.install()
         MYLOGGERDELAYER.start(self.eval.ModifyIndex if self.eval else None)
 
     def __no_follow_timer(self):
@@ -1585,7 +1593,7 @@ class NomadJobWatcher(_NomadJobWatcherEvents):
                     break
                 if stopit:
                     self.stop_job()
-                if InterruptTwice.received:
+                if self.interruptcounter.cnt:
                     if ARGS.attach:
                         self.stop_job()
                     else:
@@ -1600,7 +1608,9 @@ class NomadJobWatcher(_NomadJobWatcherEvents):
                 self.notifier.join()
                 DB.join()
         exit(
-            ExitCode.interrupted if InterruptTwice.received else self._get_exitcode_cb()
+            ExitCode.interrupted
+            if self.interruptcounter.cnt
+            else self._get_exitcode_cb()
         )
 
     def job_is_finished(self):
@@ -1855,9 +1865,9 @@ class Args(LogOptions, NotifyOptions):
     attach: bool = clickdc.option(
         "-A",
         is_flag=True,
-        help="""
+        help=f"""
              Stop the job on receiving an SIGINT or SIGTERM signal.
-             Exit immediately after receiving a signal the second time.
+             Exit immediately after receiving a signal the {InterruptCounter.max} times.
              """,
     )
     purge: bool = clickdc.option(
