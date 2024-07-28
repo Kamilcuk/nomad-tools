@@ -1,0 +1,16 @@
+FROM python AS integration
+RUN set -x && \
+  apt-get update && \
+  apt-get install -y --no-install-recommends docker.io wget && \
+  rm -rf /var/lib/apt/lists/*
+COPY ./tests/provision.sh ./tests/provision.sh
+RUN set -x && \
+  ./tests/provision.sh cni_install
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r ./requirements.txt
+COPY requirements-test.txt .
+RUN pip install --no-cache-dir -r ./requirements-test.txt
+COPY . .
+RUN pip install --no-cache-dir -e .
+RUN set -x && \
+  ./tests/provision.sh nomad_install
