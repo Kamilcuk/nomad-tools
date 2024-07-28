@@ -83,7 +83,8 @@ be_nice
 cleanuplogs
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
 	# If not sourced, execute unit tests
-	if r grep -E 'import.*nomad_tools|nomad_tools.*import' --exclude-dir __pycache__ -R src/nomad_tools/; then
+	if r find src/nomad_tools -name __pycache__ -prune -o -name '*.py' \
+			-exec grep -E 'import.*nomad_tools|nomad_tools.*import' {} +; then
 		fatal "You have non-relative includes in source dir"
 	fi
 	unit_tests "$@"
