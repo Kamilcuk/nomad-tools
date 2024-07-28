@@ -10,6 +10,11 @@ fatal() {
 	exit 2
 }
 
+
+if ((UID == 0)); then
+	sudo() { "$@"; }
+fi
+
 # shellcheck disable=SC2120
 nomad_install() {
 	local version
@@ -25,17 +30,18 @@ nomad_install() {
 }
 
 cni_install() {
-	sudo mkdir -vp /opt/cni/bin
-	wget -q https://github.com/containernetworking/plugins/releases/download/v1.5.0/cni-plugins-linux-amd64-v1.5.0.tgz
-	sudo tar xafvp cni-plugins*.tgz -C /opt/cni/bin
-	sudo rm cni-plugins*.tgz
+	sudo mkdir -vp /opt/cni/bin ./build
+	wget -q -O build/cni-plugins.tgz \
+		https://github.com/containernetworking/plugins/releases/download/v1.5.0/cni-plugins-linux-amd64-v1.5.0.tgz 
+	sudo tar xafvp build/cni-plugins.tgz -C /opt/cni/bin
+	rm -v build/cni-plugins.tgz
 }
 
 wait_for() {
 	now=$(date +%s)
 	endtime=$((now + 30))
 	while ! "$@" >/dev/null; do
-		sleep 0.5
+		sleep 0.1
 		now=$(date +%s)
 		if ((now > endtime)); then
 			fatal "did not start $*"
@@ -91,8 +97,22 @@ vagrant() {
 	sudo tee /etc/profile.d/my-nomad-tools.sh <<<"$(declare -f _nomad_tools_profile); _nomad_tools_profile"
 }
 
+enable_cgroup_nesting() {
+	# cgroup v2: enable nesting
+	if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
+		# move the processes from the root group to the /init group,
+		# otherwise writing subtree_control fails with EBUSY.
+		# An error during moving non-existent process (i.e., "cat") is ignored.
+		mkdir -p /sys/fs/cgroup/init
+		xargs -rn1 < /sys/fs/cgroup/cgroup.procs > /sys/fs/cgroup/init/cgroup.procs || :
+		# enable controllers
+		sed -e 's/ / +/g' -e 's/^/+/' < /sys/fs/cgroup/cgroup.controllers \
+			> /sys/fs/cgroup/cgroup.subtree_control
+	fi
+}
+
 case "$1" in
-cni_install | nomad_install | nomad_start | nomad_start_tls | nomad_restart | vagrant)
+cni_install | nomad_install | nomad_start | nomad_start_tls | nomad_restart | vagrant | enable_cgroup_nesting)
 	"$@"
 	;;
 *)
