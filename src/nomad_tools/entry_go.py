@@ -647,7 +647,7 @@ def cli(args: Args, notifyargs: entry_watch.NotifyOptions, verbose: bool):
         os.environ[NOMAD_NAMESPACE] = "default"
     log.debug(f"{args}")
     par: Parsed = args.parse()
-    log.debug(f"{par}")
+    # log.debug(f"{par}")
     job: dict = dict_remove_none(par.job)
     log.debug(f"{job}")
     jobjson: str = json.dumps(job, indent=2, sort_keys=True)
