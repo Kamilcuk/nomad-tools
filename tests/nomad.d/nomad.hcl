@@ -16,6 +16,11 @@ client {
     ignore_system_jobs = false
   }
   cni_path = "/opt/cni/bin:/usr/lib/cni"
+  options = {
+    "driver.allowlist" =  "raw_exec,docker"
+    "finderprint.denylist" = "exec,java,qemu"
+  }
+  chroot_env {}
 }
 
 limits {
