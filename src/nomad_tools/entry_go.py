@@ -37,7 +37,7 @@ def dict_remove_none(data: T) -> T:
         ret = {
             k: dict_remove_none(v)
             for k, v in data.items()
-            if v is not None and v is not {}
+            if v is not None and v != {}
         }
     elif isinstance(data, list):
         ret = [dict_remove_none(e) for e in data if e is not None]
@@ -178,7 +178,6 @@ NAME_PREFIX = "nomad_tools_go_"
 
 @dataclass
 class Args:
-    name: Optional[str] = clickdc.option(help="Set the name of the job, group and task")
     type: str = clickdc.option(
         default="batch",
         type=click.Choice("service system batch sysbatch".split()),

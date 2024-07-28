@@ -31,12 +31,12 @@ def _init_value(classname: str, dstname: str, dsttype: Any, srcval: Any):
         )
 
     try:
-        if dstorigin == list:
+        if dstorigin is list:
             assert type(srcval) is dstorigin, msg()
             return [
                 _init_value(classname, dstname, get_args(dsttype)[0], x) for x in srcval
             ]
-        elif dstorigin == dict:
+        elif dstorigin is dict:
             assert type(srcval) is dstorigin, msg()
             return {
                 _init_value(classname, dstname, get_args(dsttype)[0], k): _init_value(
