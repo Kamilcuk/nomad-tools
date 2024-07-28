@@ -22,6 +22,7 @@ jobs:
             python: 3.7
     name: Test
     runs-on: ubuntu-latest
+    timeout-minutes: 7
     steps:
       - name: checkout
         uses: actions/checkout@v4
@@ -49,8 +50,8 @@ jobs:
         run: ./integration_tests.sh --durations=10 --cov=nomad_tools -n 3
 
   test_ssl:
-    name: Test ssl
     runs-on: ubuntu-latest
+    timeout-minutes: 7
     steps:
       - name: checkout
         uses: actions/checkout@v4
@@ -67,7 +68,8 @@ jobs:
 
   test_docker:
     runs-on: [self-hosted, nomadtools]
-    # Sets the permissions granted to the `GITHUB_TOKEN` for the actions in this job.
+    timeout-minutes: 7
+    # Sets the permissions anted to the `GITHUB_TOKEN` for the actions in this job.
     permissions:
       contents: read
       packages: write
@@ -80,6 +82,7 @@ jobs:
 
   tests:
     runs-on: [self-hosted, nomadtools]
+    timeout-minutes: 1
     needs:
       - test_nomad
       - test_ssl
@@ -92,6 +95,7 @@ jobs:
       - tests
     if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')
     runs-on: [self-hosted, nomadtools]
+    timeout-minutes: 1
     # Sets the permissions granted to the `GITHUB_TOKEN` for the actions in this job.
     permissions:
       contents: read
@@ -140,6 +144,7 @@ jobs:
       - tests
     if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')
     runs-on: [self-hosted, nomadtools]
+    timeout-minutes: 1
     environment:
       name: pypi
       url: https://pypi.org/p/nomad-tools
