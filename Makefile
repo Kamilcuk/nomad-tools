@@ -44,5 +44,7 @@ try_docker_integration_test:
 		'
 
 run_githubrunner:
-	. ./.env && \
-		nomadtools watch run -var github_token=$$GITHUB_TOKEN ./nomadtools-githubrunner.nomad.hcl
+	. ./.env && nomadtools watch run \
+			-var GITHUB_TOKEN=$$GITHUB_TOKEN \
+			-var NOMAD_TOKEN=$$NOMAD_TOKEN \
+			./nomadtools-githubrunner.nomad.hcl

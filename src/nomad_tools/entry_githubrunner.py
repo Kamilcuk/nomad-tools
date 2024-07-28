@@ -15,7 +15,6 @@ import shlex
 import subprocess
 import threading
 import time
-import urllib.parse
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import (
@@ -47,15 +46,14 @@ log = logging.getLogger(__name__)
 # config
 
 DEFAULT_RUNNER: str = """
-{% set image = (arg.image|default("myoung34/github-runner")) + ":" + (arg.tag|default("latest")) %}
 job "{{ run.JOB_NAME }}" {
   type = "batch"
   meta {
     INFO = <<EOF
 This is a runner based on {{ image }} image.
-{% if arg.docker == "dind" %}
+{% if opts.docker == "dind" %}
 It also starts a docker daemon and is running as privileged
-{% elif arg.docker == "host" %}
+{% elif opts.docker == "host" %}
 It also mounts a docker daemon from the host it is running on
 {% endif %}
 EOF
@@ -72,21 +70,21 @@ EOF
     task "{{ run.JOB_NAME }}" {
       driver = "docker"
       config {
-        image = "{{ image }}"
+        image = "{{ arg.image|default("myoung34/github-runner:latest") }}"
         {% if arg.debug %}
         # for debugging
         entrypoint = ["bash", "-x", "/entrypoint.sh", "./bin/Runner.Listener", "run", "--startuptype", "service"]
         {% endif %}
-        {% if arg.docker == "dind" %}
+        {% if opts.docker == "dind" %}
         privileged = true
-        {% elif arg.docker == "host" %}
+        {% elif opts.docker == "host" %}
         mount {
             type   = "bind"
             target = "/var/run/docker.sock"
             source = "/var/run/docker.sock"
         }
         {% endif %}
-        {{ add.config }}
+        {{ opts.config }}
       }
       env {
         ACCESS_TOKEN        = "{{ run.ACCESS_TOKEN }}"
@@ -95,11 +93,11 @@ EOF
         RUNNER_SCOPE        = "repo"
         LABELS              = "{{ run.LABELS }}"
         # RUN_AS_ROOT         = "false"
-        {% if add.ephemeral == "true" %}
+        {% if opts.ephemeral == "true" %}
         EPHEMERAL           = "true"
         {% endif %}
         DISABLE_AUTO_UPDATE = "true"
-        {% if arg.docker == "dind" %}
+        {% if opts.docker == "dind" %}
         START_DOCKER_SERVICE = "true"
         {% endif %}
       }
@@ -109,11 +107,11 @@ EOF
         memory = {{ mem}}
         memory_max = {{ arg.maxmem|default(mem) }}
       }
-      {{ add.task }}
+      {{ opts.task }}
     }
-    {{ add.group }}
+    {{ opts.group }}
   }
-  {{ add.job }}
+  {{ opts.job }}
 }
         """
 
@@ -194,13 +192,14 @@ class Config(DataDict):
     limits: List[LimitConfig] = []
     """Add limitation on the number of runners"""
 
-    add: Any = {
+    opts: Any = {
         "job": "",
         "group": "",
         "task": "",
         "ephemeral": False,
+        "docker": "dind",
     }
-    """Additional template variable passed as 'add' global variable."""
+    """Additional template variable passed as 'opts' global variable."""
 
     def __post_init__(self):
         assert self.loop >= 0
@@ -217,17 +216,6 @@ class Config(DataDict):
 
 
 CONFIG: Config
-
-DEFAULTCONFIG = """
----
-nomad:
-  namespace: default
-repos:
-  - Kamilcuk/runnertest
-  - Kamilcuk/nomad-tools
-  # - Kamilcuk
-loop: 1
-"""
 
 ###############################################################################
 # counters
@@ -844,7 +832,7 @@ class TemplateContext:
         return dict(
             run=asdict(self),
             arg=arg,
-            add=CONFIG.add,
+            opts=CONFIG.opts,
             CONFIG=CONFIG,
             RUNNERS=RUNNERS,
             ARGS=ARGS,
@@ -1137,12 +1125,17 @@ def loop():
 class Args:
     dryrun: bool = clickdc.option("-n")
     verbose: bool = clickdc.option("-v")
-    config: Path = clickdc.option(
-        "-c",
-        type=click.Path(exists=True, dir_okay=False, path_type=Path),
-        help="The configuration file location",
-    )
     noparallel: bool = clickdc.option()
+    config: str = clickdc.option(
+        "-c",
+        shell_complete=click.Path(
+            exists=True, dir_okay=False, path_type=Path
+        ).shell_complete,
+        help="""
+            If the arguments contains a newline, the configuration in YAML format.
+            Otherwise the configuration file location with is read as a YAML.
+            """,
+    )
 
 
 ARGS: Args
@@ -1159,11 +1152,11 @@ def cli(args: Args):
         level=logging.DEBUG if args.verbose else logging.INFO,
     )
     #
-    if args.config:
-        with args.config.open() as f:
-            configstr = f.read()
+    if "\n" in args.config:
+        configstr = args.config
     else:
-        configstr = DEFAULTCONFIG
+        with open(args.config) as f:
+            configstr = f.read()
     global CONFIG
     tmp = yaml.safe_load(configstr)
     CONFIG = Config(tmp)
