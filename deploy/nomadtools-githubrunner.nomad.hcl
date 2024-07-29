@@ -7,6 +7,9 @@ variable "GITHUB_TOKEN" {
 variable "NOMAD_TOKEN" {
   type = string
 }
+variable "NOMAD_NAMESPACE" {
+  type = string
+}
 
 job "nomadtools-githubrunner" {
   namespace = "github"
@@ -45,7 +48,7 @@ job "nomadtools-githubrunner" {
         network_mode = "host"
         args = [
           "githubrunner",
-          "--verbose",
+          # "--verbose",
           "--config",
           "${NOMAD_TASK_DIR}/githubrunner.yml",
           "run",
@@ -60,6 +63,7 @@ job "nomadtools-githubrunner" {
       env {
         GITHUB_TOKEN = var.GITHUB_TOKEN
         NOMAD_TOKEN = var.NOMAD_TOKEN
+        NOMAD_NAMESPACE = var.NOMDA_NAMESPACE
       }
       template {
         destination = "local/githubrunner.yml"

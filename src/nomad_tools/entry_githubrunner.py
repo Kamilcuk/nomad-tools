@@ -17,23 +17,15 @@ import threading
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import (
-    Any,
-    Callable,
-    Generator,
-    Iterable,
-    List,
-    Optional,
-    Set,
-    Tuple,
-    TypeVar,
-)
+from typing import (Any, Callable, Generator, Iterable, List, Optional, Set,
+                    Tuple, TypeVar)
 
 import click
 import clickdc
 import jinja2
 import requests
 import yaml
+from typing_extensions import Protocol
 
 from . import nomadlib
 from .common import mynomad
@@ -118,7 +110,7 @@ EOF
 class NomadConfig(DataDict):
     """Nomad configuration"""
 
-    namespace: str = "github"
+    namespace: str = os.environ.get("NOMAD_NAMESPACE", "default")
     """The namespace to set on the job."""
     token: Optional[str] = os.environ.get("NOMAD_TOKEN")
     jobprefix: str = "NTGithubRunner"
@@ -319,13 +311,12 @@ T = TypeVar("T")
 R = TypeVar("R")
 
 
-def parallelmap(
-    func: Callable[[T], R], arr: Iterable[T], nproc: Optional[int] = None
-) -> Iterable[R]:
+def parallelmap(func: Callable[[T], R], arr: Iterable[T]) -> Iterable[R]:
     """Execute lambda over array in parellel and return an array of it"""
-    if ARGS.noparallel:
+    if ARGS.parallel == 1:
         return map(func, arr)
     else:
+        nproc = ARGS.parallel if ARGS.parallel > 0 else None
         with concurrent.futures.ThreadPoolExecutor(nproc) as p:
             futures = [p.submit(func, x) for x in arr]
             return (x.result() for x in concurrent.futures.as_completed(futures))
@@ -430,12 +421,13 @@ class GithubCache:
 
         is_etag: bool
         etag_or_last_modified: str
-        response: dict
+        json: dict
+        links: dict
         timestamp: float = field(default_factory=lambda: time.time())
 
     data: dict[Url, Value] = field(default_factory=dict)
     """The data stored by cache is keyed with URL"""
-    version: int = 1
+    version: int = 2
 
     @classmethod
     def load(cls):
@@ -443,9 +435,11 @@ class GithubCache:
         try:
             with open(github_cachefile()) as f:
                 data = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            log.warning(f"Github cache loading error: {e}")
             return GithubCache()
         if data["version"] != GithubCache.version:
+            log.warning("Github cache version mismatch, zeroing")
             return GithubCache()
         gh = GithubCache({k: cls.Value(**v) for k, v in data["data"].items()})
         log.info(
@@ -453,12 +447,15 @@ class GithubCache:
         )
         return gh
 
-    def save(self):
-        """Save the cache to file. Run each loop"""
-        data = {
+    def tojson(self):
+        return {
             "version": self.version,
             "data": {k: asdict(v) for k, v in self.data.items()},
         }
+
+    def save(self):
+        """Save the cache to file. Run each loop"""
+        data = self.tojson()
         os.makedirs(os.path.dirname(github_cachefile()), exist_ok=True)
         with open(github_cachefile(), "w") as f:
             json.dump(data, f)
@@ -474,21 +471,25 @@ class GithubCache:
             else:
                 headers["if-modified-since"] = cached.etag_or_last_modified
 
-    def handle(self, response: requests.Response) -> Optional[dict]:
+    def handle(self, response: requests.Response) -> Optional[Value]:
         if response.status_code == 304:
             COUNTERS.github_cached.inc()
-            return self.data[response.url].response
+            return self.data[response.url]
         else:
             COUNTERS.github_miss.inc()
         etag = response.headers.get("etag")
         if etag:
-            self.data[response.url] = self.Value(True, etag, response.json())
+            self.data[response.url] = self.Value(
+                True, etag, response.json(), response.links
+            )
+            self.save()
         else:
             last_modified = response.headers.get("last-modified")
             if last_modified:
                 self.data[response.url] = self.Value(
-                    False, last_modified, response.json()
+                    False, last_modified, response.json(), response.links
                 )
+                self.save()
         return None
 
 
@@ -513,19 +514,22 @@ def gh_get(url: str, key: str = "") -> Any:
         log.debug(f"{url} {headers} {response}")
         response.raise_for_status()
         # If the result is found in github cache, use it, otherwise extract it.
-        data = GITHUB_CACHE.handle(response)
-        if not data:
-            data = response.json()
-        # If no key, this is not paged url.
-        if not key:
-            return data
-        # If key, this is paged url - append it and continue.
+        cached: Optional[GithubCache.Value] = GITHUB_CACHE.handle(response)
+        data: Any = cached.json if cached else response.json()
+        links: dict = cached.links if cached else response.links
+        # if there are no links, this is not a paginated url.
+        if not links:
+            return data[key] if key else data
+        # Append the data to ret. Use key if given.
+        add = data if isinstance(data, list) else data[key]
         try:
-            ret.extend(data[key])
+            assert isinstance(add, list)
+            ret.extend(add)
         except KeyError:
             log.exception(f"key={key} data={data}")
             raise
-        next = response.links.get("next")
+        # if no next, this is the end.
+        next = links.get("next")
         if not next:
             break
         url = next["url"]
@@ -590,7 +594,12 @@ def get_gh_repos() -> Set[GithubRepo]:
 def get_gh_run_jobs(repo: GithubRepo, run: dict) -> List[GithubJob]:
     interesting = "queued in_progress".split()
     ret: List[GithubJob] = []
-    if run["status"] in interesting:
+    try:
+        runstatus = run["status"]
+    except TypeError:
+        log.exception(f"AAA {run}")
+        raise
+    if runstatus in interesting:
         jobs = gh_get(
             f"{CONFIG.github.url}/repos/{repo}/actions/runs/{run['id']}/jobs",
             "jobs",
@@ -621,6 +630,26 @@ def get_gh_state(repos: Set[GithubRepo]) -> list[GithubJob]:
     for idx, s in enumerate(reqstate):
         logging.info(f"GHJOB: {idx} {s.job_url()} {s.labelsstr()} {s.run['status']}")
     return reqstate
+
+
+###############################################################################
+
+
+@dataclass
+class StateSpec:
+    labels: str
+    repo: str
+    repo_url: str
+    job_url: str
+
+
+class RunnerProtocol(Protocol):
+    @property
+    def ID(self) -> str: ...
+    def get_spec(self) -> StateSpec: ...
+    def stop(self): ...
+    def purge(self): ...
+    def get_logs(self) -> Optional[str]: ...
 
 
 ###############################################################################
@@ -1103,7 +1132,6 @@ def loop():
     # Execute what we need to execute.
     todo.execute()
     # Ending.
-    GITHUB_CACHE.save()
     COUNTERS.print()
 
 
@@ -1115,7 +1143,7 @@ def loop():
 class Args:
     dryrun: bool = clickdc.option("-n")
     verbose: bool = clickdc.option("-v")
-    noparallel: bool = clickdc.option()
+    parallel: int = clickdc.option("-P", default=0)
     config: str = clickdc.option(
         "-c",
         shell_complete=click.Path(
@@ -1216,10 +1244,10 @@ def showgithubcache(url: str):
         for url, val in GITHUB_CACHE.data.items():
             print(f"{url}")
             print(
-                f"  isetag={val.is_etag} {val.etag_or_last_modified} {hash(str(val.response))}"
+                f"  isetag={val.is_etag} {val.etag_or_last_modified} {hash(str(val.json))}"
             )
     else:
-        print(json.dumps(GITHUB_CACHE.data[url].response))
+        print(json.dumps(asdict(GITHUB_CACHE.data[url])))
 
 
 @cli.command(help="Execute the loop once")

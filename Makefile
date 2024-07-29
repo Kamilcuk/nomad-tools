@@ -47,4 +47,5 @@ run_githubrunner:
 	. ./.env && nomadtools watch run \
 			-var GITHUB_TOKEN=$$GITHUB_TOKEN \
 			-var NOMAD_TOKEN=$$NOMAD_TOKEN \
+			-var NOMAD_NAMESPACE=$$NOMAD_NAMESPACE \
 			./deploy/nomadtools-githubrunner.nomad.hcl
