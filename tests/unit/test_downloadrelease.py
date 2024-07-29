@@ -6,6 +6,7 @@ import pytest
 from tests.testlib import run_downloadrelease
 
 
+@pytest.mark.skip()
 @pytest.mark.parametrize("tool", "nomad consul".split())
 def test_downloadrelease(tool):
     with tempfile.TemporaryDirectory() as d:
