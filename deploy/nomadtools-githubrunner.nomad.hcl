@@ -7,6 +7,7 @@ variable "GITHUB_TOKEN" {
 variable "NOMAD_TOKEN" {
   type = string
 }
+
 job "nomadtools-githubrunner" {
   namespace = "github"
   group "nomadtools-githubrunner" {
@@ -44,24 +45,26 @@ job "nomadtools-githubrunner" {
         network_mode = "host"
         args = [
           "githubrunner",
+          "--verbose",
           "--config",
-          <<-EOF
----
-nomad:
-  namespace: github
-  token: ${var.NOMAD_TOKEN}
-github:
-  token: ${var.GITHUB_TOKEN}
-  cachefile:  ${NOMAD_ALLOC_DIR}/data/githubcache.json
-opts:
-  docker: host
-repos:
-  - Kamilcuk
-runner_inactivity_timeout: 1w
-EOF
-          ,
+          "${NOMAD_TASK_DIR}/githubrunner.yml",
           "run",
         ]
+        mount {
+          type     = "bind"
+          source   = "${local.DIR}/deploy"
+          target   = "/root/.cache/nomadtools"
+          readonly = false
+        }
+      }
+      env {
+        GITHUB_TOKEN = var.GITHUB_TOKEN
+        NOMAD_TOKEN = var.NOMAD_TOKEN
+      }
+      template {
+        destination = "local/githubrunner.yml"
+        data        = file("./deploy/githubrunner.yml")
+        change_mode = "noop"
       }
     }
 

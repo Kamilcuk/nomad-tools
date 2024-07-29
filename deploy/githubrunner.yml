@@ -1,0 +1,9 @@
+---
+nomad:
+  namespace: github
+opts:
+  docker: host
+repos:
+  # - Kamilcuk
+  - Kamilcuk/nomad-tools
+runner_inactivity_timeout: 1w

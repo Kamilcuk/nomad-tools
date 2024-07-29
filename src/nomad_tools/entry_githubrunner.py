@@ -102,10 +102,9 @@ EOF
         {% endif %}
       }
       resources {
-        cpu = {{ arg.cpu|default(300) }}
-        {% set mem = arg.mem|default(2000) %}
-        memory = {{ mem}}
-        memory_max = {{ arg.maxmem|default(mem) }}
+        {% if arg.cpu -%}    cpu         = {{ arg.cpu }}   {%- endif %}
+        {% if arg.mem -%}    memory      = {{ arg.mem }}   {%- endif %}
+        {% if arg.maxmem -%} memory_max = {{ arg.maxmem }} {%- endif %}
       }
       {{ opts.task }}
     }
@@ -173,7 +172,7 @@ class Config(DataDict):
     """How many seconds will the loop run"""
 
     runners: dict[str, str] = {
-        "nomadtools.*": DEFAULT_RUNNER,
+        "nomadtools": DEFAULT_RUNNER,
     }
     """The runners configuration.
     Each field should be either a path to a file containing a HCL or JSON
@@ -214,8 +213,6 @@ class Config(DataDict):
             else None
         )
 
-
-CONFIG: Config
 
 ###############################################################################
 # counters
@@ -495,10 +492,6 @@ class GithubCache:
         return None
 
 
-GITHUB_CACHE: GithubCache
-"""Stores and manages the github cache"""
-
-
 def gh_get(url: str, key: str = "") -> Any:
     """Execute query to github
 
@@ -771,13 +764,10 @@ class Runners:
         return ret
 
     def find(self, labelsstr: str) -> Optional[jinja2.Template]:
-        template = next((v for k, v in self.dict.items() if k.match(labelsstr)), None)
+        template = next((v for k, v in self.dict.items() if k.findall(labelsstr)), None)
         if not template:
             return None
         return template
-
-
-RUNNERS: Runners
 
 
 @dataclass
@@ -931,7 +921,7 @@ class Todo:
                 try:
                     resp = mynomad.start_job(spec.asdict())
                 except Exception:
-                    log.exception(f"Could not start: {json.dumps(spec)}")
+                    log.exception(f"Could not start: {json.dumps(spec.asdict())}")
                     raise
                 log.info(resp)
             for name in self.tostop:
@@ -1044,7 +1034,7 @@ class RepoState:
                         log.debug(f"Running {jobspec}")
                         todo.tostart.append(jobspec)
                     else:
-                        log.error(
+                        log.warning(
                             f"Runner for {labelsstr} in {self.repo_url} not found"
                         )
             elif diff < 0:
