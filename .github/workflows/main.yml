@@ -79,6 +79,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
       - run: docker build --target test .
+      - run: docker build --target app .
 
   tests:
     runs-on: [self-hosted, nomadtools]
@@ -95,7 +96,7 @@ jobs:
       - tests
     if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')
     runs-on: [self-hosted, nomadtools]
-    timeout-minutes: 1
+    timeout-minutes: 5
     # Sets the permissions granted to the `GITHUB_TOKEN` for the actions in this job.
     permissions:
       contents: read
