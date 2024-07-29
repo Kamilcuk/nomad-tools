@@ -254,7 +254,7 @@ schedule Nomad jobs to execute using the script as an executor. These jobs will
 execute the CI/CD from Gitlab inside Nomad cluster.
 
 More on it can be read on github wiki
-[https://github.com/Kamilcuk/nomadtools/wiki/gitlab%E2%80%90runner](https://github.com/Kamilcuk/nomadtools/wiki/gitlab%E2%80%90runner) .
+[https://github.com/Kamilcuk/nomad-tools/wiki/gitlab%E2%80%90runner](https://github.com/Kamilcuk/nomad-tools/wiki/gitlab%E2%80%90runner) .
 
 ## githubrunner
 
@@ -262,7 +262,7 @@ The program watches new runs on github and if there are any schedules a github-r
 to receive and dispatch the job.
 
 More on it can be read on github wiki:
-[https://github.com/Kamilcuk/nomad-tools/wiki/githubrunner](https://github.com/Kamilcuk/nomadtools/wiki/gitlab%E2%80%90runner) .
+[https://github.com/Kamilcuk/nomad-tools/wiki/githubrunner](https://github.com/Kamilcuk/nomad-tools/wiki/githubrunner) .
 
 
 ## nomad-dockers
