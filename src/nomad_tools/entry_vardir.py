@@ -19,6 +19,7 @@ from click.shell_completion import CompletionItem
 from typing_extensions import override
 
 from . import nomadlib
+from .aliasedgroup import AliasedGroup
 from .common import andjoin, common_options, mynomad, namespace_option
 from .nomadlib.connection import VariableConflict
 
@@ -174,11 +175,7 @@ class NomadVariable:
             cas: Optional[int] = (
                 check_index
                 if check_index is not None
-                else None
-                if force
-                else oldvar.ModifyIndex
-                if oldvar
-                else 0
+                else None if force else oldvar.ModifyIndex if oldvar else 0
             )
             if newitems:
                 log.info(
@@ -375,8 +372,9 @@ def click_vardir_paths(required: bool = False):
     )
 
 
-@click.group(
+@click.command(
     "vardir",
+    cls=AliasedGroup,
     help="""
 This is a solution for managing Nomad variables as directories and files.
 Single Nomad variable can be represented as a directory.

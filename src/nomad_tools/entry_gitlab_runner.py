@@ -20,14 +20,9 @@ import click
 import yaml
 
 from . import entry_watch, nomadlib, taskexec
-from .common import (
-    cached_property,
-    common_options,
-    get_package_file,
-    get_version,
-    mynomad,
-    quotearr,
-)
+from .aliasedgroup import AliasedGroup
+from .common import (cached_property, common_options, get_package_file,
+                     get_version, mynomad, quotearr)
 from .nomadlib.datadict import DataDict
 from .nomadlib.types import Job, JobTask, JobTaskConfig
 
@@ -414,7 +409,9 @@ class Config(DataDict):
     """Should the job be purged after we are done?"""
     purge_successful: bool = True
     """Should the successful Nomad jobs be purged after we are done? Only relevant when purge=none."""
-    jobname: str = "gitlabrunner.${CUSTOM_ENV_CI_RUNNER_ID}.${CUSTOM_ENV_CI_PROJECT_PATH_SLUG}.${CUSTOM_ENV_CI_JOB_ID}"
+    jobname: str = (
+        "gitlabrunner.${CUSTOM_ENV_CI_RUNNER_ID}.${CUSTOM_ENV_CI_PROJECT_PATH_SLUG}.${CUSTOM_ENV_CI_JOB_ID}"
+    )
     """The job name"""
     CPU: Optional[int] = None
     """The default job constraints."""
@@ -655,8 +652,9 @@ class BuildFailure(Exception):
     """Special chosen exit status returned by script.sh that the build script has failed."""
 
 
-@click.group(
+@click.command(
     "gitlab-runner",
+    cls=AliasedGroup,
     help=""" Custom gitlab-runner executor to run gitlab-ci jobs in Nomad. """,
     epilog="Written by Kamil Cukrowski 2023. Licensed under GNU GPL version or later.",
 )

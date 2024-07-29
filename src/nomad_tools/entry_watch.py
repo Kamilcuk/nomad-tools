@@ -58,6 +58,7 @@ from .common_nomad import (
 from .nomaddbjob import NomadDbJob
 from .nomadlib import Event, EventTopic, EventType, MyStrEnum, ns2dt
 from .nomadlib.types import strdict
+from .aliasedgroup import AliasedGroup
 
 log = logging.getLogger(__name__)
 
@@ -1933,8 +1934,9 @@ class Args(LogOptions, NotifyOptions):
     )
 
 
-@click.group(
+@click.command(
     "watch",
+    cls=AliasedGroup,
     help="""
 Depending on the command, run or stop a Nomad job. Watch over the job and
 print all job allocation events and tasks stdouts and tasks stderrs

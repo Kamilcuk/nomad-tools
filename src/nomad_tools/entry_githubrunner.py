@@ -28,6 +28,7 @@ import yaml
 from typing_extensions import Protocol
 
 from . import nomadlib
+from .aliasedgroup import AliasedGroup
 from .common import mynomad
 from .nomadlib.connection import urlquote
 from .nomadlib.datadict import DataDict
@@ -1159,7 +1160,7 @@ class Args:
 ARGS: Args
 
 
-@click.group("githubrunner")
+@click.command("githubrunner", cls=AliasedGroup)
 @clickdc.adddc("args", Args)
 def cli(args: Args):
     global ARGS

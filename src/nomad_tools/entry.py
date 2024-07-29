@@ -17,6 +17,7 @@ from . import (
 )
 from .common_click import EPILOG, common_options, main_options
 from .common_nomad import namespace_option
+from .aliasedgroup import AliasedGroup
 
 clickforward.init()
 
@@ -51,8 +52,9 @@ BashComplete.source_template = r"""\
 """
 
 
-@click.group(
+@click.command(
     "nomadtools",
+    cls=AliasedGroup,
     help="Collection of useful tools for HashiCorp Nomad.",
     epilog=EPILOG,
 )
