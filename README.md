@@ -27,6 +27,17 @@ Set of tools and utilities to ease interacting with HashiCorp Nomad scheduling s
 
 <!-- vim-markdown-toc -->
 
+If you use this package, wheather you like it or not, would you want something to improve,
+or you feel like talking, consider leaving your opinion on github discussions
+https://github.com/Kamilcuk/nomad-tools/discussions  .
+
+If there is a feature request of bug, create a github issue
+https://github.com/Kamilcuk/nomad-tools/issues .
+
+In the world of burning open source developers your comment
+will help brighten or darken my day and also serve to prioritize_is_correct
+this tool development.
+
 # Installation
 
 This is a bundle of executables packages together in a PyPY package. Install
