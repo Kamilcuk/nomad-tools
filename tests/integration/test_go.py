@@ -1,16 +1,20 @@
 from tests.testlib import run_nomadt
 
+# These tests fail randomly because Nomad is too slow to transfer logs.
+# Proper synchronization is somewhere between "can't be done" and TODO.
+sync = "echo;echo;echo;echo;echo;echo;sleep 5"
+
 
 def test_go_hello_world():
     run_nomadt(
-        "go --rm busybox:stable sh -c 'echo hello world'",
+        f"go --rm busybox:stable sh -c 'echo hello world;{sync}'",
         output=["hello world"],
     )
 
 
 def test_go_hello_world_md5():
     run_nomadt(
-        "go --rm busybox:stable sh -c 'echo hello world | md5sum'",
+        f"go --rm busybox:stable sh -c 'echo hello world | md5sum;{sync}'",
         output=["6f5902ac237024bdd0c176cb93063dc4"],
     )
 
