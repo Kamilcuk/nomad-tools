@@ -107,7 +107,7 @@ EOF
       }
       resources {
         {% if arg.cpu -%}    cpu         = {{ arg.cpu }}   {%- endif %}
-        {% if arg.mem -%}    memory      = {{ arg.mem }}   {%- endif %}
+        memory      = {{ arg.mem | default(opts.mem | default (1000)) }}
         {% if arg.maxmem -%} memory_max = {{ arg.maxmem }} {%- endif %}
       }
       {{ opts.task }}
