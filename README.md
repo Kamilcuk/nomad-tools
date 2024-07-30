@@ -40,8 +40,13 @@ this tool development.
 
 # Installation
 
-This is a bundle of executables packages together in a PyPY package. Install
-using `pipx` project.
+You can use docker image:
+
+```
+docker run -t --rm -e NOMAD_ADDR ghrc.io/kamilcuk/nomad-tools:0.4.0 --help
+```
+
+Install the project using `pipx` project.
 
 ```
 pipx install nomad-tools
