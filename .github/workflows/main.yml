@@ -94,7 +94,7 @@ jobs:
   build-and-push-docker:
     needs:
       - tests
-    if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')
+    if: github.event_name == 'push'
     runs-on: [self-hosted, nomadtools]
     timeout-minutes: 5
     # Sets the permissions granted to the `GITHUB_TOKEN` for the actions in this job.
