@@ -43,7 +43,7 @@ this tool development.
 You can use docker image:
 
 ```
-docker run -t --rm -e NOMAD_ADDR ghrc.io/kamilcuk/nomad-tools:0.4.0 --help
+docker run -t --rm -e NOMAD_ADDR ghcr.io/kamilcuk/nomad-tools:0.4.0 --help
 ```
 
 Install the project using `pipx` project.
