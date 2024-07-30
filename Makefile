@@ -43,6 +43,9 @@ try_docker_integration_test:
 			./integration_tests.sh \
 		'
 
+run_githubrunner_locally:
+	. ./.env && nomaddtools githubrunner -c ./deploy/githubrunner.yml $(ARGS) run
+
 run_githubrunner:
 	. ./.env && nomadtools watch run \
 			-var GITHUB_TOKEN=$$GITHUB_TOKEN \

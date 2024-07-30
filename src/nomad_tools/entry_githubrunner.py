@@ -17,8 +17,19 @@ import threading
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import (Any, Callable, Dict, Generator, Iterable, List, Optional, Set,
-                    Tuple, TypeVar)
+from typing import (
+    Any,
+    Callable,
+    ClassVar,
+    Dict,
+    Generator,
+    Iterable,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    TypeVar,
+)
 
 import click
 import clickdc
@@ -428,7 +439,10 @@ class GithubCache:
 
     data: Dict[Url, Value] = field(default_factory=dict)
     """The data stored by cache is keyed with URL"""
-    version: int = 2
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    """Lock against concurrent execution"""
+    VERSION: ClassVar[int] = 2
+    """The version of self.data and value class"""
 
     @classmethod
     def load(cls):
@@ -439,7 +453,7 @@ class GithubCache:
         except (FileNotFoundError, json.JSONDecodeError) as e:
             log.warning(f"Github cache loading error: {e}")
             return GithubCache()
-        if data["version"] != GithubCache.version:
+        if data["version"] != GithubCache.VERSION:
             log.warning("Github cache version mismatch, zeroing")
             return GithubCache()
         gh = GithubCache({k: cls.Value(**v) for k, v in data["data"].items()})
@@ -450,7 +464,7 @@ class GithubCache:
 
     def tojson(self):
         return {
-            "version": self.version,
+            "version": self.VERSION,
             "data": {k: asdict(v) for k, v in self.data.items()},
         }
 
@@ -465,7 +479,8 @@ class GithubCache:
         )
 
     def prepare(self, url: str, headers: Dict[str, str]):
-        cached = self.data.get(url)
+        with self.lock:
+            cached = self.data.get(url)
         if cached:
             if cached.is_etag:
                 headers["if-none-match"] = cached.etag_or_last_modified
@@ -473,24 +488,25 @@ class GithubCache:
                 headers["if-modified-since"] = cached.etag_or_last_modified
 
     def handle(self, response: requests.Response) -> Optional[Value]:
-        if response.status_code == 304:
-            COUNTERS.github_cached.inc()
-            return self.data[response.url]
-        else:
-            COUNTERS.github_miss.inc()
-        etag = response.headers.get("etag")
-        if etag:
-            self.data[response.url] = self.Value(
-                True, etag, response.json(), response.links
-            )
-            self.save()
-        else:
-            last_modified = response.headers.get("last-modified")
-            if last_modified:
+        with self.lock:
+            if response.status_code == 304:
+                COUNTERS.github_cached.inc()
+                return self.data[response.url]
+            else:
+                COUNTERS.github_miss.inc()
+            etag = response.headers.get("etag")
+            if etag:
                 self.data[response.url] = self.Value(
-                    False, last_modified, response.json(), response.links
+                    True, etag, response.json(), response.links
                 )
                 self.save()
+            else:
+                last_modified = response.headers.get("last-modified")
+                if last_modified:
+                    self.data[response.url] = self.Value(
+                        False, last_modified, response.json(), response.links
+                    )
+                    self.save()
         return None
 
 
