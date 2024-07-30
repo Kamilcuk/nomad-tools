@@ -17,7 +17,11 @@ def all_annotations(cls) -> ChainMap[str, Type]:
     attributes defined in cls or inherited from superclasses.
     Also resolve runtime type hints - https://peps.python.org/pep-0563/
     """
-    return ChainMap(*(get_type_hints(c) for c in cls.__mro__))
+    try:
+        return ChainMap(*(get_type_hints(c) for c in cls.__mro__))
+    except Exception:
+        log.exception(f"Could not get annotations of {cls.__name__}")
+        raise
 
 
 def _init_value(classname: str, dstname: str, dsttype: Any, srcval: Any):

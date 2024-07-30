@@ -17,7 +17,7 @@ import threading
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import (Any, Callable, Generator, Iterable, List, Optional, Set,
+from typing import (Any, Callable, Dict, Generator, Iterable, List, Optional, Set,
                     Tuple, TypeVar)
 
 import click
@@ -164,7 +164,7 @@ class Config(DataDict):
     loop: int = 10
     """How many seconds will the loop run"""
 
-    runners: dict[str, str] = {
+    runners: Dict[str, str] = {
         "nomadtools": DEFAULT_RUNNER,
     }
     """The runners configuration.
@@ -426,7 +426,7 @@ class GithubCache:
         links: dict
         timestamp: float = field(default_factory=lambda: time.time())
 
-    data: dict[Url, Value] = field(default_factory=dict)
+    data: Dict[Url, Value] = field(default_factory=dict)
     """The data stored by cache is keyed with URL"""
     version: int = 2
 
@@ -464,7 +464,7 @@ class GithubCache:
             f"Github cache saved {len(self.data)} entires to {github_cachefile()}"
         )
 
-    def prepare(self, url: str, headers: dict[str, str]):
+    def prepare(self, url: str, headers: Dict[str, str]):
         cached = self.data.get(url)
         if cached:
             if cached.is_etag:
@@ -781,20 +781,20 @@ def get_nomad_state() -> list[NomadRunner]:
 
 @dataclass
 class Runners:
-    dict: dict[re.Pattern, jinja2.Template] = field(default_factory=dict)
+    data: Dict[re.Pattern, jinja2.Template] = field(default_factory=dict)
     env: jinja2.Environment = field(
         default_factory=lambda: jinja2.Environment(loader=jinja2.BaseLoader())
     )
 
     @staticmethod
-    def load(specs: dict[str, str]) -> Runners:
+    def load(specs: Dict[str, str]) -> Runners:
         ret = Runners()
         for k, v in specs.items():
-            ret.dict[re.compile(k)] = ret.env.from_string(v)
+            ret.data[re.compile(k)] = ret.env.from_string(v)
         return ret
 
     def find(self, labelsstr: str) -> Optional[jinja2.Template]:
-        template = next((v for k, v in self.dict.items() if k.findall(labelsstr)), None)
+        template = next((v for k, v in self.data.items() if k.findall(labelsstr)), None)
         if not template:
             return None
         return template
@@ -1039,10 +1039,10 @@ class RepoState:
         """Decide which jobs to run or stop"""
         self.validate()
         todo = Todo()
-        neededlabelsstrs: dict[str, int] = collections.Counter(
+        neededlabelsstrs: Dict[str, int] = collections.Counter(
             gj.labelsstr() for gj in self.githubjobs
         )
-        runninglabelsstrs: dict[str, int] = collections.Counter(
+        runninglabelsstrs: Dict[str, int] = collections.Counter(
             nr.labelsstr() for nr in self.nomadrunners if not nr.is_dead()
         )
         alllabelsstrs: set[str] = set(
@@ -1102,7 +1102,7 @@ def loop():
     # Get the nomad state.
     curstate: list[NomadRunner] = get_nomad_state()
     # Construct current state with repo as the key.
-    repostates: dict[str, RepoState] = {}
+    repostates: Dict[str, RepoState] = {}
     for gj in reqstate:
         repostates.setdefault(
             gj.repo_url(), RepoState(gj.repo_url())
@@ -1230,7 +1230,7 @@ def dumpconfig():
 
 @cli.command(help="List configured runners")
 def listrunners():
-    for rgx, tmpl in RUNNERS.dict.items():
+    for rgx, tmpl in RUNNERS.data.items():
         print(f"{rgx}")
         print(f"{tmpl}")
         print()
