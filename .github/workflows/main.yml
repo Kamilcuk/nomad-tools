@@ -145,7 +145,7 @@ jobs:
       - tests
     if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')
     runs-on: [self-hosted, nomadtools]
-    timeout-minutes: 1
+    timeout-minutes: 5
     environment:
       name: pypi
       url: https://pypi.org/p/nomad-tools
