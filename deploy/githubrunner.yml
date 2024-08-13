@@ -6,3 +6,4 @@ repos:
   # - Kamilcuk/nomad-tools
   # - Kamilcuk/runnertest
 runner_inactivity_timeout: 1w
+loop: 60

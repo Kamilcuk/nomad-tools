@@ -172,7 +172,7 @@ class Config(DataDict):
     A star '*' causes to get all the repositories available.
     """
 
-    loop: int = 10
+    loop: int = 60
     """How many seconds will the loop run"""
 
     runners: Dict[str, str] = {
