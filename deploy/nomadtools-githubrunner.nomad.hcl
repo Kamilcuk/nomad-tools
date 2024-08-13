@@ -63,7 +63,7 @@ job "nomadtools-githubrunner" {
       env {
         GITHUB_TOKEN = var.GITHUB_TOKEN
         NOMAD_TOKEN = var.NOMAD_TOKEN
-        NOMAD_NAMESPACE = var.NOMDA_NAMESPACE
+        NOMAD_NAMESPACE = var.NOMAD_NAMESPACE
       }
       template {
         destination = "local/githubrunner.yml"
