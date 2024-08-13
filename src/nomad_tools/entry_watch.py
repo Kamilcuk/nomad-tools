@@ -89,6 +89,8 @@ def print_all_threads_stacktrace(*_):
     out = "\n".join(x for x in "\n".join(text).splitlines() if x)
     eprint("\n\n" + out + "\n\n")
 
+def datetime_is_naive(d: datetime.datetime) -> bool:
+    return d.tzinfo is None or d.tzinfo.utcoffset(d) is None
 
 ###############################################################################
 
@@ -216,6 +218,7 @@ class LogLine:
         assert self.what in [
             e.value for e in LogWhat
         ], f"{self.what} value is not a valid what"
+        assert not datetime_is_naive(self.now), f"{self}"
 
     @property
     def mark(self):
@@ -571,7 +574,7 @@ class Mylogger:
         return cls.__log(
             what=LogWhat.deploy,
             id=deploy.ID,
-            now=ns2dt(job.SubmitTime) if job else datetime.datetime.now(),
+            now=ns2dt(job.SubmitTime) if job else datetime.datetime.now().astimezone(),
             jobversion=deploy.JobVersion,
             message=message,
             ModifyIndex=deploy.ModifyIndex,
@@ -740,7 +743,7 @@ class TaskLogger(threading.Thread):
             code = e.response.status_code if e.response is not None else None
             text = e.response.text if e.response is not None else None
             self.tk.log_alloc(
-                datetime.datetime.now(),
+                datetime.datetime.now().astimezone(),
                 f"Error getting {self.__typestr()} logs: {code} {text!r}",
             )
         finally:
