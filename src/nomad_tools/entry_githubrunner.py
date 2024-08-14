@@ -530,7 +530,10 @@ def gh_get(url: str, key: str = "") -> Any:
         GITHUB_CACHE.prepare(url, headers)
         response = requests.get(url, headers=headers)
         log.debug(f"{url} {headers} {response}")
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except Exception:
+            raise Exception(f"{response.url}\n{response.text}")
         # If the result is found in github cache, use it, otherwise extract it.
         cached: Optional[GithubCache.Value] = GITHUB_CACHE.handle(response)
         data: Any = cached.json if cached else response.json()
