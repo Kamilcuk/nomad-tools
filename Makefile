@@ -1,5 +1,6 @@
 MAKEFLAGS = -rR --warn-unused-variables
 ARGS ?=
+VERBOSE ?=
 
 .PHONY: test
 test:
@@ -51,4 +52,5 @@ run_githubrunner:
 			-var GITHUB_TOKEN=$$GITHUB_TOKEN \
 			-var NOMAD_TOKEN=$$NOMAD_TOKEN \
 			-var NOMAD_NAMESPACE=$$NOMAD_NAMESPACE \
+			-var VERBOSE=$(VERBOSE) \
 			./deploy/nomadtools-githubrunner.nomad.hcl

@@ -10,6 +10,9 @@ variable "NOMAD_TOKEN" {
 variable "NOMAD_NAMESPACE" {
   type = string
 }
+variable "VERBOSE" {
+  type = string
+}
 
 job "nomadtools-githubrunner" {
   namespace = "github"
@@ -17,6 +20,9 @@ job "nomadtools-githubrunner" {
     ephemeral_disk {
       migrate = true
       sticky = true
+    }
+    restart {
+      mode = "delay"
     }
 
     task "build" {
@@ -46,12 +52,13 @@ job "nomadtools-githubrunner" {
       config {
         image = "nomad:${NOMAD_ALLOC_ID}"
         network_mode = "host"
-        args = [
-          "githubrunner",
-          # "--verbose",
-          "--config",
-          "${NOMAD_TASK_DIR}/githubrunner.yml",
-          "run",
+        entrypoint = []
+        args = [ "sh", "-xc", <<EOF
+          nomadtools githubrunner \
+            $([ -n ${var.VERBOSE} ] && echo --verbose) \
+            --config=${NOMAD_TASK_DIR}/githubrunner.yml \
+            run
+          EOF
         ]
         mount {
           type     = "bind"
