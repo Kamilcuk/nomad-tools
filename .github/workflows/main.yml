@@ -67,7 +67,8 @@ jobs:
         run: ./tests/tls_env.bash testall
 
   test_docker:
-    runs-on: [self-hosted, nomadtools]
+    # runs-on: [self-hosted, nomadtools]
+    runs-on: ubuntu-latest
     timeout-minutes: 7
     # Sets the permissions anted to the `GITHUB_TOKEN` for the actions in this job.
     permissions:
@@ -82,7 +83,8 @@ jobs:
       - run: docker build --target app .
 
   tests:
-    runs-on: [self-hosted, nomadtools]
+    # runs-on: [self-hosted, nomadtools]
+    runs-on: ubuntu-latest
     timeout-minutes: 1
     needs:
       - test_nomad
@@ -95,7 +97,8 @@ jobs:
     needs:
       - tests
     if: github.event_name == 'push'
-    runs-on: [self-hosted, nomadtools]
+    # runs-on: [self-hosted, nomadtools]
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     # Sets the permissions granted to the `GITHUB_TOKEN` for the actions in this job.
     permissions:
