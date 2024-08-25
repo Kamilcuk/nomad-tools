@@ -16,7 +16,7 @@ def complete_set_namespace(ctx: click.Context):
 
 
 def completor(
-    cb: Callable[[], Iterable[str]]
+    cb: Callable[[], Iterable[str]],
 ) -> Callable[[click.Context, str, str], Optional[List[str]]]:
     def completor_cb(
         ctx: click.Context, param: str, incomplete: str
@@ -84,8 +84,8 @@ def verbose_option():
         count=True,
         expose_value=False,
         is_eager=True,
-        callback=lambda v, *_: logging.root.setLevel(
-            max(logging.DEBUG, logging.root.level - 10)
+        callback=lambda ctx, opt, value: (
+            logging.root.setLevel(max(logging.DEBUG, logging.root.level - 10 * value))
         ),
     )
 
@@ -97,8 +97,10 @@ def quiet_option():
         count=True,
         expose_value=False,
         is_eager=True,
-        callback=lambda v, *_: logging.root.setLevel(
-            min(logging.CRITICAL, logging.root.level + 10)
+        callback=lambda ctx, opt, value: (
+            logging.root.setLevel(
+                min(logging.CRITICAL, logging.root.level + 10 * value)
+            )
         ),
     )
 
