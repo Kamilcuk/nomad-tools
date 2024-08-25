@@ -19,6 +19,7 @@ Set of tools and utilities to ease interacting with HashiCorp Nomad scheduling s
   * [githubrunner](#githubrunner)
   * [nomad-dockers](#nomad-dockers)
   * [downloadrelease](#downloadrelease)
+  * [taskexec](#taskexec)
   * [import nomad_tools](#import-nomad_tools)
 * [History](#history)
 * [Contributing](#contributing)
@@ -264,7 +265,7 @@ More on it can be read on github wiki
 ## githubrunner
 
 The program watches new runs on github and if there are any schedules a github-runner
-to receive and dispatch the job.
+to receive and dispatch the job. This is WIP
 
 More on it can be read on github wiki:
 [https://github.com/Kamilcuk/nomad-tools/wiki/githubrunner](https://github.com/Kamilcuk/nomad-tools/wiki/githubrunner) .
@@ -298,6 +299,19 @@ INFO:nomad_tools.nomad_downloadrelease:Downloading https://releases.hashicorp.co
 INFO:nomad_tools.nomad_downloadrelease:https://releases.hashicorp.com/nomad/1.6.3/nomad_1.6.3_linux_amd64.zip -> -rwxr-xr-x 101.8MB nomad1.6.3
 
 ```
+
+## taskexec
+
+`nomad alloc exec` didn't met my expactations. It is boring and tedious to find an allocation ID
+and then copy it in the terminal. There is also no bash completion for task names.
+
+I decided I want to have advanced filtering, where given a job name and node name some tool
+automatically finds an allocation and task to copy from.
+
+Given a system job promtail running on all machines, `nomadtools taskexec -j promtail -n host1 bash -l`
+will drop into a bash shell inside promtail job allocation running on host1.
+
+This tool can be used to get a shell to chosen allocation. Additoinally shell completion works.
 
 ## import nomad_tools
 
