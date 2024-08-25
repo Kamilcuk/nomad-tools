@@ -41,6 +41,7 @@ from typing_extensions import Protocol
 from . import nomadlib
 from .aliasedgroup import AliasedGroup
 from .common import mynomad
+from .common_click import common_options
 from .nomadlib.connection import urlquote
 from .nomadlib.datadict import DataDict
 
@@ -1178,6 +1179,7 @@ ARGS: Args
 
 @click.command("githubrunner", cls=AliasedGroup)
 @clickdc.adddc("args", Args)
+@common_options()
 def cli(args: Args):
     global ARGS
     ARGS = args
