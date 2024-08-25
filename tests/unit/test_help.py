@@ -1,19 +1,16 @@
 import subprocess
-from pathlib import Path
 
 import pytest
-import tomli
+import nomad_tools.entry
 
-rootdir = Path(".")
-pyproject = rootdir / "pyproject.toml"
-scripts = list(tomli.load(pyproject.open("rb"))["project"]["scripts"].keys())
+scripts = nomad_tools.entry.cli.commands.keys()
 
 
 @pytest.mark.parametrize("cli", scripts)
 def test_cli_help(cli):
-    subprocess.check_call([cli, "-h"])
+    subprocess.check_call(["nomadtools", cli, "--help"])
 
 
 @pytest.mark.parametrize("cli", scripts)
 def test_cli_h(cli):
-    subprocess.check_call([cli, "-h"])
+    subprocess.check_call(["nomadtools", cli, "-h"])
