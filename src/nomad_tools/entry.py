@@ -5,13 +5,14 @@ from click.shell_completion import BashComplete
 
 from . import (
     entry_constrainteval,
-    entry_go,
     entry_cp,
     entry_dockers,
     entry_downloadrelease,
     entry_githubrunner,
     entry_gitlab_runner,
+    entry_go,
     entry_port,
+    entry_taskexec,
     entry_vardir,
     entry_watch,
 )
@@ -73,6 +74,7 @@ cli.add_command(entry_downloadrelease.cli)
 cli.add_command(entry_githubrunner.cli)
 cli.add_command(entry_gitlab_runner.cli)
 cli.add_command(entry_port.cli)
+cli.add_command(entry_taskexec.cli)
 cli.add_command(entry_vardir.cli)
 cli.add_command(entry_watch.cli)
 
