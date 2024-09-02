@@ -7,7 +7,8 @@ from typing import Dict, List, Tuple
 import click
 import clickdc
 
-from .common import verbose_option, common_options
+from .common import common_options, mynomad, verbose_option
+from .common_click import completor
 from .entry_constrainteval import Args, NodesAttributes
 from .mytabulate import mytabulate
 
@@ -19,7 +20,11 @@ List attributes of a specific node or all nodes.
 Works similarly to constrainteval.
 """,
 )
-@click.argument("nodenameorid", nargs=-1)
+@click.argument(
+    "nodenameorid",
+    nargs=-1,
+    shell_complete=completor(lambda: [v["Name"] for v in mynomad.get("nodes")]),
+)
 @clickdc.adddc("args", Args)
 @verbose_option()
 @common_options()
