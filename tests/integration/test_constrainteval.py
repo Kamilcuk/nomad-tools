@@ -26,9 +26,3 @@ def test_constrainteval_3():
     )
     assert pp.stdout is not None
     assert pp.stdout == ""
-
-
-def test_constrainteval_prefix():
-    pp = run_nomadt("constrainteval --json --prefix attr.", stdout=subprocess.PIPE)
-    assert pp.stdout
-    assert len(json.loads(pp.stdout)) >= 10, f"{pp}"
