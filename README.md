@@ -12,6 +12,7 @@ Set of tools and utilities to ease interacting with HashiCorp Nomad scheduling s
   * [watch](#watch)
   * [go](#go)
   * [constrainteval](#constrainteval)
+  * [listattributes](#listattributes)
   * [port](#port)
   * [vardir](#vardir)
   * [cp](#cp)
@@ -141,9 +142,8 @@ evaluating the constraint given on command line arguments. Useful for
 searching for which hosts contain what value of a attribute.
 
 ```
-$ nomadtools constrainteval attr.cpu.arch is_set
+$ nomadtools constrainteval attr.cpu.arch
 name   attr.cpu.arch
------  ---------------
 node1  amd64
 node2  amd64
 ```
@@ -152,6 +152,20 @@ This mode uses a cache in `~/.cache/nomadtools/nodes.json` for caching all the
 attributes of nodes downloaded from Nomad. This is used to speed up. The
 program needs to make one query for every single node in Nomad, which for a
 lot of nodes is costly.
+
+## listattributes
+
+Lists all node attributes or attribute of given nodes.
+Additionally with a leading dot lists the whole json return from Nomad API.
+
+This is meant to be used with `grep` and other unix tools for easy parsing.
+
+```
+$ nomadtools listattributes | grep datacenter
+dc.datacenter                                   dc
+```
+
+It uses the same cache and option as `constrainteval` option.
 
 ## port
 

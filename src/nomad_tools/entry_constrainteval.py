@@ -10,16 +10,16 @@ import time
 from dataclasses import asdict, dataclass
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import click
 import clickdc
 from click.shell_completion import CompletionItem
 from packaging.version import Version
-from tabulate import tabulate
 
 from .common import mynomad
-from .common_click import EPILOG, common_options
+from .common_click import EPILOG, common_options, verbose_option
+from .mytabulate import mytabulate
 
 log = logging.getLogger(__name__)
 
@@ -114,22 +114,19 @@ class Args:
         help="Number of seconds the cache if valid for.",
         default=600.0,
     )
+    json: bool = clickdc.option(
+        "-j", help="Output matched nodes information with attributes in json"
+    )
     parallel: int = clickdc.option(
         "-P",
         default=20,
         help="When getting all nodes metadata, make this many connections in parallel.",
     )
-    json: bool = clickdc.option(
-        "-j", help="Output matched nodes information with attributes in json"
-    )
     verbose: bool = clickdc.option("-v")
-    prefix: bool = clickdc.option(
-        help="""
-            Instead of evaluting the expression, print all metadata keys
-            of all nodes that match any of the argument in CONSTRAINTS list
-            constraints as a prefix.
-            """,
-    )
+
+
+@dataclass
+class ConstraintArgs:
     constraints: Tuple[str, ...] = clickdc.argument(
         required=True,
         nargs=-1,
@@ -175,6 +172,28 @@ def key_prefix(prefix: str, data: Dict[str, str]) -> Dict[str, str]:
     return {prefix + k: v for k, v in data.items()}
 
 
+def dotflatten(
+    data: Union[dict, list, str, float, int], key: str = ""
+) -> Dict[str, str]:
+    """Given any dictionary joins all keys with dot and returns it.
+    So like {"a":{"b":[{"c": "d"}]}} becomes {"a.b[0].c": "d"}
+    """
+    if isinstance(data, dict):
+        return {
+            a: b
+            for k, v in data.items()
+            for a, b in dotflatten(v, key + ("." if key else "") + str(k)).items()
+        }
+    elif isinstance(data, list):
+        return {
+            a: b
+            for i, v in enumerate(data)
+            for a, b in dotflatten(v, key + f"[{i}]").items()
+        }
+    else:
+        return {key: str(data)}
+
+
 @dataclass(frozen=True)
 class NodeAttributes:
     node: dict
@@ -202,6 +221,7 @@ class NodesAttributes(List[NodeAttributes]):
                     "node.pool": node["NodePool"],
                     **key_prefix("attr.", node["Attributes"]),
                     **key_prefix("meta.", node["Meta"]),
+                    **key_prefix(".", dotflatten(node)),
                 },
             )
             for node in nodenodes
@@ -262,31 +282,6 @@ class NodesAttributes(List[NodeAttributes]):
 ###############################################################################
 
 
-def prefix_mode(nodesattributes: NodesAttributes, args: Args):
-    prefixes = list(args.constraints)
-    # Get all attributes of all nodes.
-    allattributes: Dict[str, str] = {}
-    for x in nodesattributes:
-        allattributes.update(x.attributes)
-    # Get only attributes that match prefix.
-    result: List[Dict[str, str]] = [
-        {
-            "attribute": attribute,
-            "example value": value,
-        }
-        for attribute, value in sorted(allattributes.items())
-        if any(attribute.startswith(prefix) for prefix in prefixes)
-    ]
-    # Output.
-    if not result:
-        exit(2)
-    if args.json:
-        print(json.dumps(result))
-    else:
-        print(tabulate(result, headers="keys"))
-    exit()
-
-
 ###############################################################################
 
 
@@ -316,20 +311,19 @@ def grouper(thelist: List[str], count: int) -> List[List[str]]:
         %(prog)s '${attr.os.name}' = ubuntu '${attr.kernel.name}' = linux
         %(prog)s '${attr.os.name}' '!=' ubuntu attr.os.name is_set
         %(prog)s attr.os.name is_set '' attr.kernel.name is_set
-        %(prog)s --prefix attr.
-    """,
+    """
+    % dict(prog="nomadtools constrainteval"),
     epilog=EPILOG,
 )
 @clickdc.adddc("args", Args)
+@clickdc.adddc("constraintsargs", ConstraintArgs)
+@verbose_option()
 @common_options()
-def cli(args: Args):
-    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO)
+def cli(args: Args, constraintsargs: ConstraintArgs):
+    logging.basicConfig()
     nodesattributes = NodesAttributes.load(args)
-    if args.prefix:
-        prefix_mode(nodesattributes, args)
-        exit()
     # Group attributes in groups of 3 for constraints.
-    for group in grouper(list(args.constraints), 3):
+    for group in grouper(list(constraintsargs.constraints), 3):
         constraint = Constraint(*group)
         # Remove nodes that do match constraint by evaluating it.
         newlist: List[NodeAttributes] = []
@@ -355,20 +349,25 @@ def cli(args: Args):
     # Output.
     if not nodesattributes:
         exit(2)
+    global REFERENCES
+    REFERENCES = sorted(list(set(REFERENCES)))
     if args.json:
         print(json.dumps([asdict(x) for x in nodesattributes]))
     else:
-        toout: List[Dict[str, str]] = sorted(
+        toout: List[List[str]] = [
             [
-                {
-                    "name": node.node["Name"],
-                    **{k: v for k, v in node.attributes.items() if k in REFERENCES},
-                }
-                for node in nodesattributes
+                "name",
+                *[node.attributes["node.unique.name"] for node in nodesattributes],
             ],
-            key=lambda x: x["name"],
-        )
-        print(tabulate(toout, headers="keys"))
+            *[
+                [
+                    k,
+                    *[node.attributes.get(k, "") for node in nodesattributes],
+                ]
+                for k in REFERENCES
+            ],
+        ]
+        print(mytabulate(toout))
 
 
 if __name__ == "__main__":

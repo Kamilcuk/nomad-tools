@@ -11,6 +11,7 @@ from . import (
     entry_githubrunner,
     entry_gitlab_runner,
     entry_go,
+    entry_listattributes,
     entry_nodenametoid,
     entry_port,
     entry_taskexec,
@@ -74,6 +75,7 @@ cli.add_command(entry_downloadrelease.cli)
 cli.add_command(entry_githubrunner.cli)
 cli.add_command(entry_gitlab_runner.cli)
 cli.add_command(entry_go.cli)
+cli.add_command(entry_listattributes.cli)
 cli.add_command(entry_nodenametoid.cli)
 cli.add_command(entry_port.cli)
 cli.add_command(entry_taskexec.cli)
