@@ -108,7 +108,7 @@ class Args:
     cache: Path = clickdc.option(
         type=click.Path(dir_okay=False, writable=True, path_type=Path),
         default=Path().home() / ".cache/nomadtools/nodes.json",
-        help="Cache file location. Defuault: ~/.cache/nomadtools/nodes.json",
+        help="Cache file location. Default: ~/.cache/nomadtools/nodes.json",
     )
     cachetime: float = clickdc.option(
         help="Number of seconds the cache if valid for.",
@@ -277,9 +277,6 @@ class NodesAttributes(List[NodeAttributes]):
         nodes = cls.__download(args)
         nodes.__save_to_cache(args)
         return nodes
-
-
-###############################################################################
 
 
 ###############################################################################
