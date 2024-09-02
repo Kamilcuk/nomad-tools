@@ -9,19 +9,19 @@ Set of tools and utilities to ease interacting with HashiCorp Nomad scheduling s
 * [Installation](#installation)
   * [Shell completion](#shell-completion)
 * [Usage](#usage)
-  * [watch](#watch)
-  * [go](#go)
-  * [constrainteval](#constrainteval)
-  * [listattributes](#listattributes)
-  * [port](#port)
-  * [vardir](#vardir)
-  * [cp](#cp)
-  * [gitlab-runner](#gitlab-runner)
-  * [githubrunner](#githubrunner)
-  * [nomad-dockers](#nomad-dockers)
-  * [downloadrelease](#downloadrelease)
-  * [taskexec](#taskexec)
-  * [nodenametoid](#nodenametoid)
+  * [watch - get all logs and events of a Nomad job in terminal](#watch---get-all-logs-and-events-of-a-nomad-job-in-terminal)
+  * [go - create, run and watch a Nomad job from command line](#go---create-run-and-watch-a-nomad-job-from-command-line)
+  * [`constrainteval` - evaluate constraint in command line](#constrainteval---evaluate-constraint-in-command-line)
+  * [`listattributes` - list all available node attributes on number of nodes](#listattributes---list-all-available-node-attributes-on-number-of-nodes)
+  * [`port` - list ports allocated by job or allocation](#port---list-ports-allocated-by-job-or-allocation)
+  * [`vardir` - manipulate nomad variable keys as files](#vardir---manipulate-nomad-variable-keys-as-files)
+  * [`cp` - copy files to/from/between nomad allocations](#cp---copy-files-tofrombetween-nomad-allocations)
+  * [`gitlab-runner` - dynamically schedule gitlab CI jobs](#gitlab-runner---dynamically-schedule-gitlab-ci-jobs)
+  * [`githubrunner` - WIP dynamically schedule GitHub actions jobs](#githubrunner---wip-dynamically-schedule-github-actions-jobs)
+  * [`dockers` - list docker images referenced by Nomad job](#dockers---list-docker-images-referenced-by-nomad-job)
+  * [`downloadrelease` - download specific Nomad executable version](#downloadrelease---download-specific-nomad-executable-version)
+  * [`taskexec` - find allocation and task matching parameters and maybe execute a command in it](#taskexec---find-allocation-and-task-matching-parameters-and-maybe-execute-a-command-in-it)
+  * [`nodenametoid` - convert node name to id](#nodenametoid---convert-node-name-to-id)
   * [import nomad_tools](#import-nomad_tools)
 * [History](#history)
 * [Contributing](#contributing)
@@ -71,7 +71,7 @@ completion installation instruction.
 This module installs command line tool `nomadtools` with several modes of
 operation:
 
-## watch
+## watch - get all logs and events of a Nomad job in terminal
 
 `nomadtools watch` is meant to watch over a job change that you type in
 terminal. It prints all relevant messages - messages about allocation,
@@ -102,7 +102,7 @@ status (if there is one task).
 
 Internally, watch uses Nomad event stream to get the events in real time.
 
-## go
+## go - create, run and watch a Nomad job from command line
 
 Mimics operation of `docker run`, it is built on top of `watch` mode to
 execute a single Nomad job created dynamically from command line arguments.
@@ -134,7 +134,7 @@ INFO:nomad_tools.nomad_watch:Job nomad_tools_go_5305da8f-b376-4c35-9a05-71027aad
 INFO:nomad_tools.nomad_watch:Single task exited with 0 exit status. Exit code is 0.
 ```
 
-## constrainteval
+## `constrainteval` - evaluate constraint in command line
 
 Evaluate a constraint and show all nodes that match the constraint. In
 addition to the node names, it also shows all attributes referenced while
@@ -153,7 +153,7 @@ attributes of nodes downloaded from Nomad. This is used to speed up. The
 program needs to make one query for every single node in Nomad, which for a
 lot of nodes is costly.
 
-## listattributes
+## `listattributes` - list all available node attributes on number of nodes
 
 Lists all node attributes or attribute of given nodes.
 Additionally with a leading dot lists the whole json return from Nomad API.
@@ -167,7 +167,7 @@ dc.datacenter                                   dc
 
 It uses the same cache and option as `constrainteval` option.
 
-## port
+## `port` - list ports allocated by job or allocation
 
 Prints out the ports allocated for a particular Nomad job or
 allocation. It is meant to mimic `docker port` command.
@@ -188,7 +188,7 @@ $ nomadtools port httpd http
 192.168.0.5:31076
 ```
 
-## vardir
+## `vardir` - manipulate nomad variable keys as files
 
 I was frustrated with how Nomad variables look like. It is really hard to
 incrementally modify Nomad variables. The API is at one go. You either update
@@ -219,7 +219,7 @@ $ nomadtools vardir -j nginx ls
 nomad_vardir: Nomad variable not found at nomad/jobs/nginx@default
 ```
 
-## cp
+## `cp` - copy files to/from/between nomad allocations
 
 This is a copy of the `docker cp` command. The syntax is meant to be the
 same with docker. The rules of copying a file vs directory are meant to be
@@ -264,7 +264,7 @@ calls to execute a `tar` pipe to stream the data from or to the allocation
 context to or from the local host using stdout and stdin forwarded by
 `nomad exec`.
 
-## gitlab-runner
+## `gitlab-runner` - dynamically schedule gitlab CI jobs
 
 An implementation of custom Gitlab executor driver that runs Gitlab CI/CD jobs
 using Nomad.
@@ -277,16 +277,16 @@ execute the CI/CD from Gitlab inside Nomad cluster.
 More on it can be read on github wiki
 [https://github.com/Kamilcuk/nomad-tools/wiki/gitlab%E2%80%90runner](https://github.com/Kamilcuk/nomad-tools/wiki/gitlab%E2%80%90runner) .
 
-## githubrunner
+## `githubrunner` - WIP dynamically schedule GitHub actions jobs
 
-The program watches new runs on github and if there are any schedules a github-runner
-to receive and dispatch the job. This is WIP
+The program watches new runs on GitHub and if there are any schedules a `github-runner`
+to receive and dispatch the job. This is WIP.
 
-More on it can be read on github wiki:
+More on it can be read on GitHub wiki:
 [https://github.com/Kamilcuk/nomad-tools/wiki/githubrunner](https://github.com/Kamilcuk/nomad-tools/wiki/githubrunner) .
 
 
-## nomad-dockers
+## `dockers` - list docker images referenced by Nomad job
 
 Lists docker images referenced in Nomad job file or a running Nomad job.
 
@@ -297,7 +297,7 @@ $ nomadtools dockers --job httpd
 busybox:stable
 ```
 
-## downloadrelease
+## `downloadrelease` - download specific Nomad executable version
 
 Program for downloading specific Nomad release binary from their release page.
 I use it for testing and checking new Nomad versions.
@@ -312,12 +312,11 @@ INFO:nomad_tools.nomad_downloadrelease:https://releases.hashicorp.com/consul/1.9
 $ nomadtools downloadrelease -p 1.6.3 nomad ./nomad1.6.3
 INFO:nomad_tools.nomad_downloadrelease:Downloading https://releases.hashicorp.com/nomad/1.6.3/nomad_1.6.3_linux_amd64.zip to nomad1.6.3
 INFO:nomad_tools.nomad_downloadrelease:https://releases.hashicorp.com/nomad/1.6.3/nomad_1.6.3_linux_amd64.zip -> -rwxr-xr-x 101.8MB nomad1.6.3
-
 ```
 
-## taskexec
+## `taskexec` - find allocation and task matching parameters and maybe execute a command in it
 
-`nomad alloc exec` didn't met my expactations. It is boring and tedious to find an allocation ID
+`nomad alloc exec` didn't met my expectations. It is boring and tedious to find an allocation ID
 and then copy it in the terminal. There is also no bash completion for task names.
 
 I decided I want to have advanced filtering, where given a job name and node name some tool
@@ -326,11 +325,9 @@ automatically finds an allocation and task to copy from.
 Given a system job promtail running on all machines, `nomadtools taskexec -j promtail -n host1 bash -l`
 will drop into a bash shell inside promtail job allocation running on host1.
 
-This tool can be used to get a shell to chosen allocation. Additoinally shell completion works.
+This tool can be used to get a shell to the chosen allocation. Shell completion works.
 
-## nodenametoid
-
-Converts given node names to id. Only that.
+## `nodenametoid` - convert node name to id
 
 ```
 $ nomadtools nodenametoid node1
