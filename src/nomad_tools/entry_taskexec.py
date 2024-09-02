@@ -106,6 +106,9 @@ class FindTask:
         help="Filter allocation only running task named like that.",
     )
 
+    def is_none(self) -> bool:
+        return all(getattr(self, f.name) is None for f in fields(self))
+
     def complete_alloc(self) -> List[str]:
         allocs = self.get_allocations(StartsWith.alloc)
         return [x.ID for x in allocs]
@@ -287,5 +290,8 @@ class Cmd:
 @common_click.verbose_option()
 def cli(findtask: FindTask, cmd: Cmd):
     logging.basicConfig()
+    if findtask.is_none():
+        opts = " ".join("--" + f.name for f in fields(findtask))
+        click.get_current_context().fail(f"At least one option has to be present: {opts}")
     f = findtask.findtask()
     cmd.execute(f)
