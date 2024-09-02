@@ -7,6 +7,7 @@ from typing import Dict, List, Tuple
 import click
 import clickdc
 
+from .common import verbose_option, common_options
 from .entry_constrainteval import Args, NodesAttributes
 from .mytabulate import mytabulate
 
@@ -20,6 +21,8 @@ Works similarly to constrainteval.
 )
 @click.argument("nodenameorid", nargs=-1)
 @clickdc.adddc("args", Args)
+@verbose_option()
+@common_options()
 def cli(args: Args, nodenameorid: Tuple[str, ...]):
     logging.basicConfig()
     nodesattributes = NodesAttributes.load(args)
