@@ -20,6 +20,7 @@ Set of tools and utilities to ease interacting with HashiCorp Nomad scheduling s
   * [nomad-dockers](#nomad-dockers)
   * [downloadrelease](#downloadrelease)
   * [taskexec](#taskexec)
+  * [nodenametoid](#nodenametoid)
   * [import nomad_tools](#import-nomad_tools)
 * [History](#history)
 * [Contributing](#contributing)
@@ -312,6 +313,15 @@ Given a system job promtail running on all machines, `nomadtools taskexec -j pro
 will drop into a bash shell inside promtail job allocation running on host1.
 
 This tool can be used to get a shell to chosen allocation. Additoinally shell completion works.
+
+## nodenametoid
+
+Converts given node names to id. Only that.
+
+```
+$ nomadtools nodenametoid node1
+3e50c2ef-16bd-0253-6635-1a55c25e74ca
+```
 
 ## import nomad_tools
 
