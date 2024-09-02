@@ -5,7 +5,7 @@ from typing import Dict, Tuple
 import click
 
 from .common import mynomad
-from .common_click import completor
+from .common_click import common_options, completor
 
 
 def get_nodenametoid() -> Dict[str, str]:
@@ -29,6 +29,7 @@ def get_nodenametoid() -> Dict[str, str]:
     required=True,
     shell_complete=completor(lambda: list(get_nodenametoid().keys())),
 )
+@common_options()
 def cli(prefix: bool, nodename: Tuple[str, ...]):
     nodenametoid = get_nodenametoid()
     for name in nodename:
