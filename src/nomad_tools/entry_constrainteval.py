@@ -351,6 +351,9 @@ def cli(args: Args, constraintsargs: ConstraintArgs):
         exit(2)
     global REFERENCES
     REFERENCES = sorted(list(set(REFERENCES)))
+    nodesattributes = sorted(
+        nodesattributes, key=lambda x: x.attributes["node.unique.name"]
+    )
     if args.json:
         print(json.dumps([asdict(x) for x in nodesattributes]))
     else:
