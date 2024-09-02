@@ -11,6 +11,7 @@ from . import (
     entry_githubrunner,
     entry_gitlab_runner,
     entry_go,
+    entry_nodenametoid,
     entry_port,
     entry_taskexec,
     entry_vardir,
@@ -67,12 +68,13 @@ def cli():
 
 
 cli.add_command(entry_constrainteval.cli)
-cli.add_command(entry_go.cli)
 cli.add_command(entry_cp.cli)
 cli.add_command(entry_dockers.cli)
 cli.add_command(entry_downloadrelease.cli)
 cli.add_command(entry_githubrunner.cli)
 cli.add_command(entry_gitlab_runner.cli)
+cli.add_command(entry_go.cli)
+cli.add_command(entry_nodenametoid.cli)
 cli.add_command(entry_port.cli)
 cli.add_command(entry_taskexec.cli)
 cli.add_command(entry_vardir.cli)
