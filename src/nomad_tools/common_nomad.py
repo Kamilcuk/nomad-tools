@@ -38,7 +38,7 @@ def nomad_find_job(id: str, namespace: Optional[str] = None):
         os.environ[NOMAD_NAMESPACE] = mynomad.namespace = found.Namespace
     else:
         try:
-            mynomad.get(f"job/{id}")
+            mynomad.get(f"job/{nomadlib.urlquote(id)}")
         except JobNotFound:
             raise NoJobFound(f"Job named {id!r} not found in {namespace} namespace")
     return id

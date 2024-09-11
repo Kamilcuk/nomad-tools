@@ -20,7 +20,7 @@ Set of tools and utilities to ease interacting with HashiCorp Nomad scheduling s
   * [`githubrunner` - WIP dynamically schedule GitHub actions jobs](#githubrunner---wip-dynamically-schedule-github-actions-jobs)
   * [`dockers` - list docker images referenced by Nomad job](#dockers---list-docker-images-referenced-by-nomad-job)
   * [`downloadrelease` - download specific Nomad executable version](#downloadrelease---download-specific-nomad-executable-version)
-  * [`taskexec` - find allocation and task matching parameters and maybe execute a command in it](#taskexec---find-allocation-and-task-matching-parameters-and-maybe-execute-a-command-in-it)
+  * [`task` - find task and allocation and execute action on it](#task---find-task-and-allocation-and-execute-action-on-it)
   * [`nodenametoid` - convert node name to id](#nodenametoid---convert-node-name-to-id)
   * [import nomad_tools](#import-nomad_tools)
 * [History](#history)
@@ -314,7 +314,7 @@ INFO:nomad_tools.nomad_downloadrelease:Downloading https://releases.hashicorp.co
 INFO:nomad_tools.nomad_downloadrelease:https://releases.hashicorp.com/nomad/1.6.3/nomad_1.6.3_linux_amd64.zip -> -rwxr-xr-x 101.8MB nomad1.6.3
 ```
 
-## `taskexec` - find allocation and task matching parameters and maybe execute a command in it
+## `task` - find task and allocation and execute action on it
 
 `nomad alloc exec` didn't met my expectations. It is boring and tedious to find an allocation ID
 and then copy it in the terminal. There is also no bash completion for task names.
@@ -322,10 +322,16 @@ and then copy it in the terminal. There is also no bash completion for task name
 I decided I want to have advanced filtering, where given a job name and node name some tool
 automatically finds an allocation and task to copy from.
 
-Given a system job promtail running on all machines, `nomadtools taskexec -j promtail -n host1 bash -l`
+Given a system job promtail running on all machines, `nomadtools task -j promtail -n host1 exec bash -l`
 will drop into a bash shell inside promtail job allocation running on host1.
 
-This tool can be used to get a shell to the chosen allocation. Shell completion works.
+This tool can be used to get a shell to the chosen allocation.
+
+Subcommands:
+  - `exec`   Execute a command inside the allocation
+  - `json`   Output found allocations and task names in json form
+  - `path`   Output in the form properly escaped for use with nomadtools cp
+  - `xargs`  Output in the form -task <task> <allocid> that is usable with xargs nomad alloc
 
 ## `nodenametoid` - convert node name to id
 
