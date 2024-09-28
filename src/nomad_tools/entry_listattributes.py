@@ -2,57 +2,53 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Dict, List, Tuple
+from typing import Optional, Tuple
 
 import click
 import clickdc
 
-from .common import common_options, mynomad, verbose_option
+from . import entry_constrainteval
+from .common import common_options, verbose_option
 from .common_click import completor
-from .entry_constrainteval import Args, NodesAttributes
-from .mytabulate import mytabulate
+from .entry_constrainteval import ConstraintArgs, NodeCacheArgs, NodesAttributes
+
+
+def get_all_nodes_attributes(args: Optional[NodeCacheArgs] = None):
+    args = args or NodeCacheArgs()
+    nodesattributes = NodesAttributes.load(args)
+    allattributes = sorted(list(set(y for x in nodesattributes for y in x.attributes)))
+    return allattributes
 
 
 @click.command(
     "listattributes",
     help="""
-List attributes of a specific node or all nodes.
-Works similarly to constrainteval.
+List nodes that have given attributes and show these attributes values.
+
+With no arguments, lists all possible attributes in all nodes.
+
+Alias to constrainteval arg1 is_set '' arg2 is_set '' ...
 """,
 )
 @click.argument(
-    "nodenameorid",
+    "attributes",
     nargs=-1,
-    shell_complete=completor(lambda: [v["Name"] for v in mynomad.get("nodes")]),
+    shell_complete=completor(get_all_nodes_attributes),
 )
-@clickdc.adddc("args", Args)
+@clickdc.adddc("args", NodeCacheArgs)
 @verbose_option()
 @common_options()
-def cli(args: Args, nodenameorid: Tuple[str, ...]):
+def cli(args: NodeCacheArgs, attributes: Tuple[str, ...]):
     logging.basicConfig()
-    nodesattributes = NodesAttributes.load(args)
-    arr: List[Dict[str, str]] = []
-    if nodenameorid:
-        for input in nodenameorid:
-            node = next(
-                node
-                for node in nodesattributes
-                if node.attributes["node.unique.name"] == input
-                or node.attributes["node.unique.id"] == input
-            )
-            arr.append(node.attributes)
+    if attributes:
+        return entry_constrainteval.main(
+            args,
+            ConstraintArgs(tuple(y for x in attributes for y in [x, "is_set", ""])),
+        )
     else:
-        # Get all attributes of all nodes.
-        allattributes: Dict[str, str] = {}
-        for x in nodesattributes:
-            allattributes.update(x.attributes)
-        arr.append(allattributes)
-    allkeys: List[str] = sorted(list(set(y for x in arr for y in x.keys())))
-    output: List[List[str]] = [
-        ["name", *allkeys],
-        *[[x["node.unique.name"], *[str(x.get(k, "")) for k in allkeys]] for x in arr],
-    ]
-    if args.json:
-        print(json.dumps(arr))
-    else:
-        print(mytabulate(output))
+        allattributes = get_all_nodes_attributes()
+        if args.json:
+            print(json.dumps(allattributes))
+        else:
+            for x in allattributes:
+                print(x)
