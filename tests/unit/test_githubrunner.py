@@ -1,4 +1,3 @@
-import pytest
 import yaml
 
 from tests.testlib import run_nomadt

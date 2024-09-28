@@ -30,8 +30,9 @@ integration_tests:
 paralell_integration_tests:
 	./integration_tests.sh -n auto $(ARGS)
 
+importtime: ARGS=entry
 importtime:
-	python -X importtime -c 'import nomad_tools.entrypoint' 2>build/importtime.log
+	python -X importtime -c 'import nomad_tools.$(ARGS)' 2>build/importtime.log
 	tuna build/importtime.log
 
 try_docker_integration_test:

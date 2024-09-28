@@ -12,6 +12,7 @@ from . import (
     entry_gitlab_runner,
     entry_go,
     entry_listattributes,
+    entry_listnodeattributes,
     entry_nodenametoid,
     entry_port,
     entry_task,
@@ -76,6 +77,7 @@ cli.add_command(entry_githubrunner.cli)
 cli.add_command(entry_gitlab_runner.cli)
 cli.add_command(entry_go.cli)
 cli.add_command(entry_listattributes.cli)
+cli.add_command(entry_listnodeattributes.cli)
 cli.add_command(entry_nodenametoid.cli)
 cli.add_command(entry_port.cli)
 cli.add_command(entry_task.cli)

@@ -103,26 +103,34 @@ def operator_complete(
 
 
 @dataclass
-class Args:
-    no_cache: bool = clickdc.option(help="Set to disable cache")
+class NodeCacheArgs:
+    no_cache: bool = clickdc.option(help="Set to disable cache", show_default=True)
     cache: Path = clickdc.option(
         type=click.Path(dir_okay=False, writable=True, path_type=Path),
         default=Path().home() / ".cache/nomadtools/nodes.json",
-        help="Cache file location. Default: ~/.cache/nomadtools/nodes.json",
+        help="Cache file location",
+        show_default=True,
     )
     cachetime: float = clickdc.option(
         help="Number of seconds the cache if valid for.",
         default=600.0,
+        show_default=True,
     )
     json: bool = clickdc.option(
-        "-j", help="Output matched nodes information with attributes in json"
+        "-j",
+        help="Output matched nodes information with attributes in json",
+        show_default=True,
     )
     parallel: int = clickdc.option(
         "-P",
         default=20,
         help="When getting all nodes metadata, make this many connections in parallel.",
+        show_default=True,
     )
-    verbose: bool = clickdc.option("-v")
+    verbose: bool = clickdc.option(
+        "-v",
+        show_default=True,
+    )
 
 
 @dataclass
@@ -202,7 +210,7 @@ class NodeAttributes:
 
 class NodesAttributes(List[NodeAttributes]):
     @staticmethod
-    def __download(args: Args) -> NodesAttributes:
+    def __download(args: NodeCacheArgs) -> NodesAttributes:
         nodes: List[dict] = mynomad.get("nodes")
         nodesid = [x["ID"] for x in nodes]
         with ThreadPool(args.parallel) as pool:
@@ -228,7 +236,7 @@ class NodesAttributes(List[NodeAttributes]):
         )
         return ret
 
-    def __save_to_cache(self, args: Args):
+    def __save_to_cache(self, args: NodeCacheArgs):
         if args.no_cache:
             return
         data = {
@@ -244,7 +252,7 @@ class NodesAttributes(List[NodeAttributes]):
             log.exception(f"Error saving nodes cache to {args.cache}")
 
     @staticmethod
-    def __load_cache(args: Args) -> Optional[NodesAttributes]:
+    def __load_cache(args: NodeCacheArgs) -> Optional[NodesAttributes]:
         if args.no_cache:
             return
         try:
@@ -270,7 +278,7 @@ class NodesAttributes(List[NodeAttributes]):
             log.exception(f"Error loading nodes cache from {args.cache}")
 
     @classmethod
-    def load(cls, args: Args) -> NodesAttributes:
+    def load(cls, args: NodeCacheArgs) -> NodesAttributes:
         nodes = cls.__load_cache(args)
         if nodes:
             return nodes
@@ -301,6 +309,9 @@ def grouper(thelist: List[str], count: int) -> List[List[str]]:
 
     The 'regexp' is evaluted using python 're' module.
 
+    Additional attributes with a leading dot are available.
+    These are the fields from JSON Nomad API response as-is.
+
     \b
     Examples:
         %(prog)s attr.os.name
@@ -312,11 +323,15 @@ def grouper(thelist: List[str], count: int) -> List[List[str]]:
     % dict(prog="nomadtools constrainteval"),
     epilog=EPILOG,
 )
-@clickdc.adddc("args", Args)
+@clickdc.adddc("args", NodeCacheArgs)
 @clickdc.adddc("constraintsargs", ConstraintArgs)
 @verbose_option()
 @common_options()
-def cli(args: Args, constraintsargs: ConstraintArgs):
+def cli(args: NodeCacheArgs, constraintsargs: ConstraintArgs):
+    return main(args, constraintsargs)
+
+
+def main(args: NodeCacheArgs, constraintsargs: ConstraintArgs):
     logging.basicConfig()
     nodesattributes = NodesAttributes.load(args)
     # Group attributes in groups of 3 for constraints.
