@@ -16,7 +16,7 @@ from . import (
     entry_nodenametoid,
     entry_port,
     entry_task,
-    entry_topology,
+    entry_info,
     entry_vardir,
     entry_watch,
 )
@@ -81,7 +81,7 @@ cli.add_command(entry_listattributes.cli)
 cli.add_command(entry_listnodeattributes.cli)
 cli.add_command(entry_nodenametoid.cli)
 cli.add_command(entry_port.cli)
-cli.add_command(entry_topology.cli)
+cli.add_command(entry_info.cli)
 cli.add_command(entry_task.cli)
 cli.add_command(entry_vardir.cli)
 cli.add_command(entry_watch.cli)

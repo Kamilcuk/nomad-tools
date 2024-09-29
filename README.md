@@ -9,10 +9,11 @@ Set of tools and utilities to ease interacting with HashiCorp Nomad scheduling s
 * [Installation](#installation)
   * [Shell completion](#shell-completion)
 * [Usage](#usage)
-  * [watch - get all logs and events of a Nomad job in terminal](#watch---get-all-logs-and-events-of-a-nomad-job-in-terminal)
-  * [go - create, run and watch a Nomad job from command line](#go---create-run-and-watch-a-nomad-job-from-command-line)
+  * [`watch` - get all logs and events of a Nomad job in terminal](#watch---get-all-logs-and-events-of-a-nomad-job-in-terminal)
+  * [`go` - create, run and watch a Nomad job from command line](#go---create-run-and-watch-a-nomad-job-from-command-line)
   * [`constrainteval` - evaluate constraint in command line](#constrainteval---evaluate-constraint-in-command-line)
-  * [`listattributes` - list all available node attributes on number of nodes](#listattributes---list-all-available-node-attributes-on-number-of-nodes)
+  * [`listattributes` - List nodes with given attributes or show all available attributes.](#listattributes---list-nodes-with-given-attributes-or-show-all-available-attributes)
+  * [`listnodeattributes` - list all available node attributes](#listnodeattributes---list-all-available-node-attributes)
   * [`port` - list ports allocated by job or allocation](#port---list-ports-allocated-by-job-or-allocation)
   * [`vardir` - manipulate nomad variable keys as files](#vardir---manipulate-nomad-variable-keys-as-files)
   * [`cp` - copy files to/from/between nomad allocations](#cp---copy-files-tofrombetween-nomad-allocations)
@@ -22,6 +23,7 @@ Set of tools and utilities to ease interacting with HashiCorp Nomad scheduling s
   * [`downloadrelease` - download specific Nomad executable version](#downloadrelease---download-specific-nomad-executable-version)
   * [`task` - find task and allocation and execute action on it](#task---find-task-and-allocation-and-execute-action-on-it)
   * [`nodenametoid` - convert node name to id](#nodenametoid---convert-node-name-to-id)
+  * [`info topology` - show some information about Nomad node usage](#info-topology---show-some-information-about-nomad-node-usage)
   * [import nomad_tools](#import-nomad_tools)
 * [History](#history)
 * [Contributing](#contributing)
@@ -71,7 +73,7 @@ completion installation instruction.
 This module installs command line tool `nomadtools` with several modes of
 operation:
 
-## watch - get all logs and events of a Nomad job in terminal
+## `watch` - get all logs and events of a Nomad job in terminal
 
 `nomadtools watch` is meant to watch over a job change that you type in
 terminal. It prints all relevant messages - messages about allocation,
@@ -102,7 +104,7 @@ status (if there is one task).
 
 Internally, watch uses Nomad event stream to get the events in real time.
 
-## go - create, run and watch a Nomad job from command line
+## `go` - create, run and watch a Nomad job from command line
 
 Mimics operation of `docker run`, it is built on top of `watch` mode to
 execute a single Nomad job created dynamically from command line arguments.
@@ -142,7 +144,7 @@ evaluating the constraint given on command line arguments. Useful for
 searching for which hosts contain what value of a attribute.
 
 ```
-$ nomadtools constrainteval attr.cpu.arch
+$ nomadtools constrainteval '${attr.cpu.arch}' = amd64
 name   attr.cpu.arch
 node1  amd64
 node2  amd64
@@ -153,7 +155,18 @@ attributes of nodes downloaded from Nomad. This is used to speed up. The
 program needs to make one query for every single node in Nomad, which for a
 lot of nodes is costly.
 
-## `listattributes` - list all available node attributes on number of nodes
+## `listattributes` - List nodes with given attributes or show all available attributes.
+
+```
+$ nomadtools listattributes attr.cpu.arch
+name   attr.cpu.arch
+node1  amd64
+node2  amd64
+```
+
+Bash completion works.
+
+## `listnodeattributes` - list all available node attributes
 
 Lists all node attributes or attribute of given nodes.
 Additionally with a leading dot lists the whole json return from Nomad API.
@@ -161,7 +174,7 @@ Additionally with a leading dot lists the whole json return from Nomad API.
 This is meant to be used with `grep` and other unix tools for easy parsing.
 
 ```
-$ nomadtools listattributes | grep datacenter
+$ nomadtools listnodeattributes node1 | grep datacenter
 dc.datacenter                                   dc
 ```
 
@@ -338,6 +351,13 @@ Subcommands:
 ```
 $ nomadtools nodenametoid node1
 3e50c2ef-16bd-0253-6635-1a55c25e74ca
+```
+
+## `info topology` - show some information about Nomad node usage
+
+```
+$ nomadtools info topology
+dc node1 ready 2000B/15988MB 1000MHz/12000MHz 1allocs [mariadb.mariadb[0] mariadb services 2000MB 1000MHz]
 ```
 
 ## import nomad_tools

@@ -5,6 +5,7 @@ from typing import List
 
 import click
 
+from .aliasedgroup import AliasedGroup
 from . import common_click
 from .common_nomad import mynomad
 
@@ -12,12 +13,18 @@ log = logging.getLogger(__name__)
 
 
 @click.command(
-    "topology",
-    help="Like the topology web interface",
+    "info",
+    cls=AliasedGroup,
+    help="Get information about current Nomad state",
 )
 @common_click.common_options()
 @common_click.verbose_option()
 def cli():
+    pass
+
+
+@cli.command(help="Like topology web interface")
+def topology():
     logging.basicConfig()
     allocations = mynomad.get(
         "allocations", params=dict(resources=True, task_states=False)
