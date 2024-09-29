@@ -267,7 +267,7 @@ Find task inside an allocation given command line arguments and execute an actio
 """,
 )
 @clickdc.adddc("findtask", FindTask)
-@common_click.common_options()
+@common_click.help_h_option()
 @common_click.verbose_option()
 def cli(findtask: FindTask):
     logging.basicConfig()
@@ -333,7 +333,7 @@ Examples:
     nomadtools task -j mail exec bash -l
 """,
 )
-@common_click.common_options()
+@common_click.help_h_option()
 @clickdc.adddc("cmd", Cmd)
 def mode_exec(cmd: Cmd):
     for t in FINDTASK.find_tasks():
@@ -352,7 +352,7 @@ Examples:
   nomad alloc logs $(nomadtools task -j mail xargs) -stderr
 """,
 )
-@common_click.common_options()
+@common_click.help_h_option()
 @click.option("-0", "--zero", is_flag=True)
 @click.argument("args", nargs=-1, type=clickforward.FORWARD)
 def mode_xargs(zero: bool, args: Tuple[str, ...]):
@@ -368,7 +368,7 @@ def mode_xargs(zero: bool, args: Tuple[str, ...]):
     "json",
     help="Output found allocations and task names in json form",
 )
-@common_click.common_options()
+@common_click.help_h_option()
 def mode_json():
     for t in FINDTASK.find_tasks():
         print(json.dumps(t.asdict()))
@@ -378,7 +378,7 @@ def mode_json():
     "ls",
     help="Output found allocations and task names",
 )
-@common_click.common_options()
+@common_click.help_h_option()
 def mode_ls():
     for t in FINDTASK.find_tasks():
         print(t.alloc.ID, t.task)
@@ -409,7 +409,7 @@ Examples:
     nomadtools cp "$(nomadtools task -j mail path /etc/fstab)" ./fstab
 """,
 )
-@common_click.common_options()
+@common_click.help_h_option()
 @click.argument("path", default="", shell_complete=task_path_completor)
 def mode_print(path: str):
     for t in FINDTASK.find_tasks():

@@ -17,7 +17,7 @@ log = logging.getLogger(__name__)
     cls=AliasedGroup,
     help="Get information about current Nomad state",
 )
-@common_click.common_options()
+@common_click.help_h_option()
 @common_click.verbose_option()
 def cli():
     pass

@@ -13,7 +13,7 @@ from zipfile import ZipFile
 import click
 import requests
 
-from .common_click import common_options
+from .common_click import help_h_option
 
 log = logging.getLogger(__name__)
 
@@ -85,7 +85,7 @@ Examples:
     is_flag=True,
     help="Instead of downloading, only show the chosen version",
 )
-@common_options()
+@help_h_option()
 def cli(
     pinversion: Optional[str],
     arch: str,

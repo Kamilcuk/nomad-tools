@@ -12,7 +12,7 @@ import click.shell_completion
 from . import nomadlib
 from .common import (
     alias_option,
-    common_options,
+    help_h_option,
     mynomad,
     namespace_option,
     nomad_find_job,
@@ -135,7 +135,7 @@ Exits with the following exit status:
     type=re.compile,
     help="Show only ports which name matches this regex.",
 )
-@common_options()
+@help_h_option()
 @namespace_option()
 @click.argument("id", shell_complete=id_completor)
 @click.argument("label", required=False)

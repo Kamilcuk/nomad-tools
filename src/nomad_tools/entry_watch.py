@@ -46,7 +46,7 @@ from typing_extensions import override
 
 from . import colors, exit_on_thread_exception, flagdebug, nomaddbjob, nomadlib
 from .common_base import andjoin, cached_property, composed, eprint
-from .common_click import common_options, complete_set_namespace
+from .common_click import help_h_option, complete_set_namespace
 from .common_nomad import (
     NoJobFound,
     complete_job,
@@ -1967,7 +1967,7 @@ Written by Kamil Cukrowski 2024. Licensed under GNU GPL version 3 or later.
 @flagdebug.click_debug_option("NOMADTOOLS_DEBUG")
 @clickdc.adddc("args", Args)
 @namespace_option()
-@common_options()
+@help_h_option()
 def cli(args: Args):
     signal.signal(signal.SIGUSR1, print_all_threads_stacktrace)
     exit_on_thread_exception.install()

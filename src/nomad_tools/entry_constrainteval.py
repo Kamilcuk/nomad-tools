@@ -18,7 +18,7 @@ from click.shell_completion import CompletionItem
 from packaging.version import Version
 
 from .common import mynomad
-from .common_click import EPILOG, common_options, verbose_option
+from .common_click import EPILOG, help_h_option, verbose_option
 from .mytabulate import mytabulate
 
 log = logging.getLogger(__name__)
@@ -326,7 +326,7 @@ def grouper(thelist: List[str], count: int) -> List[List[str]]:
 @clickdc.adddc("args", NodeCacheArgs)
 @clickdc.adddc("constraintsargs", ConstraintArgs)
 @verbose_option()
-@common_options()
+@help_h_option()
 def cli(args: NodeCacheArgs, constraintsargs: ConstraintArgs):
     return main(args, constraintsargs)
 
