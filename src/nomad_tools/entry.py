@@ -3,26 +3,9 @@ import click
 import clickforward
 from click.shell_completion import BashComplete
 
-from . import (
-    entry_constrainteval,
-    entry_cp,
-    entry_dockers,
-    entry_downloadrelease,
-    entry_githubrunner,
-    entry_gitlab_runner,
-    entry_go,
-    entry_listattributes,
-    entry_listnodeattributes,
-    entry_nodenametoid,
-    entry_port,
-    entry_task,
-    entry_info,
-    entry_vardir,
-    entry_watch,
-)
-from .common_click import EPILOG, common_options, main_options
+from .aliasedlazygroup import AliasedLazyGroup
+from .common_click import EPILOG, help_h_option, main_options
 from .common_nomad import namespace_option
-from .aliasedgroup import AliasedGroup
 
 clickforward.init()
 
@@ -60,35 +43,37 @@ BashComplete.source_template = r"""\
     %(complete_func)s_setup;
 """
 
+subcommands = """
+    constrainteval
+    cp
+    dockers
+    downloadrelease
+    githubrunner
+    gitlab-runner
+    go
+    info
+    listattributes
+    listnodeattributes
+    nodenametoid
+    port
+    task
+    vardir
+    watch
+    """.split()
+
 
 @click.command(
     "nomadtools",
-    cls=AliasedGroup,
+    cls=AliasedLazyGroup,
+    lazy_subcommands={cmd: f"{__package__}.entry_{cmd.replace('-', '_')}.cli" for cmd in subcommands},
     help="Collection of useful tools for HashiCorp Nomad.",
     epilog=EPILOG,
 )
 @namespace_option()
-@common_options()
+@help_h_option()
 @main_options()
 def cli():
     pass
-
-
-cli.add_command(entry_constrainteval.cli)
-cli.add_command(entry_cp.cli)
-cli.add_command(entry_dockers.cli)
-cli.add_command(entry_downloadrelease.cli)
-cli.add_command(entry_githubrunner.cli)
-cli.add_command(entry_gitlab_runner.cli)
-cli.add_command(entry_go.cli)
-cli.add_command(entry_listattributes.cli)
-cli.add_command(entry_listnodeattributes.cli)
-cli.add_command(entry_nodenametoid.cli)
-cli.add_command(entry_port.cli)
-cli.add_command(entry_info.cli)
-cli.add_command(entry_task.cli)
-cli.add_command(entry_vardir.cli)
-cli.add_command(entry_watch.cli)
 
 
 def main():

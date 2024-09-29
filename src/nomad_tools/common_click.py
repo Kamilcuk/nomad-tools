@@ -71,10 +71,8 @@ def main_options():
     )
 
 
-def common_options():
-    return composed(
-        click.help_option("-h", "--help"),
-    )
+def help_h_option():
+    return click.help_option("-h", "--help")
 
 
 def verbose_option():

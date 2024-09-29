@@ -8,7 +8,7 @@ import click
 import clickdc
 
 from . import entry_constrainteval
-from .common import common_options, verbose_option
+from .common import help_h_option, verbose_option
 from .common_click import completor
 from .entry_constrainteval import ConstraintArgs, NodeCacheArgs, NodesAttributes
 
@@ -37,7 +37,7 @@ Alias to constrainteval arg1 is_set '' arg2 is_set '' ...
 )
 @clickdc.adddc("args", NodeCacheArgs)
 @verbose_option()
-@common_options()
+@help_h_option()
 def cli(args: NodeCacheArgs, attributes: Tuple[str, ...]):
     logging.basicConfig()
     if attributes:

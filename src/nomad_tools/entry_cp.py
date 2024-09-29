@@ -29,7 +29,7 @@ from typing_extensions import Protocol, override
 from . import nomadlib, taskexec
 from .common import (
     cached_property,
-    common_options,
+    help_h_option,
     mynomad,
     namespace_option,
     nomad_find_job,
@@ -814,7 +814,7 @@ Written by Kamil Cukrowski 2023. Licensed under GNU GPL version or later.
 """,
 )
 @namespace_option()
-@common_options()
+@help_h_option()
 @clickdc.adddc("args", Args)
 def cli(args: Args):
     global ARGS

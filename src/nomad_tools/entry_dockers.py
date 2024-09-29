@@ -81,7 +81,7 @@ class Args:
     `nomadtools dockers ./file.nomad.hcl | xargs docker pull`.
     """,
 )
-@common.common_options()
+@common.help_h_option()
 @clickdc.adddc("args", Args)
 def cli(args: Args):
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO)

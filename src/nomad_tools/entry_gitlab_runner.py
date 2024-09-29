@@ -21,7 +21,7 @@ import yaml
 
 from . import entry_watch, nomadlib, taskexec
 from .aliasedgroup import AliasedGroup
-from .common import (cached_property, common_options, get_package_file,
+from .common import (cached_property, help_h_option, get_package_file,
                      get_version, mynomad, quotearr)
 from .nomadlib.datadict import DataDict
 from .nomadlib.types import Job, JobTask, JobTaskConfig
@@ -679,7 +679,7 @@ The value defaults to CUSTOM_ENV_CI_RUNNER_ID which is set to the unique ID of t
     envvar="CUSTOM_ENV_CI_RUNNER_ID",
     show_default=True,
 )
-@common_options()
+@help_h_option()
 def cli(verbose: int, configpath: Path, runner_id: int):
     # Read configuration
     configcontent = configpath.read_text()

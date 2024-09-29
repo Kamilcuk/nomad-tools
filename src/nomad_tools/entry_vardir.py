@@ -20,7 +20,7 @@ from typing_extensions import override
 
 from . import nomadlib
 from .aliasedgroup import AliasedGroup
-from .common import andjoin, common_options, mynomad, namespace_option
+from .common import andjoin, help_h_option, mynomad, namespace_option
 from .nomadlib.connection import VariableConflict
 
 log = logging.getLogger(__file__)
@@ -404,7 +404,7 @@ Written by Kamil Cukrowski 2023. All rights reserved.
 )
 @click.option("-v", "--verbose", is_flag=True)
 @namespace_option()
-@common_options()
+@help_h_option()
 @click.option(
     "--test",
     type=click.Path(dir_okay=False, writable=True, path_type=Path),

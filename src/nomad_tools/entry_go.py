@@ -23,7 +23,7 @@ import dotenv
 
 from . import entry_watch, taskexec
 from .common_base import NOMAD_NAMESPACE, quotearr
-from .common_click import EPILOG, common_options
+from .common_click import EPILOG, help_h_option
 from .common_nomad import namespace_option
 
 clickforward.init()
@@ -632,7 +632,7 @@ Examples:
 """
     f"{EPILOG}",
 )
-@common_options()
+@help_h_option()
 @namespace_option()
 @clickdc.adddc("args", Args)
 @clickdc.adddc("notifyargs", entry_watch.NotifyOptions)

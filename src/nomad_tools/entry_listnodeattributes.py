@@ -7,7 +7,7 @@ from typing import Dict, List, Tuple
 import click
 import clickdc
 
-from .common import common_options, mynomad, verbose_option
+from .common import help_h_option, mynomad, verbose_option
 from .common_click import completor
 from .entry_constrainteval import NodeCacheArgs, NodesAttributes
 from .mytabulate import mytabulate
@@ -32,7 +32,7 @@ Uses same cache as constrainteval.
 )
 @clickdc.adddc("args", NodeCacheArgs)
 @verbose_option()
-@common_options()
+@help_h_option()
 def cli(args: NodeCacheArgs, nodenameorid: Tuple[str, ...]):
     logging.basicConfig()
     nodesattributes = NodesAttributes.load(args)
