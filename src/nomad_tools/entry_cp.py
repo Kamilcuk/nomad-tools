@@ -253,6 +253,8 @@ class NomadMypath(Mypath):
 
 ###############################################################################
 
+NOSPACE = CompletionItem("", type="nospace")
+
 
 @dataclass
 class ArgPath:
@@ -433,16 +435,13 @@ class ArgPath:
 
     @staticmethod
     def __filter(
-        arr: List[str], prefix: str, suffix: str = ":", addnospace: bool = True
+        arr: List[str], prefix: str, suffix: str = ":"
     ) -> List[CompletionItem]:
         """Filter list of string by prefix and convert to CompletionItem. Also remove duplicates"""
-        nospace = CompletionItem("", type="nospace")
         ret = [
             CompletionItem(shlex.quote(f"{x}{suffix}"))
             for x in sorted(list(set(x for x in arr if x.startswith(prefix))))
         ]
-        if ret and addnospace:
-            ret = [nospace] + ret
         return ret
 
     @staticmethod
@@ -460,9 +459,16 @@ class ArgPath:
         mypath = self.to_mypath()
         assert mypath.isnomad()
         assert isinstance(mypath, NomadMypath)
-        ret: List[str] = mypath.compgen()
-        addnospace: bool = len(ret) > 1 or any(x[-1] == "/" for x in ret)
-        return self.__filter(ret, self.path, suffix="", addnospace=addnospace)
+        return self.compgen_nomadmypath(mypath)
+
+    @classmethod
+    def compgen_nomadmypath(cls, mypath: NomadMypath) -> List[CompletionItem]:
+        arr: List[str] = mypath.compgen()
+        ret: List[CompletionItem] = cls.__filter(arr, mypath.path, suffix="")
+        addnospace: bool = len(ret) > 1 or any(x.value[-1] == "/" for x in ret)
+        if addnospace:
+            ret = [NOSPACE, *ret]
+        return ret
 
     def __complete_job_name(self, last: str, suffix: str = ":"):
         jobs = [nomadlib.Job(x) for x in mynomad.get("jobs", params=dict(prefix=last))]
@@ -496,7 +502,7 @@ class ArgPath:
             assert (
                 self.alloc is not None
             ), f"Internal error: self.alloc is None on allocation path: {self}"
-            return self.__filter([x.ID for x in self.__allocations], self.alloc)
+            return [NOSPACE, *self.__filter([x.ID for x in self.__allocations], self.alloc)]
         # If there is only a single matching allocation:task pair, just use it.
         try:
             # :ALLOCATION:PATH...
@@ -657,9 +663,11 @@ def copy_mode(src: Mypath, dst: Mypath):
                 src,
                 dst,
                 f"{srcscript} {src.quotepath()}",
-                "sh -c " + quote(f"{dstscript} >{dst.quotepath()}")
-                if not ARGS.dryrun
-                else f"true -- {quote(dstscript)} {dst.quotepath()}",
+                (
+                    "sh -c " + quote(f"{dstscript} >{dst.quotepath()}")
+                    if not ARGS.dryrun
+                    else f"true -- {quote(dstscript)} {dst.quotepath()}"
+                ),
             )
         else:
             exit(f"Not a file or directory: {dst}")
@@ -813,11 +821,13 @@ def cli(args: Args):
     ARGS = args
     verbose = 1 + ARGS.verbose - ARGS.quiet
     logging.basicConfig(
-        level=logging.DEBUG
-        if verbose > 1
-        else logging.INFO
-        if verbose > 0
-        else logging.WARNING,
+        level=(
+            logging.DEBUG
+            if verbose > 1
+            else logging.INFO
+            if verbose > 0
+            else logging.WARNING
+        ),
         format="%(levelname)s %(name)s:%(funcName)s:%(lineno)d: %(message)s",
     )
     log.debug(f"ARGS={ARGS}")
