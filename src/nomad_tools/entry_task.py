@@ -11,6 +11,7 @@ from dataclasses import dataclass, fields
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 import click
+import click.shell_completion
 import clickdc
 import clickforward
 from typing_extensions import get_args, get_origin
@@ -18,6 +19,7 @@ from typing_extensions import get_args, get_origin
 from . import common, common_click, nomadlib
 from .aliasedgroup import AliasedGroup
 from .common_nomad import mynomad, nomad_find_job
+from .entry_cp import ArgPath, NomadMypath
 
 log = logging.getLogger(__name__)
 
@@ -260,7 +262,9 @@ TASKS: List[TaskAlloc]
 @click.command(
     "task",
     cls=AliasedGroup,
-    help="Find task inside an allocation given command line arguments and execute an action in it.",
+    help="""
+Find task inside an allocation given command line arguments and execute an action in it.
+""",
 )
 @clickdc.adddc("findtask", FindTask)
 @common_click.common_options()
@@ -272,8 +276,8 @@ def cli(findtask: FindTask):
         click.get_current_context().fail(
             f"At least one option has to be present: {opts}"
         )
-    global TASKS
-    TASKS = findtask.find_tasks()
+    global FINDTASK
+    FINDTASK = findtask
 
 
 ###############################################################################
@@ -321,25 +325,39 @@ class Cmd:
 
 @cli.command(
     "exec",
-    help="Execute a command inside the allocation",
+    help="""
+Execute a command inside the allocation.
+
+\b
+Examples:
+    nomadtools task -j mail exec bash -l
+""",
 )
 @common_click.common_options()
 @clickdc.adddc("cmd", Cmd)
 def mode_exec(cmd: Cmd):
-    for task in TASKS:
-        cmd.run(task)
+    for t in FINDTASK.find_tasks():
+        cmd.run(t)
 
 
 @cli.command(
     "xargs",
-    help="Output in the form -task <task> <allocid> that is usable with xargs nomad alloc",
+    help="""
+Output in the form -task <task> <allocid> that is usable with xargs nomad alloc
+
+\b
+Examples:
+  nomadtools task -j mail xargs -0 logs -- -stderr | xargs -0 nomad alloc
+  nomadtools task -j mail xargs logs -- -stderr | xargs nomad alloc
+  nomad alloc logs $(nomadtools task -j mail xargs) -stderr
+""",
 )
 @common_click.common_options()
 @click.option("-0", "--zero", is_flag=True)
 @click.argument("args", nargs=-1, type=clickforward.FORWARD)
 def mode_xargs(zero: bool, args: Tuple[str, ...]):
-    for t in TASKS:
-        out = ["--task", t.task, t.alloc.ID, *args]
+    for t in FINDTASK.find_tasks():
+        out = ["-task=" + t.task, t.alloc.ID, *args]
         if zero:
             print("\0".join(out))
         else:
@@ -352,18 +370,49 @@ def mode_xargs(zero: bool, args: Tuple[str, ...]):
 )
 @common_click.common_options()
 def mode_json():
-    for t in TASKS:
+    for t in FINDTASK.find_tasks():
         print(json.dumps(t.asdict()))
 
 
 @cli.command(
-    "path",
-    help="Output in the form properly escaped for use with nomadtools cp",
+    "ls",
+    help="Output found allocations and task names",
 )
 @common_click.common_options()
-@click.argument("path", default="")
+def mode_ls():
+    for t in FINDTASK.find_tasks():
+        print(t.alloc.ID, t.task)
+
+
+def task_path_completor(
+    ctx: click.Context, param: click.Parameter, incomplete: str
+) -> List[click.shell_completion.CompletionItem]:
+    try:
+        assert ctx.parent
+        # Problem: I need to set FINDTASK to something.
+        # Solution: just call parent with parent arguments.
+        cli.invoke(ctx.parent)
+        t = FINDTASK.find_tasks()[0]
+        path = NomadMypath(incomplete, t.alloc.ID, t.task)
+        return ArgPath.compgen_nomadmypath(path)
+    except Exception:
+        return []
+
+
+@cli.command(
+    "path",
+    help="""
+Output in the form properly escaped for use with nomadtools cp.
+
+\b
+Examples:
+    nomadtools cp "$(nomadtools task -j mail path /etc/fstab)" ./fstab
+""",
+)
+@common_click.common_options()
+@click.argument("path", default="", shell_complete=task_path_completor)
 def mode_print(path: str):
-    for t in TASKS:
+    for t in FINDTASK.find_tasks():
         print(
             ":"
             + t.alloc.ID

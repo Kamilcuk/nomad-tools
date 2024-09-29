@@ -26,14 +26,18 @@ from .aliasedgroup import AliasedGroup
 
 clickforward.init()
 
-# Fix bash splitting completion on colon.
-# Use __reassemble_comp_words_by_ref from bash-completion.
-# Pass COMP_POINT as environment variable.
+# Problem: mising nospace handling in python.click.
+# Solution: custom bash completion code.
+# Problem: bash COMP_WORDBREAKS splits on colon `:`.
+# Solution: use bash-completion helpers.
 BashComplete.source_template = r"""\
     %(complete_func)s() {
         local cword words=()
+        # __reassemble_comp_words_by_ref renamed to _comp__reassemble_words in newer bash-completion
         if [[ $(type -t __reassemble_comp_words_by_ref) == function ]]; then
             __reassemble_comp_words_by_ref "=:" words cword
+        elif [[ $(type -t _comp__reassemble_words) == function ]]; then
+            _comp__reassemble_words "=:" words cword
         else
             words=("${COMP_WORDS[@]}")
             cword=${COMP_CWORD}
