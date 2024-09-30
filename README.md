@@ -4,7 +4,8 @@ Set of tools and utilities to ease interacting with HashiCorp Nomad scheduling s
 
 ## Table of Contents
 
-<!-- vim-markdown-toc GFM -->
+
+<!-- mtoc-start -->
 
 * [Installation](#installation)
   * [Shell completion](#shell-completion)
@@ -22,6 +23,10 @@ Set of tools and utilities to ease interacting with HashiCorp Nomad scheduling s
   * [`dockers` - list docker images referenced by Nomad job](#dockers---list-docker-images-referenced-by-nomad-job)
   * [`downloadrelease` - download specific Nomad executable version](#downloadrelease---download-specific-nomad-executable-version)
   * [`task` - find task and allocation and execute action on it](#task---find-task-and-allocation-and-execute-action-on-it)
+    * [`task exec` - execute a command inside the allocation](#task-exec---execute-a-command-inside-the-allocation)
+    * [`task json` - output found allocations and task names in json form](#task-json---output-found-allocations-and-task-names-in-json-form)
+    * [`task path` - output path in the form properly escaped for use with nomadtools cp](#task-path---output-path-in-the-form-properly-escaped-for-use-with-nomadtools-cp)
+    * [`task xargs` - output in the form -task <task> <allocid> that is usable with xargs nomad alloc](#task-xargs---output-in-the-form--task-task-allocid-that-is-usable-with-xargs-nomad-alloc)
   * [`nodenametoid` - convert node name to id](#nodenametoid---convert-node-name-to-id)
   * [`info topology` - show some information about Nomad node usage](#info-topology---show-some-information-about-nomad-node-usage)
   * [import nomad_tools](#import-nomad_tools)
@@ -30,7 +35,7 @@ Set of tools and utilities to ease interacting with HashiCorp Nomad scheduling s
   * [Running tests](#running-tests)
 * [License](#license)
 
-<!-- vim-markdown-toc -->
+<!-- mtoc-end -->
 
 If you use this package, wheather you like it or not, would you want something to improve,
 or you feel like talking, consider leaving your opinion on github discussions
@@ -340,11 +345,32 @@ will drop into a bash shell inside promtail job allocation running on host1.
 
 This tool can be used to get a shell to the chosen allocation.
 
-Subcommands:
-  - `exec`   Execute a command inside the allocation
-  - `json`   Output found allocations and task names in json form
-  - `path`   Output in the form properly escaped for use with nomadtools cp
-  - `xargs`  Output in the form -task <task> <allocid> that is usable with xargs nomad alloc
+### `task exec` - execute a command inside the allocation
+
+This internally calls `nomad alloc exec`.
+
+```
+$ nomadtools task -j mail exec bash -l
+root@main:/#
+```
+
+### `task json` - output found allocations and task names in json form
+
+### `task path` - output path in the form properly escaped for use with nomadtools cp
+
+```
+$ nomadtools cp "$(nomadtools task -j mail path /etc/fstab)" ./fstab
+INFO entry_cp.py:copy_mode:650: File :0c18e9aa-f053-cc3e-6fe3-3d23f159c2e5:mail:/etc/fstab -> ./fstab
+37.0  B 0:00:00 [73.3  B/s] [ <=>
+```
+
+### `task xargs` - output in the form -task <task> <allocid> that is usable with xargs nomad alloc
+
+```
+$ nomadtools task -j mail xargs -0 logs -- -stderr | xargs -0 nomad alloc
+$ nomadtools task -j mail xargs logs -- -stderr | xargs nomad alloc
+$ nomad alloc logs $(nomadtools task -j mail xargs) -stderr
+```
 
 ## `nodenametoid` - convert node name to id
 
