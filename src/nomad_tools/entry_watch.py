@@ -89,8 +89,10 @@ def print_all_threads_stacktrace(*_):
     out = "\n".join(x for x in "\n".join(text).splitlines() if x)
     eprint("\n\n" + out + "\n\n")
 
+
 def datetime_is_naive(d: datetime.datetime) -> bool:
     return d.tzinfo is None or d.tzinfo.utcoffset(d) is None
+
 
 ###############################################################################
 
@@ -273,6 +275,7 @@ class LogFormatter:
     mark = "{{log.mark}}>"
     post = "{{log.message}}{{log.colorreset}}"
     task = "{{log.task + '>' if log.task}}"
+    space = "{{' ' if not args.log_nospace}}"
 
     DEFAULT = (
         pre
@@ -288,7 +291,7 @@ class LogFormatter:
         O>45fbbd>v0>task1> hello world
     """
 
-    ONE = pre + mark + task + " " + post
+    ONE = pre + mark + task + space + post
     """
     Log format with -1 option.
         O>task1> hello world
@@ -398,6 +401,7 @@ class LogOptions:
         "-0", aliased=dict(log_format=LogFormatter.ZERO)
     )
     log_json: bool = clickdc.alias_option(aliased=dict(log_format=LogFormatter.JSON))
+    log_nospace: bool = clickdc.option(help="Do not print space on log lines")
     out: List[str] = clickdc.option(
         "-o",
         type=CommaList("all alloc stdout stderr eval deploy nolog none".split()),
