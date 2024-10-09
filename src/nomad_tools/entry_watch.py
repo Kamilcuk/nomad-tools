@@ -1956,6 +1956,10 @@ The mark in the log lines is equal to: 'deploy' for messages printed as
 a result of deployment, 'eval' for messages printed from evaluations,
 'A' from allocation, 'E' for stderr logs of a task and 'O' from stdout
 logs of a task.
+
+Some commands take argument of type JOB_ID_OR_FILE . If this argument is
+an existing file and that ends with .hcl .nomad or .json, the job name
+and optionally job namespaces are extracted from that file.
 """,
     epilog="""
 \b
@@ -1984,10 +1988,70 @@ def cli(args: Args):
     init_logging()
 
 
-cli_jobid = click.argument(
-    "jobid",
-    shell_complete=complete_job(),
-)
+class JobIdOrFile(click.ParamType):
+    # Problem: typing watch job ./file.nomad.hcl exist with no such job
+    # Solution: if the ifile is a file and it endsw ith hcl or nomad, get job name from the file.
+    name = "job_id_or_file"
+
+    def convert(
+        self, value: Any, param: Optional[click.Parameter], ctx: Optional[click.Context]
+    ) -> str:
+        exists = lambda : Path(value).exists()
+        job = None
+        if any(value.endswith(x) for x in ".hcl .nomad".split()) and exists():
+            try:
+                log.info(f"Extracting job name from file {value} using nomad command")
+                output = subprocess.check_output("nomad job run -output".split() + [value])
+                job = json.loads(output)
+            except subprocess.CalledProcessError:
+                pass
+            # Problem: some job files require variables
+            # Solution: just parse the file content with regex
+            if not job:
+                log.info(f"Extracting job name from file {value} using regex")
+                jobid = jobnamespace = None
+                with Path(value).open() as f:
+                    for line in f:
+                        if not jobid:
+                            m = re.match(r'^job\s*"(.*)"\s*{\s*$', line)
+                            if m:
+                                jobid = m[1]
+                        else:
+                            m = re.match(r'^\s*namespace\s*=\s*"(.*)"\s*$', line)
+                            if m:
+                                jobnamespace = m[1]
+                                break
+                            if re.match(r'^\s*group\s*".*', line):
+                                # Stop parsing the file if we get to groups
+                                break
+                if jobid:
+                    job = {}
+                    job["ID"] = jobid
+                    if jobnamespace:
+                        job["Namespace"] = jobnamespace
+        if value.endswith(".json") and exists():
+            log.info(f"Extracting job name from json file {value}")
+            with Path(value) as f:
+                job = json.load(f)
+        if job:
+            job = job.get("Job", job)
+            namespace = job.get("Namespace", None)
+            if namespace:
+                os.environ["NOMAD_NAMESPACE"] = mynomad.namespace = namespace
+            return job["ID"]
+        else:
+            return value
+
+    def shell_complete(
+        self, ctx: click.Context, param: click.Parameter, incomplete: str
+    ) -> List[CompletionItem]:
+        jobs = [CompletionItem(x["ID"]) for x in mynomad.get("jobs") if x["ID"].startswith(incomplete)]
+        if jobs:
+            return jobs
+        return [CompletionItem(incomplete, type="file")]
+
+
+cli_jobid = click.argument("jobid", metavar="JOB_ID_OR_FILE", type=JobIdOrFile())
 
 
 def cli_jobfile_disabled(name: str, help: str):
