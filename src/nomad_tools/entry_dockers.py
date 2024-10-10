@@ -50,7 +50,7 @@ def load_job_file(file: IO) -> nomadlib.Job:
 @dataclass
 class Args:
     verbose: int = clickdc.option("-v", count=True, help="Be verbose")
-    format: Optional[str] = clickdc.option(
+    format: str = clickdc.option(
         "-f",
         help="Passed to python .format()",
         show_default=True,

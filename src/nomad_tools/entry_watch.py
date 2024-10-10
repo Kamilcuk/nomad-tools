@@ -405,7 +405,9 @@ class LogOptions:
     )
     log_json: bool = clickdc.alias_option(aliased=dict(log_format=LogFormatter.JSON))
     log_nospace: bool = clickdc.option(help="Do not print space on log lines")
-    log_j: Any = clickdc.alias_option(aliased=dict(log_nospace=True, log_format=LogFormatter.ONE))
+    log_j: Any = clickdc.alias_option(
+        aliased=dict(log_nospace=True, log_format=LogFormatter.ONE)
+    )
     out: List[str] = clickdc.option(
         "-o",
         type=CommaList("all alloc stdout stderr eval deploy nolog none".split()),
@@ -2000,12 +2002,14 @@ class JobIdOrFile(click.ParamType):
     def convert(
         self, value: Any, param: Optional[click.Parameter], ctx: Optional[click.Context]
     ) -> str:
-        exists = lambda : Path(value).exists()
+        exists = Path(value).exists()
         job = None
-        if any(value.endswith(x) for x in ".hcl .nomad".split()) and exists():
+        if exists and any(value.endswith(x) for x in ".hcl .nomad".split()):
             try:
                 log.info(f"Extracting job name from file {value} using nomad command")
-                output = subprocess.check_output("nomad job run -output".split() + [value])
+                output = subprocess.check_output(
+                    "nomad job run -output".split() + [value]
+                )
                 job = json.loads(output)
             except subprocess.CalledProcessError:
                 pass
@@ -2033,9 +2037,9 @@ class JobIdOrFile(click.ParamType):
                     job["ID"] = jobid
                     if jobnamespace:
                         job["Namespace"] = jobnamespace
-        if value.endswith(".json") and exists():
+        if exists and value.endswith(".json"):
             log.info(f"Extracting job name from json file {value}")
-            with Path(value) as f:
+            with Path(value).open() as f:
                 job = json.load(f)
         if job:
             job = job.get("Job", job)
@@ -2049,7 +2053,11 @@ class JobIdOrFile(click.ParamType):
     def shell_complete(
         self, ctx: click.Context, param: click.Parameter, incomplete: str
     ) -> List[CompletionItem]:
-        jobs = [CompletionItem(x["ID"]) for x in mynomad.get("jobs") if x["ID"].startswith(incomplete)]
+        jobs = [
+            CompletionItem(x["ID"])
+            for x in mynomad.get("jobs")
+            if x["ID"].startswith(incomplete)
+        ]
         if jobs:
             return jobs
         return [CompletionItem(incomplete, type="file")]
