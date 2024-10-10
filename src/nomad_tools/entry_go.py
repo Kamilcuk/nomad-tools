@@ -31,13 +31,15 @@ log = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
+def trueornone(x: Optional[T]) -> Optional[T]:
+    return x if x else None
+
+
 def dict_remove_none(data: T) -> T:
     """Remove all elements that are set to None"""
     if isinstance(data, dict):
         ret = {
-            k: dict_remove_none(v)
-            for k, v in data.items()
-            if v is not None and v != {}
+            k: dict_remove_none(v) for k, v in data.items() if v is not None and v != {}
         }
     elif isinstance(data, list):
         ret = [dict_remove_none(e) for e in data if e is not None]
@@ -99,7 +101,22 @@ class JsonType(click.ParamType):
         self, value: Any, param: Optional[click.Parameter], ctx: Optional[click.Context]
     ) -> dict:
         """Entrypoint for click option conversion"""
-        return json.loads(value) if isinstance(value, str) else value
+        if not isinstance(value, str):
+            return value
+        return json.loads(value)
+
+
+class KvType(click.ParamType):
+    name = "K=V"
+
+
+def strs_to_kv(data: Tuple[str, ...]) -> Dict[str, str]:
+    """Split list of strings in the form of k=v to a dictionary"""
+    return {
+        k: v
+        for elem in data
+        for k, v in [elem.split("=", 1) if "=" in elem else (elem, "")]
+    }
 
 
 class JsonOrShellKvType(click.ParamType):
@@ -173,7 +190,7 @@ class Parsed:
     cmd: List[str]
 
 
-NAME_PREFIX = "nomad_tools_go_"
+NAME_PREFIX = "nomadtoolsgo_"
 
 
 @dataclass
@@ -196,7 +213,10 @@ class Args:
         type=int, multiple=True, help="Expose a port"
     )
     publish: Tuple[str, ...] = clickdc.option(
-        "-p", multiple=True, help="Publish container port to the host"
+        "-p",
+        multiple=True,
+        metavar="SRC:DST",
+        help="Publish container port to the host",
     )
     group_add: Optional[str] = clickdc.option(help="Add additional groups to join")
     env: Tuple[str, ...] = clickdc.option(
@@ -217,9 +237,11 @@ class Args:
         type=JsonOrShellKvType(
             snake_to_camel=True,
             map=dict(aud="Audience", ttl="TTL"),
-            transform=lambda x: x.update({"TTL": timestr_to_nanos(x["TTL"])})
-            if isinstance(x.get("TTL"), str)
-            else None,
+            transform=lambda x: (
+                x.update({"TTL": timestr_to_nanos(x["TTL"])})
+                if isinstance(x.get("TTL"), str)
+                else None
+            ),
         ),
         multiple=True,
         help="""
@@ -264,15 +286,10 @@ class Args:
     memorymaxmb: Optional[int] = clickdc.option(
         type=int, help="Memory max limit in MegaBytes"
     )
-    privileged: bool = clickdc.option(
-        is_flag=True, help="Add privileged=true to config"
-    )
-    pull: Optional[str] = clickdc.option(
-        type=click.Choice(["always", "missing"]),
-        help="When always, add force_pull=true to config",
-    )
+    privileged: Optional[bool] = clickdc.option(help="Add privileged=true to config")
+    force_pull: Optional[bool] = clickdc.option(help="Add force_pull=true to config")
     user: Optional[str] = clickdc.option("-u", help="Specify the user to execute as.")
-    tty: bool = clickdc.option("-t", is_flag=True, help="Add tty to config")
+    tty: Optional[bool] = clickdc.option("-t", help="Add tty to config")
     workdir: Optional[str] = clickdc.option("-w", help="Add work_dir to config")
     volume: Tuple[str, ...] = clickdc.option(
         multiple=True, help="Add volumes to config"
@@ -331,10 +348,14 @@ class Args:
     purge: bool = clickdc.option(
         "--rm", is_flag=True, help="After the job is run, purge the job from Nomad"
     )
-    output: bool = clickdc.option(
+    output: int = clickdc.option(
         "-O",
-        is_flag=True,
-        help="Instead of running the job, output Nomad job JSON specification.",
+        count=True,
+        help="""
+            Output the JSON Nomad job specification.
+            If specified once, will not run the job, only output.
+            If specified twice or more, will show the job and then run it.
+            """,
     )
     detach: bool = clickdc.option(is_flag=True, help="Run job in background")
     interactive: bool = clickdc.option(
@@ -380,7 +401,17 @@ class Args:
         (currently docker, exec, raw_exec, and java drivers).
         """
     )
-    #
+
+    meta: Tuple[str, ...] = clickdc.option(
+        type=KvType(), multiple=True, help="Add job meta"
+    )
+    group_meta: Tuple[str, ...] = clickdc.option(
+        type=KvType(), multiple=True, help="Add group meta"
+    )
+    task_meta: Tuple[str, ...] = clickdc.option(
+        type=KvType(), multiple=True, help="Add task meta"
+    )
+
     extra_config: Any = clickdc.option(
         type=JsonOrShellKvType(), default={}, help="Add extra JSON to config"
     )
@@ -413,46 +444,55 @@ class Args:
             "ID": name,
             "Datacenters": self.datacenters if self.datacenters else None,
             "Type": self.type,
-            "Constraints": [
-                {
-                    "LTarget": ll,
-                    "Operand": oo,
-                    "RTarget": rr,
-                }
-                for cc in self.constraint
-                for ll, oo, rr in [shlex.split(cc)]
-            ]
-            if self.constraint
-            else None,
+            "Constraints": (
+                [
+                    {
+                        "LTarget": ll,
+                        "Operand": oo,
+                        "RTarget": rr,
+                    }
+                    for cc in self.constraint
+                    for ll, oo, rr in [shlex.split(cc)]
+                ]
+                if self.constraint
+                else None
+            ),
+            "Meta": strs_to_kv(self.meta) if self.meta else None,
             "TaskGroups": [
                 {
                     "Name": name,
                     "Count": self.count,
+                    "Meta": strs_to_kv(self.group_meta) if self.group_meta else None,
                     "Networks": (
                         [
                             {
                                 "Mode": self.group_network_mode,
-                                "DynamicPorts": [
-                                    {
-                                        "HostNetwork": "default",
-                                        "Label": f"port_{port}",
-                                        "To": int(port),
-                                    }
-                                    for port in self.expose
-                                ]
-                                if self.expose
-                                else None,
-                                "ReservedPorts": [
-                                    {
-                                        "HostNetwork": "default",
-                                        "Label": f"port_{src}_{dst}",
-                                        "Value": int(dst),
-                                    }
-                                    for port in self.publish
-                                    for src, dst in [port.split(":", 1)]
-                                ]
-                                if self.publish
-                                else None,
+                                "DynamicPorts": (
+                                    [
+                                        {
+                                            "HostNetwork": "default",
+                                            "Label": f"port_{port}",
+                                            "To": int(port),
+                                        }
+                                        for port in self.expose
+                                    ]
+                                    if self.expose
+                                    else None
+                                ),
+                                "ReservedPorts": (
+                                    [
+                                        {
+                                            "HostNetwork": "default",
+                                            "Label": f"port_{src}_{dst}",
+                                            "To": int(src),
+                                            "Value": int(dst),
+                                        }
+                                        for port in self.publish
+                                        for src, dst in [port.split(":", 1)]
+                                    ]
+                                    if self.publish
+                                    else None
+                                ),
                             }
                         ]
                         if self.expose or self.publish
@@ -463,10 +503,15 @@ class Args:
                             "Name": name,
                             "Driver": self.driver,
                             "User": self.user,
+                            "Meta": (
+                                strs_to_kv(self.task_meta) if self.task_meta else None
+                            ),
                             "Config": {
-                                "entrypoint": shlex.split(self.entrypoint)
-                                if self.entrypoint is not None
-                                else None,
+                                "entrypoint": (
+                                    shlex.split(self.entrypoint)
+                                    if self.entrypoint is not None
+                                    else None
+                                ),
                                 "ports": (
                                     [f"port_{port}" for port in self.expose]
                                     + [
@@ -478,37 +523,33 @@ class Args:
                                     else None
                                 ),
                                 "command": self.command[0] if self.command else None,
-                                "args": self.command[1:]
-                                if len(self.command) > 1
-                                else None,
-                                "image": self.image if self.image else None,
-                                "volumes": self.volume if self.volume else None,
-                                "init": self.init if self.init else None,
-                                "privileged": self.privileged
-                                if self.privileged
-                                else None,
-                                "group_add": self.group_add if self.group_add else None,
-                                "cap_add": self.cap_add if self.cap_add else None,
-                                "cap_drop": self.cap_drop if self.cap_drop else None,
-                                "tty": self.tty if self.tty else None,
-                                **(
-                                    {"force_pull": True}
-                                    if self.pull == "always"
-                                    else {}
+                                "args": (
+                                    self.command[1:] if len(self.command) > 1 else None
                                 ),
+                                "image": trueornone(self.image),
+                                "volumes": trueornone(self.volume),
+                                "init": trueornone(self.init),
+                                "privileged": trueornone(self.privileged),
+                                "group_add": trueornone(self.group_add),
+                                "cap_add": trueornone(self.cap_add),
+                                "cap_drop": trueornone(self.cap_drop),
+                                "tty": trueornone(self.tty),
+                                "force_pull": trueornone(self.force_pull),
                                 "work_dir": self.workdir,
                                 "image_pull_timeout": self.image_pull_timeout,
                                 "auth": self.auth,
                                 "hostname": self.hostname,
-                                "mounts": self.mount + self.mountnfs
-                                if self.mount or self.mountnfs
-                                else None,
+                                "mounts": (
+                                    self.mount + self.mountnfs
+                                    if self.mount or self.mountnfs
+                                    else None
+                                ),
                                 "network_mode": self.network,
                                 **self.extra_config,
                             },
                             "kill_timeout": self.kill_timeout,
                             "kill_signal": self.kill_signal,
-                            "Templates": (self.template if self.template else None),
+                            "Templates": trueornone(self.template),
                             "Env": (
                                 {
                                     **{
@@ -544,16 +585,16 @@ class Args:
                                 or self.device
                                 else None
                             ),
-                            "RestartPolicy": {"Attempts": 0, "Mode": "fail"},
                             "Vault": self.vault,
                             "Consul": self.consul,
                             "Identity": self.identity[0] if self.identity else None,
-                            "Identities": self.identity[1:]
-                            if len(self.identity) > 1
-                            else None,
+                            "Identities": (
+                                self.identity[1:] if len(self.identity) > 1 else None
+                            ),
                             **self.extra_task,
                         }
                     ],
+                    "RestartPolicy": {"Attempts": 0, "Mode": "fail"},
                     "ReschedulePolicy": (
                         {"Unlimited": True}
                         if self.restart == "always"
@@ -607,6 +648,12 @@ class Interactive:
             os.kill(os.getpid(), signal.SIGINT)
 
 
+@click.command()
+@clickdc.adddc("logoptions", entry_watch.LogOptions)
+def default_logoptions(logoptions: entry_watch.LogOptions):
+    return logoptions
+
+
 @click.command(
     "go",
     help="""
@@ -623,9 +670,9 @@ val=var. See examples below.
 \b
 Examples:
     go --rm hello-world
-        Runs hello-world docker image.
     go --rm -m 3000 -e NAME=you alpine sh -c 'echo hello $NAME'
-        Runs alpine docker imge with 3G of memory and NAME environment variable
+    go --rm -OO --meta key=val --group-meta key2=val2 alpine sh -c 'env | grep NOMAD_'
+    go --rm -OO --extra-task '{"Meta":{"foo":"bar"}}' alpine sh -c 'env | grep NOMAD_'
     go --constraint '${attr.os.name} regexp Ubuntu' --driver raw_exec sh
     go --cores=3 --identity '{"name": "example", "aud": ["oidc.example.com"], "file": true, "change_mode": "signal", "change_signal": "SIGHUP", "TTL": "1h"}' --driver raw_exec echo hello
     go --rm --template "destination=local/script.sh data=$(printf "%q" "$(cat ./script.sh)")" alpine sh -c 'sh ${NOMAD_TASK_DIR}/script.sh'
@@ -635,9 +682,15 @@ Examples:
 @help_h_option()
 @namespace_option()
 @clickdc.adddc("args", Args)
+@clickdc.adddc("logoptions", entry_watch.LogOptions)
 @clickdc.adddc("notifyargs", entry_watch.NotifyOptions)
 @click.option("-v", "--verbose", is_flag=True)
-def cli(args: Args, notifyargs: entry_watch.NotifyOptions, verbose: bool):
+def cli(
+    args: Args,
+    notifyargs: entry_watch.NotifyOptions,
+    logoptions: entry_watch.LogOptions,
+    verbose: bool,
+):
     global ARGS
     ARGS = args
     if args.command[0].startswith("-"):
@@ -651,29 +704,36 @@ def cli(args: Args, notifyargs: entry_watch.NotifyOptions, verbose: bool):
     job: dict = dict_remove_none(par.job)
     log.debug(f"{job}")
     jobjson: str = json.dumps(job, indent=2, sort_keys=True)
-    if args.output:
+    if args.output == 1:
         print(jobjson)
-    else:
-        cmd: List[str] = [
-            *(["--verbose"] if verbose else []),
-            "--attach",
-            "--json",
-            "-0",
-            "--lines=-1",
-            *clickdc.to_args(notifyargs),
-            "start" if args.detach else "run",
-            "-",
-        ]
-        if args.purge:
-            assert not args.detach, "detach conflicts with purge"
-            cmd = ["--purge", *cmd]
-        if args.interactive:
-            assert not args.detach, "interactive with detach doesn't make sense"
-            wfd = Interactive(par).setup()
-            cmd = [f"--notifystarted={wfd}", *cmd]
-        with redirect_stdin_str(jobjson):
-            log.debug(f"+ {quotearr(cmd)}")
-            entry_watch.cli.main(args=cmd)
+        return
+    if args.output >= 2:
+        print(jobjson)
+    cmd: List[str] = [
+        *(["--verbose"] if verbose else []),
+        "--attach",
+        "--json",
+        "-0",
+        "--lines=-1",
+        *(
+            clickdc.to_args(logoptions)
+            if logoptions != default_logoptions([], standalone_mode=False)
+            else []
+        ),
+        *clickdc.to_args(notifyargs),
+        "start" if args.detach else "run",
+        "-",
+    ]
+    if args.purge:
+        assert not args.detach, "detach conflicts with purge"
+        cmd = ["--purge", *cmd]
+    if args.interactive:
+        assert not args.detach, "interactive with detach doesn't make sense"
+        wfd = Interactive(par).setup()
+        cmd = [f"--notifystarted={wfd}", *cmd]
+    with redirect_stdin_str(jobjson):
+        log.debug(f"+ nomadtools watch {quotearr(cmd)}")
+        entry_watch.cli.main(args=cmd)
 
 
 if __name__ == "__main__":
