@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import jinja2
 import base64
 import contextlib
 import datetime
@@ -23,6 +22,7 @@ import time
 import traceback
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import (
     Any,
     Callable,
@@ -40,27 +40,29 @@ from typing import (
 
 import click
 import clickdc
+import jinja2
 import requests
 from click.shell_completion import CompletionItem
 from typing_extensions import override
 
 from . import colors, exit_on_thread_exception, flagdebug, nomaddbjob, nomadlib
+from .aliasedgroup import AliasedGroup
 from .common_base import andjoin, cached_property, composed, eprint
-from .common_click import help_h_option, complete_set_namespace
+from .common_click import complete_set_namespace, help_h_option
 from .common_nomad import (
-    NoJobFound,
-    complete_job,
     completor,
     mynomad,
     namespace_option,
     nomad_find_job,
+    NoJobFound,
 )
 from .nomaddbjob import NomadDbJob
 from .nomadlib import Event, EventTopic, EventType, MyStrEnum, ns2dt
 from .nomadlib.types import strdict
-from .aliasedgroup import AliasedGroup
+
 
 log = logging.getLogger(__name__)
+
 
 ###############################################################################
 
@@ -283,7 +285,7 @@ class LogFormatter:
         + "{{log.id[:args.log_id_len]}}>"
         + "v{{log.jobversion}}>"
         + task
-        + " "
+        + space
         + post
     )
     """
@@ -322,7 +324,8 @@ class LogFormatter:
             )
             + ("watch>" if ARGS.verbose <= 0 else "%(module)s>")
             + ("%(lineno)03d>" if ARGS.verbose else "")
-            + " %(levelname)s %(message)s"
+            + ("" if ARGS.log_nospace else " ")
+            + "%(levelname)s %(message)s"
             + COLORS.reset
         )
 
@@ -402,6 +405,7 @@ class LogOptions:
     )
     log_json: bool = clickdc.alias_option(aliased=dict(log_format=LogFormatter.JSON))
     log_nospace: bool = clickdc.option(help="Do not print space on log lines")
+    log_j: Any = clickdc.alias_option(aliased=dict(log_nospace=True, log_format=LogFormatter.ONE))
     out: List[str] = clickdc.option(
         "-o",
         type=CommaList("all alloc stdout stderr eval deploy nolog none".split()),
