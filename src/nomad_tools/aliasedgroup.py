@@ -17,5 +17,4 @@ class AliasedGroup(click.Group):
     def resolve_command(self, ctx, args):
         # always return the full command name
         _, cmd, args = super().resolve_command(ctx, args)
-        assert cmd
-        return cmd.name, cmd, args
+        return cmd.name if cmd else None, cmd, args
