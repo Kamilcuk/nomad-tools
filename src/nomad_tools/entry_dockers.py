@@ -4,7 +4,7 @@ import shlex
 import subprocess
 import sys
 from dataclasses import dataclass
-from typing import IO, Any, Dict, List, Tuple
+from typing import IO, Any, Dict, List, Optional, Tuple
 
 import click.shell_completion
 import clickdc
@@ -50,7 +50,7 @@ def load_job_file(file: IO) -> nomadlib.Job:
 @dataclass
 class Args:
     verbose: int = clickdc.option("-v", count=True, help="Be verbose")
-    format: str = clickdc.option(
+    format: Optional[str] = clickdc.option(
         "-f",
         help="Passed to python .format()",
         show_default=True,
@@ -68,7 +68,7 @@ class Args:
     all: Tuple[str, ...] = clickdc.option(
         "-a",
         multiple=True,
-        help="NextList docker images referenced by all job versions",
+        help="List docker images referenced by all job versions",
     )
     files: Tuple[IO, ...] = clickdc.argument("files", nargs=-1, type=click.File("r"))
 
