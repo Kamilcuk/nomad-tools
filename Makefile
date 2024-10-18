@@ -55,3 +55,7 @@ run_githubrunner:
 			-var NOMAD_NAMESPACE=$$NOMAD_NAMESPACE \
 			-var VERBOSE=$(VERBOSE) \
 			./deploy/nomadtools-githubrunner.nomad.hcl
+
+weles_run_githubrunner:
+	,rsync --delete $(CURDIR)/ kamil@weles:./myprojects/nomad-tools/
+	ssh kamil@weles make -C ./myprojects/nomad-tools/ run_githubrunner

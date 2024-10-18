@@ -6,7 +6,7 @@ import os
 import ssl
 import sys
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional, Union
 
 import requests.adapters
 import requests.auth
@@ -157,11 +157,16 @@ class VariableConn(_Conn):
 
 @dataclasses.dataclass
 class JobSubmission:
+    """https://github.com/hashicorp/nomad/blob/42eacc85e2f749651066f03984e3ec4e456596e0/api/jobs.go#L968"""
+
     Source: str
-    Format: str
+    Format: Union[str, Literal["hcl1", "hcl2", "json"]]
     VariableFlags: Dict[str, str] = dataclasses.field(default_factory=dict)
     Variables: str = ""
 
+    @staticmethod
+    def mk_hcl(hcl: str):
+        return JobSubmission(hcl, "hcl2")
 
 class NomadConn(Requestor):
     """Represents connection to Nomad"""

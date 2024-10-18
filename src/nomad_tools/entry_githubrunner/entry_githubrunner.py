@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
+# vim: foldmethod=marker
 from __future__ import annotations
 
-import collections
 import concurrent.futures
 import datetime
+import enum
 import functools
-import itertools
 import json
 import logging
 import os
@@ -15,6 +15,7 @@ import shlex
 import subprocess
 import threading
 import time
+from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import (
@@ -22,102 +23,36 @@ from typing import (
     Callable,
     ClassVar,
     Dict,
-    Generator,
     Iterable,
     List,
     Optional,
     Set,
     Tuple,
     TypeVar,
+    Union,
 )
 
 import click
 import clickdc
+import dateutil.parser
 import jinja2
 import requests
 import yaml
-from typing_extensions import Protocol
 
-from . import nomadlib
-from .aliasedgroup import AliasedGroup
-from .common import mynomad
-from .common_click import help_h_option
-from .nomadlib.connection import urlquote
-from .nomadlib.datadict import DataDict
+from nomad_tools.nomadlib.types import MyStrEnum
+
+from .. import nomadlib
+from ..aliasedgroup import AliasedGroup
+from ..common import get_package_file, mynomad
+from ..common_base import cached_property
+from ..common_click import help_h_option
+from ..nomadlib.connection import urlquote
+from ..nomadlib.datadict import DataDict
 
 log = logging.getLogger(__name__)
 
 ###############################################################################
-# config
-
-DEFAULT_RUNNER: str = """
-job "{{ run.JOB_NAME }}" {
-  type = "batch"
-  meta {
-    INFO = <<EOF
-This is a runner based on {{ image }} image.
-{% if opts.docker == "dind" %}
-It also starts a docker daemon and is running as privileged
-{% elif opts.docker == "host" %}
-It also mounts a docker daemon from the host it is running on
-{% endif %}
-EOF
-  }
-  group "{{ run.JOB_NAME }}" {
-    reschedule {
-      attempts  = 0
-      unlimited = false
-    }
-    restart {
-      attempts = 0
-      mode     = "fail"
-    }
-    task "{{ run.JOB_NAME }}" {
-      driver = "docker"
-      config {
-        image = "{{ arg.image|default("myoung34/github-runner:latest") }}"
-        {% if arg.debug %}
-        # for debugging
-        entrypoint = ["bash", "-x", "/entrypoint.sh", "./bin/Runner.Listener", "run", "--startuptype", "service"]
-        {% endif %}
-        {% if opts.docker == "dind" %}
-        privileged = true
-        {% elif opts.docker == "host" %}
-        mount {
-            type   = "bind"
-            target = "/var/run/docker.sock"
-            source = "/var/run/docker.sock"
-        }
-        {% endif %}
-        {{ opts.config }}
-      }
-      env {
-        ACCESS_TOKEN        = "{{ run.ACCESS_TOKEN }}"
-        REPO_URL            = "{{ run.REPO_URL }}"
-        RUNNER_NAME         = "{{ run.JOB_NAME }}"
-        RUNNER_SCOPE        = "repo"
-        LABELS              = "{{ run.LABELS }}"
-        # RUN_AS_ROOT         = "false"
-        {% if opts.ephemeral == "true" %}
-        EPHEMERAL           = "true"
-        {% endif %}
-        DISABLE_AUTO_UPDATE = "true"
-        {% if opts.docker == "dind" %}
-        START_DOCKER_SERVICE = "true"
-        {% endif %}
-      }
-      resources {
-        {% if arg.cpu -%}    cpu         = {{ arg.cpu }}   {%- endif %}
-        memory      = {{ arg.mem | default(opts.mem | default (1000)) }}
-        {% if arg.maxmem -%} memory_max = {{ arg.maxmem }} {%- endif %}
-      }
-      {{ opts.task }}
-    }
-    {{ opts.group }}
-  }
-  {{ opts.job }}
-}
-        """
+# {{{1 config
 
 
 class NomadConfig(DataDict):
@@ -129,9 +64,8 @@ class NomadConfig(DataDict):
     jobprefix: str = "NTGithubRunner"
     """The string to prefix run jobs with.
     Preferably something short, there is a limit on Github runner name."""
-    meta: str = "NT"
-    """The prefix applied to metadata keys set by this program.
-    Default: "NT" like Nomad Tools."""
+    meta: str = "NOMADTOOLS"
+    """The metadata where to put important arguments"""
     purge: bool = True
     """Purge dead jobs"""
 
@@ -145,15 +79,6 @@ class GithubConfig(DataDict):
     """The github access token consul-template template code."""
     cachefile: str = "~/.cache/nomadtools/githubcache.json"
     """The location of cachefile. os.path.expanduser is used to expand."""
-
-
-class LimitConfig(DataDict):
-    repo: str = ".*"
-    """Match repositories full name with this regex"""
-    labels: str = ".*"
-    """Match runners with this regex"""
-    max: int = -1
-    """Maximum number of running runners"""
 
 
 class Config(DataDict):
@@ -176,34 +101,26 @@ class Config(DataDict):
     loop: int = 60
     """How many seconds will the loop run"""
 
-    runners: Dict[str, str] = {
-        "nomadtools": DEFAULT_RUNNER,
-    }
-    """The runners configuration.
-    Each field should be either a path to a file containing a HCL or JSON
-    job specification, or it should be a HCL or JSON Nomad job specification
-    in string form.
-    The job should contain a job meta field called NT_LABELS with comma
-    separated list of labels of the job.
-    The job will be started with additional NT_* metadata fields
-    with values from the Spec object below.
-    You can use for example ".*self-hosted.*" for all-catch.
-    """
+    template: str = get_package_file("entry_githubrunner/default.nomad.hcl")
+    """Jinja2 template for the runner"""
 
-    runner_inactivity_timeout: str = "1h"
+    label_match: str = "nomadtools (.*)"
+
+    runner_inactivity_timeout: str = "5m"
     """How much time a runner will be inactive for it to be removed?"""
 
-    limits: List[LimitConfig] = []
-    """Add limitation on the number of runners"""
-
-    opts: Any = {
-        "job": "",
-        "group": "",
-        "task": "",
-        "ephemeral": False,
-        "docker": "dind",
+    default_template_context: Any = {
+        "extra_config": "",
+        "extra_group": "",
+        "extra_task": "",
+        "extra_job": "",
+        "ephemeral": "true",
+        "startscript": get_package_file("entry_githubrunner/startscript.sh"),
     }
-    """Additional template variable passed as 'opts' global variable."""
+    """Additional template variables"""
+
+    template_context: Any = {}
+    """Additional template variables"""
 
     def __post_init__(self):
         assert self.loop >= 0
@@ -220,7 +137,7 @@ class Config(DataDict):
 
 
 ###############################################################################
-# counters
+# {{{1 counters
 
 
 @dataclass
@@ -318,7 +235,7 @@ COUNTERS = Counters()
 """Small object to accumulate what is happening in a single loop"""
 
 ###############################################################################
-# helpers
+# {{{1 helpers
 
 T = TypeVar("T")
 R = TypeVar("R")
@@ -338,6 +255,22 @@ def parallelmap(func: Callable[[T], R], arr: Iterable[T]) -> Iterable[R]:
 
 def flatten(xss: Iterable[Iterable[T]]) -> Iterable[T]:
     return (x for xs in xss for x in xs)
+
+
+def list_split(
+    condition: Callable[[T], bool], data: List[T]
+) -> Tuple[List[T], List[T]]:
+    ret: Tuple[List[T], List[T]] = ([], [])
+    for v in data:
+        ret[condition(v)].append(v)
+    return ret
+
+
+def list_group_by(data: List[T], key: Callable[[T], R]) -> Dict[R, List[T]]:
+    ret: Dict[R, List[T]] = {}
+    for v in data:
+        ret.setdefault(key(v), []).append(v)
+    return ret
 
 
 PARSE_TIME_REGEX = re.compile(
@@ -410,8 +343,71 @@ def nomad_job_to_json(job: str) -> dict:
     return data
 
 
+def github_repo_from_url(repo: str):
+    return "/".join(repo.split("/")[3:4])
+
+
+def labelstr_to_kv(labelstr: str) -> Dict[str, str]:
+    arg = {}
+    for part in shlex.split(labelstr):
+        split = part.split("=", 1)
+        arg[split[0]] = split[1] if len(split) == 2 else ""
+    return arg
+
+
+def nomad_job_text_to_json(jobtext: str):
+    try:
+        jobspec = json.loads(jobtext)
+    except json.JSONDecodeError:
+        try:
+            jobspec = json.loads(
+                subprocess.check_output(
+                    "nomad job run -output -".split(), input=jobtext, text=True
+                )
+            )
+        except subprocess.CalledProcessError:
+            log.exception(f"Could not decode Nomad job to json:\n{jobtext}")
+            raise
+    jobspec = jobspec.get("Job", jobspec)
+    return jobspec
+
+
 ###############################################################################
-# github
+# {{{1 abstract description
+
+
+@dataclass
+class Desc:
+    labels: str
+    repo_url: str
+
+    def __post_init__(self):
+        assert self.labels
+        assert self.repo_url
+        assert "://" in self.repo_url
+        assert re.match(CONFIG.label_match, self.labels)
+
+    @property
+    def repo(self):
+        return github_repo_from_url(self.repo_url)
+
+    def tostr(self):
+        return f"labels={self.labels} url={self.repo_url}"
+
+
+class DescProtocol(ABC):
+    @abstractmethod
+    def get_desc(self) -> Desc: ...
+
+    def try_get_desc(self) -> Optional[Desc]:
+        try:
+            return self.get_desc()
+        except Exception:
+            return None
+
+
+###############################################################################
+# {{{1 github
 
 
 @functools.lru_cache()
@@ -529,7 +525,8 @@ def gh_get(url: str, key: str = "") -> Any:
         # Prepare the request adding headers from Github cache.
         GITHUB_CACHE.prepare(url, headers)
         response = requests.get(url, headers=headers)
-        log.debug(f"{url} {headers} {response}")
+        headerslog = {**headers, "Authorization": "***"}
+        log.debug(f"{url} {headerslog} {response}")
         try:
             response.raise_for_status()
         except Exception:
@@ -564,25 +561,28 @@ def gh_get_cached(url: str, key: str = ""):
 
 
 ###############################################################################
-# github high level
+# {{{1 github high level
 
 GithubRepo = str
 
 
 @dataclass(frozen=True)
-class GithubJob:
+class GithubJob(DescProtocol):
     repo: GithubRepo
     run: dict
     job: dict
 
     def labelsstr(self):
-        return ",".join(sorted(list(set(self.job["labels"]))))
+        return "\n".join(sorted(list(set(self.job["labels"]))))
 
     def job_url(self):
         return self.job["html_url"]
 
     def repo_url(self):
         return self.run["repository"]["html_url"]
+
+    def get_desc(self):
+        return Desc(self.labelsstr(), self.repo_url())
 
 
 def get_gh_repos_one_to_many(repo: str) -> List[GithubRepo]:
@@ -627,7 +627,9 @@ def get_gh_run_jobs(repo: GithubRepo, run: dict) -> List[GithubJob]:
         )
         for job in jobs:
             if job["status"] in interesting:
-                ret.append(GithubJob(repo, run, job))
+                gj = GithubJob(repo, run, job)
+                if gj.try_get_desc():
+                    ret.append(gj)
     return ret
 
 
@@ -649,52 +651,28 @@ def get_gh_state(repos: Set[GithubRepo]) -> list[GithubJob]:
     # desc: str = ", ".join(s.labelsstr() + " for " + s.job_url() for s in reqstate)
     # log.info(f"Found {len(reqstate)} required runners to run: {desc}")
     for idx, s in enumerate(reqstate):
-        logging.info(f"GHJOB: {idx} {s.job_url()} {s.labelsstr()} {s.run['status']}")
+        logging.info(f"GHJOB={idx} {s.job_url()} {s.labelsstr()} {s.run['status']}")
     return reqstate
 
 
 ###############################################################################
+# {{{1 nomad
+
+
+def get_desc_from_nomadjob(job):
+    return Desc(**json.loads((job["Meta"] or {})[CONFIG.nomad.meta]))
 
 
 @dataclass
-class StateSpec:
-    labels: str
-    repo: str
-    repo_url: str
-    job_url: str
+class NomadJobToRun:
+    nj: nomadlib.Job
+    hcl: str
 
+    def get_desc(self):
+        return get_desc_from_nomadjob(self.nj)
 
-class RunnerProtocol(Protocol):
-    @property
-    def ID(self) -> str: ...
-    def get_spec(self) -> StateSpec: ...
-    def stop(self): ...
-    def purge(self): ...
-    def get_logs(self) -> Optional[str]: ...
-
-
-###############################################################################
-# nomad
-
-
-class NomadJobCommon(DataDict):
-    def labelsstr(self) -> str:
-        return self["Meta"][CONFIG.nomad.meta + "_LABELS"]
-
-    def repo(self) -> str:
-        return self["Meta"][CONFIG.nomad.meta + "_REPO"]
-
-    def repo_url(self) -> str:
-        return self["Meta"][CONFIG.nomad.meta + "_REPO_URL"]
-
-    def job_url(self) -> str:
-        return self["Meta"][CONFIG.nomad.meta + "_JOB_URL"]
-
-
-class NomadJob(nomadlib.Job, NomadJobCommon):
-    """/v1/job/ID return value of the runner"""
-
-    pass
+    def tostr(self):
+        return f"id={self.nj.ID} {self.get_desc().tostr()}"
 
 
 @dataclass
@@ -702,32 +680,97 @@ class GithubRunnerState:
     inactive_since: Optional[datetime.datetime] = None
 
 
-class NomadRunner(nomadlib.JobsJob, NomadJobCommon):
-    """/v1/jobs return value of the runner"""
+class RunnerState(MyStrEnum):
+    pending = enum.auto()
+    listening = enum.auto()
+    running = enum.auto()
+    unknown = enum.auto()
+    dead_success = enum.auto()
+    dead_failure = enum.auto()
+
+
+@dataclass(frozen=True)
+class RunnerStateSince:
+    state: RunnerState
+    since: datetime.datetime = datetime.datetime.min
+
+    def is_dead(self):
+        return self.state in [RunnerState.dead_failure, RunnerState.dead_success]
+
+    def is_pending(self):
+        return self.state == RunnerState.pending
+
+    def is_listening(self):
+        return self.state == RunnerState.listening
+
+    def is_unknown(self):
+        return self.state == RunnerState.unknown
+
+    def passed(self):
+        return datetime.datetime.now() - self.since
+
+    def __eq__(self, o: Union[RunnerStateSince, RunnerState]) -> bool:
+        if isinstance(o, RunnerState):
+            return self.state == o
+        else:
+            return self.state == o.state and self.since == o.since
 
     def tostr(self):
-        return f"{self.ID} {self.repo_url()} {self.Status}"
+        return f"state={self.state} since={self.since.isoformat()}"
 
-    def get_github_runner_state(self) -> Optional[GithubRunnerState]:
-        """Check if this runner is _right now_
-        executing a github job. This is best efforted
-        by parsing stdout logs of the runner"""
-        if not self.is_running():
-            return None
+
+@dataclass(frozen=True)
+class NomadRunner(DescProtocol):
+    nj: nomadlib.JobsJob
+
+    @property
+    def ID(self):
+        return self.nj.ID
+
+    def is_dead(self):
+        return self.nj.is_dead()
+
+    def get_desc(self):
+       return get_desc_from_nomadjob(self.nj)
+
+    @cached_property
+    def state(self) -> RunnerStateSince:
+        if self.nj.is_pending():
+            return RunnerStateSince(RunnerState.pending)
+        if self.nj.is_dead():
+            if self.nj.JobSummary.get_sum_summary().only_completed():
+                return RunnerStateSince(RunnerState.dead_success)
+            return RunnerStateSince(RunnerState.dead_failure)
+        if self.nj.is_running():
+            logs = self._get_logs()
+            if logs is None:
+                return RunnerStateSince(RunnerState.pending)
+            return self._parse_logs(logs)
+        return RunnerStateSince(RunnerState.unknown)
+
+    def tostr(self):
+        return f"id={self.nj.ID} {self.state.tostr()} {self.get_desc().tostr()}"
+
+    @cached_property
+    def _allocs(self):
         COUNTERS.nomad_get.inc()
-        allocs = [
+        return [
             nomadlib.Alloc(x)
             for x in mynomad.get(
-                f"job/{urlquote(self.ID)}/allocations",
+                f"job/{urlquote(self.nj.ID)}/allocations",
                 params=dict(
                     namespace=CONFIG.nomad.namespace,
                     filter='ClientStats == "running"',
                 ),
             )
         ]
-        alloc = next((alloc for alloc in allocs if alloc.is_running_started()), None)
-        if not alloc:
+
+    def _get_logs(self) -> Optional[str]:
+        allocs = self._allocs
+        allocs = [alloc for alloc in allocs if alloc.is_running_started()]
+        if not allocs:
             return None
+        alloc = allocs[0]
         COUNTERS.nomad_get.inc()
         logs = mynomad.request(
             "GET",
@@ -740,6 +783,12 @@ class NomadRunner(nomadlib.JobsJob, NomadJobCommon):
                 plain=True,
             ),
         ).text
+        return logs
+
+    def _parse_logs(self, logs: str) -> RunnerStateSince:
+        """Check if this runner is _right now_
+        executing a github job. This is best efforted
+        by parsing stdout logs of the runner"""
         """
         2024-07-14 12:14:17Z: Listening for Jobs
         2024-07-14 12:14:20Z: Running job: build
@@ -751,23 +800,22 @@ class NomadRunner(nomadlib.JobsJob, NomadJobCommon):
             parts = line.split(": ", 1)
             if len(parts) == 2:
                 try:
-                    time = datetime.datetime.fromisoformat(parts[0]).astimezone()
-                except ValueError as e:
-                    log.debug(f"{line} -> {e}")
+                    time = dateutil.parser.parse(parts[0])
+                except Exception as e:
+                    print(f"ERR {e}")
                     continue
                 msg = parts[1]
-                if (
-                    "Listening for jobs".lower() in msg.lower()
-                    or "completed with result".lower() in msg.lower()
-                ):
-                    return GithubRunnerState(time)
+                if "Listening for jobs".lower() in msg.lower():
+                    return RunnerStateSince(RunnerState.listening, time)
+                if "completed with result".lower() in msg.lower():
+                    return RunnerStateSince(RunnerState.listening, time)
                 if "Running job".lower() in msg.lower():
                     # is not inactive - return now
-                    return GithubRunnerState()
-        return None
+                    return RunnerStateSince(RunnerState.running, time)
+        return RunnerStateSince(RunnerState.unknown)
 
 
-def get_nomad_state() -> list[NomadRunner]:
+def get_nomad_state() -> List[NomadRunner]:
     COUNTERS.nomad_get.inc()
     jobsjobs = mynomad.get(
         "jobs",
@@ -780,338 +828,149 @@ def get_nomad_state() -> list[NomadRunner]:
     #
     curstate: list[NomadRunner] = []
     for jobsjob in jobsjobs:
-        nj = NomadRunner(jobsjob)
+        nr = NomadRunner(jobsjob)
         try:
             # Get only valid jobsjobs
-            nj.repo_url()
-            nj.labelsstr()
+            nr.get_desc()
         except (KeyError, AttributeError):
             continue
-        curstate.append(nj)
+        curstate.append(nr)
     #
-    # log.info(f"Found {len(curstate)} runners:")
+    log.debug(f"Found {len(curstate)} runners:")
     for i, s in enumerate(curstate):
-        log.info(f"RUNNER: {i} {s.tostr()}")
+        log.info(f"RUNNER={i} {s.tostr()}")
     return curstate
 
 
 ###############################################################################
-# runners
+# {{{1 runners
 
 
 @dataclass
-class Runners:
-    data: Dict[re.Pattern, jinja2.Template] = field(default_factory=dict)
-    env: jinja2.Environment = field(
-        default_factory=lambda: jinja2.Environment(loader=jinja2.BaseLoader())
-    )
+class RunnerGenerator:
+    """Stores parsed runners ready to template"""
 
-    @staticmethod
-    def load(specs: Dict[str, str]) -> Runners:
-        ret = Runners()
-        for k, v in specs.items():
-            ret.data[re.compile(k)] = ret.env.from_string(v)
-        return ret
+    desc: Desc
+    info: str
 
-    def find(self, labelsstr: str) -> Optional[jinja2.Template]:
-        template = next((v for k, v in self.data.items() if k.findall(labelsstr)), None)
-        if not template:
-            return None
-        return template
-
-
-@dataclass
-class TemplateContext:
-    JOB_NAME: str
-    ACCESS_TOKEN: str
-    REPO: str
-    REPO_URL: str
-    JOB_URL: str
-    LABELS: str
+    def _generate_job_name(self):
+        # Github runner name can be max 64 characters and no special chars.
+        # Still try to be as verbose as possible.
+        parts = [
+            CONFIG.nomad.jobprefix,
+            COUNTERS.cnt.inc(),
+            self.desc.repo,
+            self.desc.labels.replace("nomadtools ", ""),
+        ]
+        return (re.sub(r"[^a-zA-Z0-9_.-]", "", "-".join(str(x) for x in parts))[:64],)
 
     @staticmethod
     def make_example(labelsstr: str):
-        return TemplateContext(
-            JOB_NAME="Example_job_name",
-            ACCESS_TOKEN="example_access_token",
-            REPO="user/repo",
-            REPO_URL="http://example.repo.url/user/repo",
-            JOB_URL="http://example.job.url/user/repo/run/12312/job/1231",
-            LABELS=labelsstr,
+        return RunnerGenerator(
+            Desc(labels=labelsstr, repo_url="http://example.repo.url/user/repo"),
+            info="This is an information",
         )
 
-    @staticmethod
-    def make_from_github_job(gj: GithubJob):
-        return TemplateContext(
-            JOB_NAME=re.sub(
-                r"[^a-zA-Z0-9_.-]",
-                "",
-                "-".join(
-                    str(x)
-                    for x in [
-                        CONFIG.nomad.jobprefix,
-                        COUNTERS.cnt.inc(),
-                        gj.repo,
-                        gj.labelsstr(),
-                    ]
-                ),
-            )[:64],
-            ACCESS_TOKEN=CONFIG.github.token or "",
-            REPO=gj.repo,
-            REPO_URL=gj.repo_url(),
-            JOB_URL=gj.job_url(),
-            LABELS=gj.labelsstr(),
-        )
-
-    def to_template_args(self) -> dict:
-        arg = {}
-        for label in self.LABELS.split(","):
-            for part in shlex.split(label):
-                split = part.split("=", 1)
-                arg[split[0]] = split[1] if len(split) == 2 else ""
+    def _to_template_args(self) -> dict:
+        arg = labelstr_to_kv(self.desc.labels)
+        name = self._generate_job_name()
         return dict(
+            param={
+                **arg,
+                **CONFIG.template_context,
+                **CONFIG.default_template_context,
+                **dict(
+                    REPO_URL=self.desc.repo_url,
+                    RUNNER_NAME=name,
+                    JOB_NAME=name,
+                    LABELS=self.desc.labels,
+                ),
+            },
             run=asdict(self),
             arg=arg,
-            opts=CONFIG.opts,
             CONFIG=CONFIG,
-            RUNNERS=RUNNERS,
+            TEMPLATE=TEMPLATE,
             ARGS=ARGS,
+            escape=nomadlib.escape,
+            META=json.dumps(asdict(self.desc)),
         )
 
-
-def get_runner_jobspec(gj: GithubJob) -> Optional[NomadJob]:
-    template = RUNNERS.find(gj.labelsstr())
-    if not template:
-        return None
-    tc = TemplateContext.make_from_github_job(gj)
-    jobtext = template.render(tc.to_template_args())
-    if not jobtext:
-        return None
-    #
-    try:
-        jobspec = json.loads(jobtext)
-    except json.JSONDecodeError:
-        try:
-            jobspec = json.loads(
-                subprocess.check_output(
-                    "nomad job run -output -".split(), input=jobtext, text=True
-                )
-            )
-        except subprocess.CalledProcessError:
-            log.exception(f"Could not decode template for {gj.labelsstr()}: {template}")
-            raise
-    jobspec = jobspec.get("Job", jobspec)
-    # Apply default transformations.
-    for key in ["ID", "Name"]:
-        if key in jobspec:
-            # Github runner name can be max 64 characters and no special chars.
-            # Still try to be as verbose as possible.
-            # The hash generated from job_url should be unique enough.
-            jobspec[key] = tc.JOB_NAME
-    jobspec["Namespace"] = CONFIG.nomad.namespace
-    jobspec["Meta"] = {
-        **(jobspec.get("Meta", {}) or {}),
-        **{
-            CONFIG.nomad.meta + "_" + k: str(v)
-            for k, v in asdict(tc).items()
-            if k.lower() != "token"
-        },
-    }
-    jobspec = NomadJob(jobspec)
-    return jobspec
+    def get_runnertorun(self) -> NomadJobToRun:
+        tc = self._to_template_args()
+        jobtext = TEMPLATE.render(tc)
+        jobspec = nomad_job_text_to_json(jobtext)
+        # Apply default transformations.
+        jobspec["Namespace"] = CONFIG.nomad.namespace
+        for key in ["ID", "Name"]:
+            if key in jobspec:
+                jobspec[key] = tc["param"]["JOB_NAME"]
+        jobspec["Meta"][CONFIG.nomad.meta] = tc["META"]
+        #
+        nomadjobtorun = NomadJobToRun(jobspec, jobtext)
+        assert nomadjobtorun.get_desc() == self.desc
+        return nomadjobtorun
 
 
 ###############################################################################
-# scheduler
+# {{{1 scheduler
 
 
 @dataclass
-class Todo:
-    """Represents actions to take"""
+class Scheduler:
+    desc: Desc
+    gjs: List[GithubJob]
+    nrs: List[NomadRunner]
 
-    tostart: List[NomadJob] = field(default_factory=list)
-    tostop: List[str] = field(default_factory=list)
-    topurge: List[str] = field(default_factory=list)
-
-    def __add__(self, o: Todo):
-        return Todo(
-            self.tostart + o.tostart,
-            self.tostop + o.tostop,
-            self.topurge + o.topurge,
-        )
-
-    def execute(self):
-        # Sanity checks.
-        tostartids: List[str] = [x["ID"] for x in self.tostart]
-        ID: str
-        for ID in tostartids:
-            assert ID not in self.tostop, f"{ID} is tostart and tostop"
-            assert ID not in self.topurge, f"{ID} is tostart and topurge"
-        for ID in self.tostop:
-            assert ID not in self.topurge, f"{ID} is tostrop and topurge"
-        for ID, cnt in collections.Counter(tostartids).items():
-            assert cnt == 1, f"Repeated id in tostart: {ID}"
-        for ID, cnt in collections.Counter(self.tostop).items():
-            assert cnt == 1, f"Repeated id in tostop: {ID}"
-        for ID, cnt in collections.Counter(self.topurge).items():
-            assert cnt == 1, f"Repeated id in tostop: {ID}"
-        # Print them.
-        if self.tostart:
-            log.info(f"tostart: {' '.join(tostartids)}")
-        if self.tostop:
-            log.info(f"tostop: {' '.join(self.tostop)}")
-        if self.topurge:
-            log.info(f"topurge: {' '.join(self.topurge)}")
-        # Execute them.
-        if ARGS.dryrun:
-            log.error("DRYRUN")
-        else:
-            for spec in self.tostart:
-                COUNTERS.nomad_run.inc()
-                try:
-                    resp = mynomad.start_job(spec.asdict())
-                except Exception:
-                    log.exception(f"Could not start: {json.dumps(spec.asdict())}")
-                    raise
-                log.info(resp)
-            for name in self.tostop:
-                COUNTERS.nomad_stop.inc()
-                resp = mynomad.stop_job(name)
-                log.info(resp)
-            if CONFIG.nomad.purge:
-                for name in self.topurge:
-                    COUNTERS.nomad_purge.inc()
-                    resp = mynomad.stop_job(name, purge=True)
-                    log.info(resp)
-
-
-@dataclass(frozen=True)
-class RepoState:
-    """Represents state of one repository.
-    Currently this program supports only github-runners bound to one repo"""
-
-    repo_url: str
-    githubjobs: List[GithubJob] = field(default_factory=list)
-    nomadrunners: List[NomadRunner] = field(default_factory=list)
-
-    def validate(self):
-        # Check that all data are for one repo.
-        for gj in self.githubjobs:
-            assert gj.repo_url() == self.repo_url
-        for nr in self.nomadrunners:
-            assert nr.repo_url() == self.repo_url
-        for k, v in collections.Counter(nr.ID for nr in self.nomadrunners).items():
-            assert v == 1, f"Repeated runner: {k}"
-
-    def __find_free_githubjob(self, labelsstr: str, todo: Todo) -> GithubJob:
-        used_job_urls = set(
-            itertools.chain(
-                (
-                    (x.job_url() for x in todo.tostart if x.labelsstr() == labelsstr),
-                    (
-                        nr.job_url()
-                        for nr in self.nomadrunners
-                        if nr.labelsstr() == labelsstr
-                    ),
-                )
+    def gen_runners_to_trim(self) -> List[NomadRunner]:
+        """Generate runners to stop."""
+        order = [
+            RunnerState.unknown,
+            RunnerState.pending,
+            RunnerState.listening,
+        ]
+        nrs = [nr for nr in self.nrs if nr.state.state in order]
+        nrs.sort(
+            key=lambda nr: (
+                order.index(nr.state.state),
+                nr.state.since,
+                -nr.nj.ModifyIndex,
             )
         )
-        gjobs = [x for x in self.githubjobs if x.labelsstr() == labelsstr]
-        picked = next((x for x in gjobs if x.job_url() not in used_job_urls), None)
-        if picked:
-            return picked
-        return random.choice(tuple(gjobs))
+        return nrs
 
-    def gen_runners_to_stop(self, labelsstr: str) -> Generator[NomadRunner]:
-        """Generate runners to stop."""
-        # To stop runner it can't be alredy stopped
-        notdeadnotstop = [
-            nr
-            for nr in self.nomadrunners
-            if nr.labelsstr() == labelsstr and not nr.is_dead() and not nr.Stop
-        ]
-        # First stop pending ones.
-        for nr in notdeadnotstop:
-            if nr.is_pending():
-                yield nr
-        # Then stop ones inactive for longer thatn the configured timeout.
-        # Getting runner state is costly.
-        timeout = CONFIG.get_runner_inactivity_timeout()
-        if timeout:
-            for nr in notdeadnotstop:
-                if nr.is_running():
-                    rstate = nr.get_github_runner_state()
-                    if rstate and rstate.inactive_since:
-                        inactivefor = (
-                            datetime.datetime.now().astimezone() - rstate.inactive_since
-                        )
-                        if inactivefor > timeout:
-                            log.warning(
-                                f"INACTIVE: Runner is inactive for {inactivefor} > {CONFIG.runner_inactivity_timeout}: {nr.tostr()}"
-                            )
-                            yield nr
-                        else:
-                            log.info(
-                                f"INACTIVE: Runner continues inactive for {inactivefor} < {CONFIG.runner_inactivity_timeout}: {nr.tostr()}"
-                            )
-
-    def scheduler(self) -> Todo:
-        """Decide which jobs to run or stop"""
-        self.validate()
-        todo = Todo()
-        neededlabelsstrs: Dict[str, int] = collections.Counter(
-            gj.labelsstr() for gj in self.githubjobs
-        )
-        runninglabelsstrs: Dict[str, int] = collections.Counter(
-            nr.labelsstr() for nr in self.nomadrunners if not nr.is_dead()
-        )
-        alllabelsstrs: set[str] = set(
-            itertools.chain(neededlabelsstrs.keys(), runninglabelsstrs.keys())
-        )
-        for labelsstr in alllabelsstrs:
-            needed = neededlabelsstrs.get(labelsstr, 0)
-            running = runninglabelsstrs.get(labelsstr, 0)
-            diff = needed - running
-            if diff > 0:
-                for _ in range(diff):
-                    jobspec = get_runner_jobspec(
-                        self.__find_free_githubjob(labelsstr, todo)
-                    )
-                    if jobspec is not None:
-                        log.info(
-                            f"Running job {jobspec.ID} with {jobspec.labelsstr()} for {jobspec.job_url()}"
-                        )
-                        log.debug(f"Running {jobspec}")
-                        todo.tostart.append(jobspec)
-                    else:
-                        log.warning(
-                            f"Runner for {labelsstr} in {self.repo_url} not found"
-                        )
-            elif diff < 0:
-                # Only remove those ones that do not run anything.
-                # Generator to evaluate only those that needed.
-                # Diff id negative.
-                todo.tostop.extend(
-                    x.ID
-                    for x in itertools.islice(
-                        self.gen_runners_to_stop(labelsstr), -diff
-                    )
+    def schedule(self):
+        nrs_not_dead, nrs_dead = list_split(lambda x: x.state.is_dead(), self.nrs)
+        torun = len(self.gjs) - len(nrs_not_dead)
+        if torun > 0:
+            for _ in range(torun):
+                nomadjobtorun = RunnerGenerator(self.desc, "").get_runnertorun()
+                log.info(f"Starting runner {nomadjobtorun.tostr()}")
+                COUNTERS.nomad_run.inc()
+                mynomad.start_job(
+                    nomadjobtorun.nj.asdict(),
+                    nomadlib.JobSubmission.mk_hcl(nomadjobtorun.hcl),
                 )
-        #
+        elif torun < 0:
+            tostop = -torun
+            nomadjobstostop = self.gen_runners_to_trim()[:tostop]
+            for nr in nomadjobstostop:
+                log.info(f"Stopping runner {nr.tostr()}")
+                COUNTERS.nomad_purge.inc()
+                mynomad.stop_job(nr.nj.ID, purge=True)
         if CONFIG.nomad.purge:
-            for nr in self.nomadrunners:
-                if nr.is_dead() and nr.JobSummary.get_sum_summary().only_completed():
-                    # Check that there are no running evaluations to be sure.
-                    evals = mynomad.get(f"job/{nr.ID}/evaluations")
-                    if len(evals) == 0 or all(
-                        eval["Status"] == "complete" for eval in evals
-                    ):
-                        log.info(
-                            f"Purging {nr.ID} for {nr.repo_url()} with no running deployments"
-                        )
-                        todo.topurge.append(nr.ID)
-        #
-        return todo
+            for nr in nrs_dead:
+                log.info(f"Purging runner {nr.tostr()}")
+                COUNTERS.nomad_purge.inc()
+                mynomad.stop_job(nr.nj.ID, purge=True)
+
+
+def merge_states(gjs: List[GithubJob], nrs: List[NomadRunner]):
+    state: Dict[Desc, Tuple[List[GithubJob], List[NomadRunner]]] = {}
+    for i in gjs:
+        state.setdefault(i.get_desc(), ([], []))[0].append(i)
+    for i in nrs:
+        state.setdefault(i.get_desc(), ([], []))[1].append(i)
+    return state
 
 
 def loop():
@@ -1121,43 +980,16 @@ def loop():
     reqstate: list[GithubJob] = get_gh_state(repos)
     # Get the nomad state.
     curstate: list[NomadRunner] = get_nomad_state()
-    # Construct current state with repo as the key.
-    repostates: Dict[str, RepoState] = {}
-    for gj in reqstate:
-        repostates.setdefault(
-            gj.repo_url(), RepoState(gj.repo_url())
-        ).githubjobs.append(gj)
-    for nj in curstate:
-        repostates.setdefault(
-            nj.repo_url(), RepoState(nj.repo_url())
-        ).nomadrunners.append(nj)
-    # For each repo, run the scheduler and collect results.
-    todo: Todo = functools.reduce(
-        Todo.__add__, parallelmap(RepoState.scheduler, repostates.values()), Todo()
-    )
-    # Apply limits
-    for ll in CONFIG.limits:
-        if ll.max >= 0:
-            count = 0
-            tmp = []
-            for tostart in todo.tostart:
-                if re.match(ll.repo, tostart.repo()) and re.match(
-                    ll.labels, tostart.labelsstr()
-                ):
-                    count += 1
-                    if count <= ll.max:
-                        tmp.append(tostart)
-                else:
-                    tmp.append(tostart)
-            todo.tostart = tmp
-    # Execute what we need to execute.
-    todo.execute()
+    # Merge states on label and repo.
+    state = merge_states(reqstate, curstate)
+    for k, v in state.items():
+        Scheduler(k, v[0], v[1]).schedule()
     # Ending.
     COUNTERS.print()
 
 
 ###############################################################################
-# command line
+# {{{1 command line
 
 
 @dataclass
@@ -1197,15 +1029,14 @@ def cli(args: Args):
     else:
         with open(args.config) as f:
             configstr = f.read()
-    global CONFIG
     tmp = yaml.safe_load(configstr)
+    global CONFIG
     CONFIG = Config(tmp)
-    # Load runners
-    global RUNNERS
-    RUNNERS = Runners.load(CONFIG.runners)
-    #
+    global TEMPLATE
+    TEMPLATE = jinja2.Environment(loader=jinja2.BaseLoader()).from_string(
+        CONFIG.template
+    )
     mynomad.namespace = os.environ["NOMAD_NAMESPACE"] = CONFIG.nomad.namespace
-    #
     global GITHUB_CACHE
     GITHUB_CACHE = GithubCache.load()
 
@@ -1249,14 +1080,6 @@ def dumpconfig():
     print(yaml.safe_dump(CONFIG.asdict()))
 
 
-@cli.command(help="List configured runners")
-def listrunners():
-    for rgx, tmpl in RUNNERS.data.items():
-        print(f"{rgx}")
-        print(f"{tmpl}")
-        print()
-
-
 @cli.command(
     help="Prints out github cache. If given argument URL, print the cached response"
 )
@@ -1281,10 +1104,7 @@ def once():
 @click.argument("label", required=True, nargs=-1)
 def rendertemplate(label: Tuple[str, ...]):
     labelsstr: str = ",".join(sorted(list(label)))
-    template = RUNNERS.find(labelsstr)
-    if not template:
-        raise Exception(f"Template not found for {labelsstr}")
-    res = template.render(TemplateContext.make_example(labelsstr).to_template_args())
+    res = RunnerGenerator.make_example(labelsstr).get_runnertorun()
     print(res)
 
 

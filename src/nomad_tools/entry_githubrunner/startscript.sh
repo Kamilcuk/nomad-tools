@@ -1,31 +1,43 @@
 #!/bin/bash
-set -xeuo pipefail
+set -euo pipefail
+
+if [[ "${DEBUG:-}" ]]; then
+	set -x
+fi
 
 fatal() {
-	echo "startscript: FATAL: $*" >&2
+	echo "startscript: FATAL: $*"
 	exit 123
 }
 
 warn() {
-	echo "startscript: WARNING: $*" >&2
+	echo "startscript: WARNING: $*"
 }
 
 info() {
-	echo "startscript: INFO: $*" >&2
+	echo "startscript: INFO: $*"
 }
 
-choosedir() {
-	local dir i ret=0
+r() {
+	echo "+ $*"
+	"$@"
+}
+
+choosedirin() {
+	local dir
 	dir="$1"
 	shift
 	if ((!$#)); then fatal "missing arguments"; fi
+	#
+	local i ret=0
 	for ((i = 0; ; i++)); do
-		mkdir -vp "$dir/$i"
+		r mkdir -vp "$dir/$i"
 		{
 			if flock -n 249; then
 				info "Using $dir/$i directory"
-				"$@" "$dir/$i" || ret=$?
-				return $ret
+				info "+ $* $dir/$i"
+				r "$@" "$dir/$i" || ret=$?
+				return "$ret"
 			fi
 		} 249>"$dir/$i/lockfile"
 	done
@@ -38,42 +50,73 @@ dir_is_empty() {
 configure_dockerd() {
 	local dir
 	dir="$1"
-	dir=$(readlink -f "$dir/docker")
+	shift
 	if (($#)); then fatal "too many args"; fi
-	if [[ ! -d /var/lib/docker ]]; then
-		info "Dockerd using $dir"
-		ln -nvfs "$dir" /var/lib/docker/
+	#
+	dir=$(readlink -f "$dir/docker")
+	local dockersock
+	dockersock=/var/run/docker.sock
+	if [[ -e $dockersock ]]; then
+		warn "Skipping dockerd configuration: $dockersock already exists"
+		if ! r docker info; then
+			warn "docker info failed"
+		fi
 	else
-		warn "Skipping dockerd configuratin: /var/lib/docker already exists"
+		info "Symlinking docker to $dir"
+		r mkdir -vp "$dir"
+		r ln -nvfs "$dir" /var/lib/docker
 	fi
 }
 
 configure_runner() {
-	local dir tmp
+	local dir
 	dir="$1"
+	shift
+	if (($#)); then fatal "too many args"; fi
 	#
-	tmp=$(readlink -f "$dir/run")
-	mkdir -vp "$tmp"
-	export RUNNER_WORKDIR="$tmp"
+	local tmp
+	tmp=$(readlink -f "$dir/configure")
+	r mkdir -vp "$tmp"
+	r export RUNNER_WORKDIR="$tmp"
 	info "RUNNER_WORKDIR=$RUNNER_WORKDIR"
 	#
 	tmp=$(readlink -f "$dir/hostedtoolcache")
 	if [[ -e /opt/hostedtoolcache/ ]]; then
-		rmdir -v /opt/hostedtoolcache/
+		r rmdir -v /opt/hostedtoolcache/
 	fi
-	mkdir -vp "$tmp"
-	ln -nvfs "$tmp" /opt/hostedtoolcache/
-	export AGENT_TOOLSDIRECTORY="$tmp"
+	r mkdir -vp "$tmp"
+	r ln -nvfs "$tmp" /opt/hostedtoolcache
+	r export AGENT_TOOLSDIRECTORY="$tmp"
 	info "AGENT_TOOLSDIRECTORY=$tmp | /opt/hostedtoolcache -> $tmp"
 }
 
-run() {
+configure() {
 	local dir
 	dir="$1"
+	shift
+	if (($#)); then fatal "too many args"; fi
+	#
 	configure_dockerd "$dir"
 	configure_runner "$dir"
-	exec /entrypoint.sh ./bin/Runner.Listener run --startuptype service
 }
 
+save_stdout_in_fd3_and_redirect_stdout_stderr() {
+	exec 3>&1 1>&2
+}
+
+restore_stdout_from_fd3() {
+	exec 1>&3 3>&-
+}
+
+save_stdout_in_fd3_and_redirect_stdout_stderr
+if (($#)); then fatal "too many args"; fi
 if [[ ! -e /.dockerenv ]]; then fatal "Not in docker"; fi
-run /_work
+if mountpoint /_work; then
+	choosedirin /_work configure
+else
+	info "/_work is not a mountpoint"
+fi
+info 'start github runner'
+restore_stdout_from_fd3
+# synchronize with https://github.com/myoung34/docker-github-actions-runner/blob/master/Dockerfile#L25
+r exec /entrypoint.sh ./bin/Runner.Listener run --startuptype service
