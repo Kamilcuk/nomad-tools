@@ -1,9 +1,14 @@
 ---
-opts:
-  docker: host
 repos:
-  - Kamilcuk
-  # - Kamilcuk/nomad-tools
-  # - Kamilcuk/runnertest
+  # - Kamilcuk
+  - Kamilcuk/nomad-tools
+  - Kamilcuk/runnertest
+nomad:
+  namespace: github
 runner_inactivity_timeout: 1w
-loop: 60
+loop: 10
+# loop: 60
+template_context:
+  docker: host
+  cachedir: /home/kamil/myprojects/nomad-tools/deploy/cachedir
+

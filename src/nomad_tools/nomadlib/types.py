@@ -99,6 +99,12 @@ class JobStatus(MyStrEnum):
 class _BothJobAndJobsJob(DataDict):
     ID: str
     Status: str
+    Namespace: Optional[str]
+    Stop: bool
+    Meta: Optional[Dict[str, str]] = None
+    CreateIndex: int
+    ModifyIndex: int
+    JobModifyIndex: int
 
     def is_dead(self):
         return self.Status == JobStatus.dead
@@ -114,12 +120,9 @@ class Job(_BothJobAndJobsJob):
     """Returned aby job/<id> API. DO NOT mix with JobsJob"""
 
     Version: int
-    Namespace: Optional[str]
     ModifyIndex: int
     JobModifyIndex: int
     TaskGroups: List[JobTaskGroup]
-    Stop: bool
-    Meta: Optional[Dict[str, str]]
     SubmitTime: int
 
     def description(self):
@@ -140,9 +143,6 @@ class Job(_BothJobAndJobsJob):
 class JobsJob(_BothJobAndJobsJob):
     """Returned aby jobs API. DO NOT mix with Job"""
 
-    Namespace: Optional[str]
-    Stop: bool
-    Meta: Optional[Dict[str, str]] = None
     JobSummary: JobSummary
 
 
