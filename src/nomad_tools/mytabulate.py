@@ -1,10 +1,12 @@
 from typing import List
 
 
-def mytabulate(data: List[List[str]]) -> str:
+def mytabulate(data: List[List[str]], transpose: bool = False) -> str:
     """Print list of list of strings in tabulated form in columns"""
     if not data:
         return ""
+    if transpose:
+        data = list(map(list, zip(*data)))
     lens: List[int] = [max(len(str(x)) for x in y) for y in data]
     if not lens:
         return ""

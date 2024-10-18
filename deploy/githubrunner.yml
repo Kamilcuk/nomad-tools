@@ -5,10 +5,13 @@ repos:
   - Kamilcuk/runnertest
 nomad:
   namespace: github
+  # purge: false
+  purge: true
 runner_inactivity_timeout: 1w
 loop: 10
 # loop: 60
 template_context:
-  docker: host
+  # docker: host
+  docker: dind
   cachedir: /home/kamil/myprojects/nomad-tools/deploy/cachedir
 

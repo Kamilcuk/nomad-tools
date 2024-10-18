@@ -25,15 +25,14 @@ def all_annotations(cls) -> ChainMap[str, Type]:
 
 
 def _init_value(classname: str, dstname: str, dsttype: Any, srcval: Any):
-    # print(f"Constructing {aname} with type {atype} from {val}")
-    dstorigin = get_origin(dsttype)
-
-    def msg() -> str:
+    def msg(prefix: str = "Error when ") -> str:
         return (
-            f"Error when constructing class {classname!r} expected type {dsttype!r} with origin {dstorigin!r}"
+            f"{prefix}constructing class {classname!r} expected type {dsttype!r} with origin {dstorigin!r}"
             f" for field {dstname!r}, but received {type(srcval)} with value: {srcval!r}"
         )
 
+    dstorigin = get_origin(dsttype)
+    # print(msg("DATADICT INFO "))
     try:
         if dstorigin is list:
             assert type(srcval) is dstorigin, msg()
@@ -58,10 +57,13 @@ def _init_value(classname: str, dstname: str, dsttype: Any, srcval: Any):
             return dsttype(srcval)
         elif issubclass(dsttype, enum.Enum):
             return dsttype(srcval)
+        # elif callable(dsttype):
+        #     return dsttype(srcval)
     except Exception:
         log.exception(f"DATADICT:ERROR: {msg()}")
         if strict:
             raise
+        raise
     return srcval
 
 

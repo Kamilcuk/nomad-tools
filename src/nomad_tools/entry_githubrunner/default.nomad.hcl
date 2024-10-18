@@ -1,4 +1,6 @@
 job "{{ param.JOB_NAME }}" {
+  {{ param.extra_job }}
+
   type = "batch"
   meta {
     INFO = <<EOF
@@ -18,6 +20,8 @@ EOF
 {% endif %}
   }
   group "{{ param.JOB_NAME }}" {
+    {{ param.extra_group }}
+
     reschedule {
       attempts  = 0
       unlimited = false
@@ -28,12 +32,16 @@ EOF
     }
 
     task "{{ param.JOB_NAME }}" {
+      {{ param.extra_task }}
+
       driver       = "docker"
       kill_timeout = "5m"
       config {
+        {{ param.extra_config }}
+
         image      = "{{ param.image | default('myoung34/github-runner:latest') }}"
         init       = true
-        entrypoint = ["bash", "/local/startscript.sh"]
+        entrypoint = ["bash", "/local/nomadtools_startscript.sh"]
 
         {% if param.cachedir %}
         mount {
@@ -53,18 +61,6 @@ EOF
             target = "/var/run/docker.sock"
         }
         {% endif %}
-
-        {{ param.extra_config }}
-      }
-      template {
-        destination     = "local/startscript.sh"
-        change_mode     = "noop"
-        left_delimiter  = "QWEQWEQEWQEEQ"
-        right_delimiter = "ASDASDADSADSA"
-        data            = <<EOF
-{% if not param.startscript %}{{ 1/0 }}{% endif %}
-{{ escape(param.startscript) }}
-EOF
       }
       env {
         ACCESS_TOKEN        = "{{ CONFIG.github.token }}"
@@ -73,18 +69,20 @@ EOF
         LABELS              = "{{ param.LABELS }}"
         RUNNER_SCOPE        = "repo"
         DISABLE_AUTO_UPDATE = "true"
-        # RUN_AS_ROOT         = "false"
-
-        {% if param.ephemeral == "true" %}
+        {% if not param.RUN_AS_ROOT %}
+        RUN_AS_ROOT         = "false"
+        {% endif %}
+        {% if param.ephemeral %}
         EPHEMERAL           = "true"
         {% endif %}
         {% if param.docker == "dind" %}
         START_DOCKER_SERVICE = "true"
         {% endif %}
         {% if param.debug %}
-        DEBUG = "true"
+        DEBUG_OUTPUT = "true"
         {% endif %}
       }
+      {% if param.cpu or param.mem or param.maxmem %}
       resources {
         {% if param.cpu %}
         cpu         = {{ param.cpu }}
@@ -96,9 +94,17 @@ EOF
         memory_max = {{ param.maxmem }}
         {% endif %}
       }
-      {{ param.extra_task }}
+      {% endif %}
+      template {
+        destination     = "local/nomadtools_startscript.sh"
+        change_mode     = "noop"
+        left_delimiter  = "QWEQWEQEWQEEQ"
+        right_delimiter = "ASDASDADSADSA"
+        data            = <<EOF
+{% if not param.startscript %}{{ 1/0 }}{% endif %}
+{{ escape(param.startscript) }}
+EOF
+      }
     }
-    {{ param.extra_group }}
   }
-  {{ param.extra_job }}
 }

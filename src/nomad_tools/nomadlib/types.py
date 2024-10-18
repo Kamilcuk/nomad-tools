@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, List, Optional, TypeVar, Union
 
 import dateutil.parser
 
+from .tools import ns2dt
 from .datadict import DataDict
 
 log = logging.getLogger(__name__)
@@ -125,6 +126,9 @@ class Job(_BothJobAndJobsJob):
     TaskGroups: List[JobTaskGroup]
     SubmitTime: int
 
+    def SubmitTime_dt(self):
+        return ns2dt(self.SubmitTime)
+
     def description(self):
         return f"{self.ID}#{self.Version}@{self.Namespace}"
 
@@ -233,6 +237,9 @@ class Eval(DataDict):
     JobModifyIndex: Optional[int] = None
     """May be missing. No idea when"""
     TriggeredBy: Optional[str] = None
+
+    def ModifyTime_dt(self):
+        return ns2dt(self.ModifyTime)
 
     def is_pending_or_blocked(self):
         return self.Status in [EvalStatus.pending, EvalStatus.blocked]
@@ -381,6 +388,9 @@ class Alloc(DataDict):
     def strshort(self):
         return f"{self.__class__.__name__}({self.ID[:6]} {strdict(JobVersion=self.JobVersion)})"
 
+    def ModifyTime_dt(self):
+        return ns2dt(self.ModifyTime)
+
     def get_taskstates(self) -> Dict[str, AllocTaskState]:
         """The same as TaskStates but returns an empty dict in case the field is None"""
         return self.get("TaskStates") or {}
@@ -403,10 +413,13 @@ class Alloc(DataDict):
     def is_running(self):
         return self.ClientStatus == AllocClientStatus.running
 
-    def is_running_started(self):
-        return self.is_running() and any(
+    def any_was_started(self):
+        return any(
             taskstate.was_started() for taskstate in self.get_taskstates().values()
         )
+
+    def is_running_started(self):
+        return self.is_running() and self.any_was_started()
 
     def is_finished(self):
         return not self.is_pending_or_running()

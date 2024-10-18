@@ -22,7 +22,7 @@ import clickforward
 import dotenv
 
 from . import entry_watch, taskexec
-from .common_base import NOMAD_NAMESPACE, quotearr
+from .common_base import NOMAD_NAMESPACE, quotearr, dict_remove_none
 from .common_click import EPILOG, help_h_option
 from .common_nomad import namespace_option
 
@@ -33,19 +33,6 @@ T = TypeVar("T")
 
 def trueornone(x: Optional[T]) -> Optional[T]:
     return x if x else None
-
-
-def dict_remove_none(data: T) -> T:
-    """Remove all elements that are set to None"""
-    if isinstance(data, dict):
-        ret = {
-            k: dict_remove_none(v) for k, v in data.items() if v is not None and v != {}
-        }
-    elif isinstance(data, list):
-        ret = [dict_remove_none(e) for e in data if e is not None]
-    else:
-        ret = data
-    return cast(T, ret)
 
 
 @contextlib.contextmanager

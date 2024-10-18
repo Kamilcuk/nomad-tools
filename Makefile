@@ -45,8 +45,9 @@ try_docker_integration_test:
 			./integration_tests.sh \
 		'
 
+export PATH := $(PATH):$(HOME)/.local/bin/
 run_githubrunner_locally:
-	. ./.env && nomaddtools githubrunner -c ./deploy/githubrunner.yml $(ARGS) run
+	. ./.env && nomadtools githubrunner -c ./deploy/githubrunner.yml $(ARGS) run
 
 run_githubrunner:
 	. ./.env && nomadtools watch run \
@@ -56,6 +57,9 @@ run_githubrunner:
 			-var VERBOSE=$(VERBOSE) \
 			./deploy/nomadtools-githubrunner.nomad.hcl
 
+remote_run_githubrunner_locally:
+	. ~/.env_nomad && $(MAKE) run_githubrunner_locally
+
 weles_run_githubrunner:
-	,rsync --delete $(CURDIR)/ kamil@weles:./myprojects/nomad-tools/
-	ssh kamil@weles make -C ./myprojects/nomad-tools/ run_githubrunner
+	,rsync --no-group --no-owner $(CURDIR)/ kamil@weles:./myprojects/nomad-tools/
+	ssh -t kamil@weles make -C ./myprojects/nomad-tools/ "ARGS=$(ARGS)" run_githubrunner_locally
