@@ -5,7 +5,7 @@ import pkgutil
 import shlex
 import subprocess
 import sys
-from typing import Any, Callable, Generic, Iterable, List, TypeVar
+from typing import Any, Callable, Generic, Iterable, List, TypeVar, cast
 
 NOMAD_NAMESPACE = "NOMAD_NAMESPACE"
 
@@ -97,9 +97,6 @@ class shell_completion:
             print(f"   {line}")
 
 
-###############################################################################
-
-
 T = TypeVar("T")
 R = TypeVar("R")
 
@@ -125,3 +122,16 @@ class cached_property(Generic[T, R]):
         setattr(instance, self._attr_name, attr)
 
         return attr
+
+
+def dict_remove_none(data: T) -> T:
+    """Remove all elements that are set to None"""
+    if isinstance(data, dict):
+        ret = {
+            k: dict_remove_none(v) for k, v in data.items() if v is not None and v != {}
+        }
+    elif isinstance(data, list):
+        ret = [dict_remove_none(e) for e in data if e is not None]
+    else:
+        ret = data
+    return cast(T, ret)

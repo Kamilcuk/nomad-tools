@@ -23,36 +23,36 @@ r() {
 	"$@"
 }
 
-choosedirin() {
+choose_cachedir() {
 	local dir
 	dir="$1"
 	shift
-	if ((!$#)); then fatal "missing arguments"; fi
+	if (($#)); then fatal "too many arguments"; fi
 	#
-	local i ret=0
+	info "Picking cache directory inside $dir"
+	declare -g CACHEDIR
+	local i
 	for ((i = 0; ; i++)); do
 		r mkdir -vp "$dir/$i"
-		{
-			if flock -n 249; then
-				info "Using $dir/$i directory"
-				info "+ $* $dir/$i"
-				r "$@" "$dir/$i" || ret=$?
-				return "$ret"
-			fi
-		} 249>"$dir/$i/lockfile"
+		exec 249>"$dir/$i/lockfile"
+		if flock --verbose -n 249; then
+			info "Using $dir/$i as cache directory"
+			# When was the directory last used? See timestamp of lockfile.
+			touch "$dir/$i/lockfile" 
+			CACHEDIR="$dir/$i"
+			break
+		fi
+		exec 249>&-
 	done
 }
 
-dir_is_empty() {
-	[[ -n "$(ls -A "$1")" ]]
-}
-
-configure_dockerd() {
+dockerd_use_dir() {
 	local dir
 	dir="$1"
 	shift
 	if (($#)); then fatal "too many args"; fi
 	#
+	info "Configuring docker daemon to use $dir/docker directory"
 	dir=$(readlink -f "$dir/docker")
 	local dockersock
 	dockersock=/var/run/docker.sock
@@ -68,18 +68,14 @@ configure_dockerd() {
 	fi
 }
 
-configure_runner() {
+github_runner_use_dir() {
 	local dir
 	dir="$1"
 	shift
 	if (($#)); then fatal "too many args"; fi
 	#
 	local tmp
-	tmp=$(readlink -f "$dir/configure")
-	r mkdir -vp "$tmp"
-	r export RUNNER_WORKDIR="$tmp"
-	info "RUNNER_WORKDIR=$RUNNER_WORKDIR"
-	#
+	info "Moving Github runner cache to $dir/hostedtoolscache"
 	tmp=$(readlink -f "$dir/hostedtoolcache")
 	if [[ -e /opt/hostedtoolcache/ ]]; then
 		r rmdir -v /opt/hostedtoolcache/
@@ -87,36 +83,27 @@ configure_runner() {
 	r mkdir -vp "$tmp"
 	r ln -nvfs "$tmp" /opt/hostedtoolcache
 	r export AGENT_TOOLSDIRECTORY="$tmp"
-	info "AGENT_TOOLSDIRECTORY=$tmp | /opt/hostedtoolcache -> $tmp"
-}
-
-configure() {
-	local dir
-	dir="$1"
-	shift
-	if (($#)); then fatal "too many args"; fi
 	#
-	configure_dockerd "$dir"
-	configure_runner "$dir"
+	info "Moving Github runner workdir to $dir/configure"
+	tmp=$(readlink -f "$dir/configure")
+	r mkdir -vp "$tmp"
+	r export RUNNER_WORKDIR="$tmp"
 }
 
-save_stdout_in_fd3_and_redirect_stdout_stderr() {
-	exec 3>&1 1>&2
-}
+###############################################################################
+# main
 
-restore_stdout_from_fd3() {
-	exec 1>&3 3>&-
-}
-
-save_stdout_in_fd3_and_redirect_stdout_stderr
-if (($#)); then fatal "too many args"; fi
-if [[ ! -e /.dockerenv ]]; then fatal "Not in docker"; fi
-if mountpoint /_work; then
-	choosedirin /_work configure
-else
-	info "/_work is not a mountpoint"
-fi
-info 'start github runner'
-restore_stdout_from_fd3
+{
+	if (($#)); then fatal "too many args"; fi
+	if [[ ! -e /.dockerenv ]]; then fatal "Not in docker"; fi
+	if mountpoint /_work; then
+		choose_cachedir /_work
+		dockerd_use_dir "$CACHEDIR"
+		github_runner_use_dir "$CACHEDIR"
+	else
+		info "/_work is not a mountpoint"
+	fi
+	info 'start github runner'
+} 2>&1
 # synchronize with https://github.com/myoung34/docker-github-actions-runner/blob/master/Dockerfile#L25
-r exec /entrypoint.sh ./bin/Runner.Listener run --startuptype service
+r exec /entrypoint.sh ./bin/Runner.Listener run --startuptype service "$@"
