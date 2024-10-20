@@ -60,6 +60,9 @@ run_githubrunner:
 remote_run_githubrunner_locally:
 	. ~/.env_nomad && $(MAKE) run_githubrunner_locally
 
-weles_run_githubrunner:
+weles_run_githubrunner_locally:
 	,rsync --no-group --no-owner $(CURDIR)/ kamil@weles:./myprojects/nomad-tools/
 	ssh -t kamil@weles make -C ./myprojects/nomad-tools/ "ARGS=$(ARGS)" run_githubrunner_locally
+weles_run_githubrunner:
+	,rsync --no-group --no-owner $(CURDIR)/ kamil@weles:./myprojects/nomad-tools/
+	ssh -t kamil@weles make -C ./myprojects/nomad-tools/ "ARGS=$(ARGS)" run_githubrunner

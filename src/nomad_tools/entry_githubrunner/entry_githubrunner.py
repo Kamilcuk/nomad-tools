@@ -1122,7 +1122,6 @@ def cli(args: Args):
             configstr = f.read()
     tmp = yaml.safe_load(configstr)
     global CONFIG
-    print(tmp)
     CONFIG = Config.model_validate(tmp, strict=True)
     global PARSEDCONFIG
     PARSEDCONFIG = ParsedConfig(CONFIG)
