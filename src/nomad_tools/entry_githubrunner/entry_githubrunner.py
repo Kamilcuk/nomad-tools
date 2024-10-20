@@ -37,6 +37,7 @@ import click
 import clickdc
 import dateutil.parser
 import jinja2
+import pydantic
 import requests
 import yaml
 
@@ -47,7 +48,6 @@ from ..common_base import cached_property, dict_remove_none
 from ..common_click import help_h_option
 from ..mytabulate import mytabulate
 from ..nomadlib.connection import urlquote
-from ..nomadlib.datadict import DataDict
 
 log = logging.getLogger(__name__)
 
@@ -208,7 +208,7 @@ def nomad_job_text_to_json(jobtext: str) -> dict:
 # {{{1 config
 
 
-class NomadConfig(DataDict):
+class NomadConfig(pydantic.BaseModel, extra=pydantic.Extra.forbid):
     """Nomad configuration"""
 
     namespace: str = os.environ.get("NOMAD_NAMESPACE", "default")
@@ -221,7 +221,7 @@ class NomadConfig(DataDict):
     """The metadata where to put important arguments"""
 
 
-class GithubConfig(DataDict):
+class GithubConfig(pydantic.BaseModel, extra=pydantic.Extra.forbid):
     url: str = "https://api.github.com"
     """The url to github api"""
     token: Optional[str] = os.environ.get("GH_TOKEN", os.environ.get("GITHUB_TOKEN"))
@@ -232,7 +232,7 @@ class GithubConfig(DataDict):
     """The location of cachefile. os.path.expanduser is used to expand."""
 
 
-class Config(DataDict):
+class Config(pydantic.BaseModel, extra=pydantic.Extra.forbid):
     """Configuration"""
 
     nomad: NomadConfig = NomadConfig()
@@ -277,6 +277,8 @@ class Config(DataDict):
     """Purge dead successfull jobs after this time"""
     purge_failure_timeout: str = "1w"
     """Purge dead problematic jobs after this time"""
+    max_runners: int = 0
+    """The maximum number of runners"""
 
     def __post_init__(self):
         assert self.loop >= 0
@@ -704,11 +706,11 @@ class NomadJobToRun:
 
 
 class RunnerState(enum.IntEnum):
+    unknown = enum.auto()
     pending = enum.auto()
+    starting = enum.auto()
     listening = enum.auto()
     running = enum.auto()
-    unknown = enum.auto()
-    logunknown = enum.auto()
     dead_success = enum.auto()
     dead_failure = enum.auto()
 
@@ -720,15 +722,6 @@ class RunnerStateSince:
 
     def is_dead(self):
         return self.state in [RunnerState.dead_failure, RunnerState.dead_success]
-
-    def is_pending(self):
-        return self.state == RunnerState.pending
-
-    def is_listening(self):
-        return self.state == RunnerState.listening
-
-    def is_unknown(self):
-        return self.state == RunnerState.unknown
 
     def passed(self):
         assert self.since
@@ -774,7 +767,7 @@ class NomadRunner(DescProtocol):
             logs = self.get_logs()
             if logs is None:
                 since = self.get_since(self._evals)
-                return RunnerStateSince(RunnerState.pending, since)
+                return RunnerStateSince(RunnerState.starting, since)
             return self._parse_logs(logs)
         return RunnerStateSince(RunnerState.unknown)
 
@@ -860,7 +853,7 @@ class NomadRunner(DescProtocol):
                     return RunnerStateSince(RunnerState.listening, since)
                 if "Running job".lower() in msg:
                     return RunnerStateSince(RunnerState.running, since)
-        return RunnerStateSince(RunnerState.logunknown)
+        return RunnerStateSince(RunnerState.starting, self.get_since(self._allocs))
 
 
 def get_nomad_state() -> List[NomadRunner]:
@@ -994,8 +987,8 @@ class Scheduler:
         order = [
             RunnerState.unknown,
             RunnerState.pending,
+            RunnerState.starting,
             RunnerState.listening,
-            RunnerState.logunknown,
             RunnerState.running,
         ]
         nrs = [nr for nr in self.nrs if nr.state.state in order]
@@ -1014,6 +1007,11 @@ class Scheduler:
         if torun > 0:
             # if there are more github jobs associated with this repository and labels, start them.
             for _ in range(torun):
+                if (
+                    CONFIG.max_runners > 0
+                    and len(self.takennames) >= CONFIG.max_runners
+                ):
+                    break
                 nomadjobtorun = RunnerGenerator(
                     self.desc, "", self.takennames
                 ).get_runnertorun()
@@ -1090,7 +1088,7 @@ def loop():
 @dataclass
 class Args:
     dryrun: bool = clickdc.option("-n")
-    parallel: int = clickdc.option("-P", default=0)
+    parallel: int = clickdc.option("-P", default=4)
     config: str = clickdc.option(
         "-c",
         shell_complete=click.Path(
@@ -1101,9 +1099,6 @@ class Args:
             Otherwise the configuration file location with is read as a YAML.
             """,
     )
-
-
-ARGS: Args
 
 
 @click.command("githubrunner", cls=AliasedGroup)
@@ -1127,7 +1122,8 @@ def cli(args: Args):
             configstr = f.read()
     tmp = yaml.safe_load(configstr)
     global CONFIG
-    CONFIG = Config(tmp)
+    print(tmp)
+    CONFIG = Config.model_validate(tmp, strict=True)
     global PARSEDCONFIG
     PARSEDCONFIG = ParsedConfig(CONFIG)
     global GH
@@ -1178,10 +1174,11 @@ def purgealldead():
 @cli.command(help="Dump the configuration")
 @click.option("usejson", "-j", "--json", is_flag=True)
 def dumpconfig(usejson: bool):
+    tmp = CONFIG.model_dump()
     if usejson:
-        print(json.dumps(CONFIG.asdict()))
+        print(json.dumps(tmp))
     else:
-        print(yaml.safe_dump(CONFIG.asdict()))
+        print(yaml.safe_dump(tmp))
 
 
 @cli.command(
