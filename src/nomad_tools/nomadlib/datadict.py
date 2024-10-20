@@ -63,7 +63,6 @@ def _init_value(classname: str, dstname: str, dsttype: Any, srcval: Any):
         log.exception(f"DATADICT:ERROR: {msg()}")
         if strict:
             raise
-        raise
     return srcval
 
 
