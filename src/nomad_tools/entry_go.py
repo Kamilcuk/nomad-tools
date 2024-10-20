@@ -14,7 +14,7 @@ import tempfile
 import threading
 import uuid
 from dataclasses import dataclass
-from typing import IO, Any, Callable, Dict, List, Optional, Tuple, TypeVar, cast
+from typing import IO, Any, Callable, Dict, List, Optional, Tuple, TypeVar
 
 import click
 import clickdc
@@ -22,7 +22,7 @@ import clickforward
 import dotenv
 
 from . import entry_watch, taskexec
-from .common_base import NOMAD_NAMESPACE, quotearr, dict_remove_none
+from .common_base import NOMAD_NAMESPACE, dict_remove_none, quotearr
 from .common_click import EPILOG, help_h_option
 from .common_nomad import namespace_option
 
