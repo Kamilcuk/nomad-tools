@@ -6,7 +6,7 @@ repos:
 nomad:
   namespace: github
   # purge: false
-  purge: true
+  # purge: true
 runner_inactivity_timeout: 1w
 loop: 10
 # loop: 60

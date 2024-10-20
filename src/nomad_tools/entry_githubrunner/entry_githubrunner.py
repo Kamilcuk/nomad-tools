@@ -1122,7 +1122,7 @@ def cli(args: Args):
             configstr = f.read()
     tmp = yaml.safe_load(configstr)
     global CONFIG
-    CONFIG = Config.model_validate(tmp, strict=True)
+    CONFIG = Config(**tmp)
     global PARSEDCONFIG
     PARSEDCONFIG = ParsedConfig(CONFIG)
     global GH
@@ -1173,7 +1173,7 @@ def purgealldead():
 @cli.command(help="Dump the configuration")
 @click.option("usejson", "-j", "--json", is_flag=True)
 def dumpconfig(usejson: bool):
-    tmp = CONFIG.model_dump()
+    tmp = CONFIG.dict()
     if usejson:
         print(json.dumps(tmp))
     else:
