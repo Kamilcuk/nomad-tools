@@ -5,14 +5,15 @@ import logging
 import os
 import ssl
 import sys
+import urllib.parse
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Literal, Optional, Union
+from typing import Any, Dict, Optional, Union
 
 import requests.adapters
 import requests.auth
 import urllib3
-import urllib.parse
 import websocket
+from typing_extensions import Literal
 
 from ..common_base import cached_property
 from . import types
