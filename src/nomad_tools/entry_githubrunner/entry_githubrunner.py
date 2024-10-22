@@ -178,11 +178,12 @@ def github_repo_from_url(repo: str):
     return user.capitalize() + "/" + repo.capitalize()
 
 
-def labelstr_to_kv(labelstr: str) -> Dict[str, str]:
+def labels_to_kv(labels: List[str]) -> Dict[str, str]:
     arg = {}
-    for part in shlex.split(labelstr):
-        split = part.split("=", 1)
-        arg[split[0]] = split[1] if len(split) == 2 else ""
+    for label in labels:
+        for part in shlex.split(label):
+            split = part.split("=", 1)
+            arg[split[0]] = split[1] if len(split) == 2 else ""
     return arg
 
 
@@ -249,27 +250,30 @@ class Config(pydantic.BaseModel, extra=pydantic.Extra.forbid):
     A star '*' causes to get all the repositories available.
     """
 
-    label_match: str = "nomadtools *(.*)"
-    """Only execute if github action workflow job runs-on labels matching this regex"""
+    runson_match: str = "nomadtools *(.*)"
+    """ Only execute if github action workflow job runs-on labels matching this regex. """
 
     loop: int = 60
-    """How many seconds will the loop run"""
+    """ How many seconds will the loop run. """
 
     template: str = get_package_file("entry_githubrunner/default.nomad.hcl")
     """Jinja2 template for the runner"""
 
-    default_template_context: Any = {
+    template_default_settings: Dict[str, Any] = {
         "extra_config": "",
         "extra_group": "",
         "extra_task": "",
         "extra_job": "",
+        "docker": "none",
         "ephemeral": True,
-        "startscript": get_package_file("entry_githubrunner/startscript.sh"),
+        "run_as_root": False,
+        "cachedir": "",
+        "entrypoint": get_package_file("entry_githubrunner/entrypoint.sh"),
     }
-    """Additional template variables"""
+    """Default values for SETTINGS template variable"""
 
-    template_context: Any = {}
-    """Additional template variables"""
+    template_settings: Dict[str, Any] = {}
+    """ Overwrite settings according to your whim """
 
     runner_inactivity_timeout: str = "12h"
     """How much time a runner will be inactive for it to be removed?"""
@@ -287,7 +291,7 @@ class Config(pydantic.BaseModel, extra=pydantic.Extra.forbid):
 
 class ParsedConfig:
     def __init__(self, config: Config):
-        self.label_match = re.compile(config.label_match)
+        self.label_match = re.compile(config.runson_match)
         self.runner_inactivity_timeout = parse_time(config.runner_inactivity_timeout)
         self.purge_successfull_timeout = parse_time(config.purge_successfull_timeout)
         self.purge_failure_timeout = parse_time(config.purge_failure_timeout)
@@ -397,14 +401,14 @@ COUNTERS = Counters()
 
 @dataclass(frozen=True)
 class Desc:
-    labels: str
+    labels: List[str]
     repo_url: str
 
     def __post_init__(self):
         assert self.labels
         assert self.repo_url
         assert "://" in self.repo_url
-        assert PARSEDCONFIG.label_match.match(self.labels)
+        assert any(PARSEDCONFIG.label_match.match(x) for x in self.labels)
 
     @property
     def repo(self):
@@ -412,6 +416,10 @@ class Desc:
 
     def tostr(self):
         return f"labels={self.labels} url={self.repo_url}"
+
+    @property
+    def labelsstr(self):
+        return ",".join(sorted(self.labels))
 
 
 class DescProtocol(ABC):
@@ -602,17 +610,8 @@ class GithubJob(DescProtocol):
     run: dict
     job: dict
 
-    def labelsstr(self):
-        return "\n".join(sorted(list(set(self.job["labels"]))))
-
-    def job_url(self):
-        return self.job["html_url"]
-
-    def repo_url(self):
-        return self.run["repository"]["html_url"]
-
     def get_desc(self):
-        return Desc(self.labelsstr(), self.repo_url())
+        return Desc(self.job["labels"], self.job["html_url"])
 
 
 def get_gh_repos_one_to_many(repo: str) -> List[GithubRepo]:
@@ -681,7 +680,7 @@ def get_gh_state(repos: Set[GithubRepo]) -> list[GithubJob]:
     # desc: str = ", ".join(s.labelsstr() + " for " + s.job_url() for s in reqstate)
     # log.info(f"Found {len(reqstate)} required runners to run: {desc}")
     for idx, s in enumerate(reqstate):
-        logging.info(f"GHJOB={idx} {s.job_url()} {s.labelsstr()} {s.run['status']}")
+        logging.info(f"GHJOB={idx} {s.get_desc().tostr()} {s.run['status']}")
     return reqstate
 
 
@@ -690,7 +689,13 @@ def get_gh_state(repos: Set[GithubRepo]) -> list[GithubJob]:
 
 
 def get_desc_from_nomadjob(job):
-    return Desc(**json.loads((job["Meta"] or {})[CONFIG.nomad.meta]))
+    txt = (job["Meta"] or {})[CONFIG.nomad.meta]
+    try:
+        data = json.loads(txt)
+    except Exception:
+        print(txt)
+        raise
+    return Desc(**data)
 
 
 @dataclass
@@ -914,7 +919,7 @@ class RunnerGenerator:
                 CONFIG.nomad.jobprefix,
                 self.desc.repo,
                 i,
-                self.desc.labels.replace("nomadtools", ""),
+                self.desc.labelsstr.replace("nomadtools", ""),
                 self.info,
             ]
             name = re.sub(r"[^a-zA-Z0-9_.-]", "", "-".join(str(x) for x in parts))
@@ -924,35 +929,29 @@ class RunnerGenerator:
                 return name
 
     @staticmethod
-    def make_example(labelsstr: str):
+    def make_example(labels: List[str]):
         return RunnerGenerator(
-            Desc(labels=labelsstr, repo_url="http://example.repo.url/user/repo"),
+            Desc(labels=labels, repo_url="http://example.repo.url/user/repo"),
             "This is an information",
             TakenNames(),
         )
 
     def _to_template_args(self) -> dict:
-        arg = labelstr_to_kv(self.desc.labels)
-        name = self._generate_job_name()
         return dict(
-            param={
-                **arg,
-                **CONFIG.template_context,
-                **CONFIG.default_template_context,
-                **dict(
-                    REPO_URL=self.desc.repo_url,
-                    RUNNER_NAME=name,
-                    JOB_NAME=name,
-                    LABELS=self.desc.labels,
-                ),
+            SETTINGS={
+                **CONFIG.template_default_settings,
+                **CONFIG.template_settings,
             },
-            run=asdict(self),
-            arg=arg,
+            RUN=dict(
+                REPO_URL=self.desc.repo_url,
+                RUNNER_NAME=self._generate_job_name(),
+                LABELS=self.desc.labelsstr.replace('"', r"\""),
+                REPO=self.desc.repo,
+                INFO=self.info,
+            ),
+            RUNSON=labels_to_kv(self.desc.labels),
             CONFIG=CONFIG,
-            TEMPLATE=TEMPLATE,
-            ARGS=ARGS,
-            escape=nomadlib.escape,
-            META=json.dumps(asdict(self.desc)),
+            nomadlib=nomadlib,
         )
 
     def get_runnertorun(self) -> NomadJobToRun:
@@ -961,10 +960,9 @@ class RunnerGenerator:
         jobspec: dict = nomad_job_text_to_json(jobtext)
         # Apply default transformations.
         jobspec["Namespace"] = CONFIG.nomad.namespace
-        for key in ["ID", "Name"]:
-            if key in jobspec:
-                jobspec[key] = tc["param"]["JOB_NAME"]
-        jobspec["Meta"][CONFIG.nomad.meta] = tc["META"]
+        jobspec.setdefault("Meta", {})[CONFIG.nomad.meta] = json.dumps(
+            asdict(self.desc)
+        )
         #
         nomadjobtorun = NomadJobToRun(nomadlib.Job(jobspec), jobtext)
         assert nomadjobtorun.get_desc() == self.desc
@@ -1089,7 +1087,7 @@ def loop():
 class Args:
     dryrun: bool = clickdc.option("-n")
     parallel: int = clickdc.option("-P", default=4)
-    config: str = clickdc.option(
+    config: Optional[str] = clickdc.option(
         "-c",
         shell_complete=click.Path(
             exists=True, dir_okay=False, path_type=Path
@@ -1101,7 +1099,15 @@ class Args:
     )
 
 
-@click.command("githubrunner", cls=AliasedGroup)
+@click.command(
+    "githubrunner",
+    cls=AliasedGroup,
+    help="""
+        Execute Nomad job to run github self-hosted runner for user repositories.
+
+        See documentation in doc/githubrunner.md on github.
+        """,
+)
 @clickdc.adddc("args", Args)
 @help_h_option()
 @common_click.quiet_option()
@@ -1115,14 +1121,17 @@ def cli(args: Args):
         datefmt="%Y-%m-%dT%H:%M:%S%z",
     )
     #
-    if "\n" in args.config:
-        configstr = args.config
-    else:
-        with open(args.config) as f:
-            configstr = f.read()
-    tmp = yaml.safe_load(configstr)
     global CONFIG
-    CONFIG = Config(**tmp)
+    if args.config:
+        if "\n" in args.config:
+            configstr = args.config
+        else:
+            with open(args.config) as f:
+                configstr = f.read()
+        tmp = yaml.safe_load(configstr)
+        CONFIG = Config(**tmp)
+    else:
+        CONFIG = Config()
     global PARSEDCONFIG
     PARSEDCONFIG = ParsedConfig(CONFIG)
     global GH
@@ -1200,12 +1209,16 @@ def once():
     loop()
 
 
-@cli.command()
-@click.argument("label", required=True, nargs=-1)
-def rendertemplate(label: Tuple[str, ...]):
-    labelsstr: str = ",".join(sorted(list(label)))
-    res = RunnerGenerator.make_example(labelsstr).get_runnertorun()
-    print(res)
+@cli.command(
+    help="""
+    Render the template from configuration given the labels given on command line.
+    Usefull for testing the job.
+    """
+)
+@click.argument("labels", required=True, nargs=-1)
+def rendertemplate(labels: Tuple[str, ...]):
+    res = RunnerGenerator.make_example(list(labels)).get_runnertorun()
+    print(res.hcl)
 
 
 @cli.command(help="Main entrypoint - run the loop periodically")
@@ -1237,7 +1250,7 @@ def listrunners():
                 x.ID,
                 x.state.state.name,
                 x.state.since.isoformat() if x.state.since else "None",
-                x.get_desc().labels,
+                x.get_desc().labelsstr,
                 x.get_desc().repo,
             ]
         )
