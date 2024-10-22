@@ -16,7 +16,7 @@ jobs:
       max-parallel: 2
       matrix:
         include:
-          - nomad: 1.8.4
+          - nomad: 1.9.1
             python: 3.12
           - nomad: 1.6.8
             python: 3.7
