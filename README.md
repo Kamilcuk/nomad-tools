@@ -19,7 +19,7 @@ Set of tools and utilities to ease interacting with HashiCorp Nomad scheduling s
   * [`vardir` - manipulate nomad variable keys as files](#vardir---manipulate-nomad-variable-keys-as-files)
   * [`cp` - copy files to/from/between nomad allocations](#cp---copy-files-tofrombetween-nomad-allocations)
   * [`gitlab-runner` - dynamically schedule gitlab CI jobs](#gitlab-runner---dynamically-schedule-gitlab-ci-jobs)
-  * [`githubrunner` - WIP dynamically schedule GitHub actions jobs](#githubrunner---wip-dynamically-schedule-github-actions-jobs)
+  * [`githubrunner` - dynamically schedule GitHub actions jobs](#githubrunner---dynamically-schedule-github-actions-jobs)
   * [`dockers` - list docker images referenced by Nomad job](#dockers---list-docker-images-referenced-by-nomad-job)
   * [`downloadrelease` - download specific Nomad executable version](#downloadrelease---download-specific-nomad-executable-version)
   * [`task` - find task and allocation and execute action on it](#task---find-task-and-allocation-and-execute-action-on-it)
@@ -295,14 +295,11 @@ execute the CI/CD from Gitlab inside Nomad cluster.
 More on it can be read on github wiki
 [https://github.com/Kamilcuk/nomad-tools/wiki/gitlab%E2%80%90runner](https://github.com/Kamilcuk/nomad-tools/wiki/gitlab%E2%80%90runner) .
 
-## `githubrunner` - WIP dynamically schedule GitHub actions jobs
+## `githubrunner` - dynamically schedule GitHub actions jobs
 
-The program watches new runs on GitHub and if there are any schedules a `github-runner`
-to receive and dispatch the job. This is WIP.
+Schedule Github actions runners as Nomad job for user repositories.
 
-More on it can be read on GitHub wiki:
-[https://github.com/Kamilcuk/nomad-tools/wiki/githubrunner](https://github.com/Kamilcuk/nomad-tools/wiki/githubrunner) .
-
+See documentation in [doc/githubrunner.md](doc/githubrunner.md) .
 
 ## `dockers` - list docker images referenced by Nomad job
 
