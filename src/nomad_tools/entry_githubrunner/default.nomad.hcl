@@ -1,26 +1,34 @@
-job "{{ param.JOB_NAME }}" {
-  {{ param.extra_job }}
+locals {
+    INFO = <<EOFEOF
+This is a default runner shipped with nomadtools based on myoung34/github-runner image.
 
+User requested labels were parsed to the following:
+  {{ nomadlib.escape(RUNSON | tojson) }}
+
+The following parameters were generated for this job:
+  {{ nomadlib.escape(RUN | tojson) }}
+
+Job is running with the following settings:
+  {{ nomadlib.escape(SETTINGS | tojson) }}
+
+{% if SETTINGS.docker == "dind" %}
+The container runs with --privileged and starts a docker-in-docker instance.
+{% elif SETTINGS.docker == "host" %}
+The container mounts the /var/run/docker.sock from the host.
+{% endif %}
+{% if RUN.nodocker is defined %}
+The user requested to run without docker.
+{% endif %}
+
+EOFEOF
+}
+
+job "{{ RUN.RUNNER_NAME }}" {
+  {{ SETTINGS.extra_job }}
   type = "batch"
-  meta {
-    INFO = <<EOF
-This is a runner based on {{ image }} image.
-{% if param.docker == "dind" %}
-It also starts a docker daemon and is running as privileged
-{% elif param.docker == "host" %}
-It also mounts a docker daemon from the host it is running on
-{% endif %}
 
-EOF
-
-{% if param.debug %}
-  PARAM = <<EOF
-{{param | tojson}}
-EOF
-{% endif %}
-  }
-  group "{{ param.JOB_NAME }}" {
-    {{ param.extra_group }}
+  group "{{ RUN.RUNNER_NAME }}" {
+    {{ SETTINGS.extra_group }}
 
     reschedule {
       attempts  = 0
@@ -31,80 +39,91 @@ EOF
       mode     = "fail"
     }
 
-    task "{{ param.JOB_NAME }}" {
-      {{ param.extra_task }}
+    task "{{ RUN.RUNNER_NAME }}" {
+      {{ SETTINGS.extra_task }}
 
       driver       = "docker"
       kill_timeout = "5m"
       config {
-        {{ param.extra_config }}
+        {{ SETTINGS.extra_config }}
 
-        image      = "{{ param.image | default('myoung34/github-runner:latest') }}"
+        image      = "myoung34/github-runner:{{ RUNSON.tag | default('latest') }}"
         init       = true
-        entrypoint = ["bash", "/local/nomadtools_startscript.sh"]
+{% if SETTINGS.entrypoint %}
+        entrypoint = ["${NOMAD_TASK_DIR}/nomadtools_entrypoint.sh"]
+{% endif %}
 
-        {% if param.cachedir %}
+{% if SETTINGS.cachedir %}
         mount {
           type     = "bind"
-          source   = "{{ param.cachedir }}"
+          source   = "{{ SETTINGS.cachedir }}"
           target   = "/_work"
           readonly = false
         }
-        {% endif %}
+{% endif %}
 
-        {% if param.docker == "dind" %}
+{% if not RUNSON.nodocker %}
+  {% if SETTINGS.docker == "dind" %}
         privileged = true
-        {% elif param.docker == "host" %}
+  {% elif SETTINGS.docker == "host" %}
         mount {
             type   = "bind"
             source = "/var/run/docker.sock"
             target = "/var/run/docker.sock"
         }
-        {% endif %}
+  {% endif %}
+{% endif %}
+
       }
+
       env {
-        ACCESS_TOKEN        = "{{ CONFIG.github.token }}"
-        REPO_URL            = "{{ param.REPO_URL }}"
-        RUNNER_NAME         = "{{ param.JOB_NAME }}"
-        LABELS              = "{{ param.LABELS }}"
-        RUNNER_SCOPE        = "repo"
-        DISABLE_AUTO_UPDATE = "true"
-        {% if not param.RUN_AS_ROOT %}
-        RUN_AS_ROOT         = "false"
-        {% endif %}
-        {% if param.ephemeral %}
-        EPHEMERAL           = "true"
-        {% endif %}
-        {% if param.docker == "dind" %}
+        ACCESS_TOKEN         = "{{ SETTINGS.access_token or CONFIG.github.token }}"
+        REPO_URL             = "{{ RUN.REPO_URL }}"
+        RUNNER_NAME          = "{{ RUN.RUNNER_NAME }}"
+        RUNSON               = "{{ RUN.LABELS }}"
+        RUNNER_SCOPE         = "repo"
+        DISABLE_AUTO_UPDATE  = "true"
+{% if not SETTINGS.run_as_root %}
+        RUN_AS_ROOT          = "false"
+{% endif %}
+{% if SETTINGS.ephemeral %}
+        EPHEMERAL            = "true"
+{% endif %}
+{% if not RUNSON.nodocker %}
+  {% if SETTINGS.docker == "dind" %}
         START_DOCKER_SERVICE = "true"
-        {% endif %}
-        {% if param.debug %}
-        DEBUG_OUTPUT = "true"
-        {% endif %}
+  {% endif %}
+{% endif %}
+{% if SETTINGS.debug %}
+        DEBUG_OUTPUT         = "true"
+{% endif %}
       }
-      {% if param.cpu or param.mem or param.maxmem %}
+
       resources {
-        {% if param.cpu %}
-        cpu         = {{ param.cpu }}
-        {% endif %}
-        {% if param.mem %}
-        memory      = {{ param.mem }}
-        {% endif %}
-        {% if param.maxmem %}
-        memory_max = {{ param.maxmem }}
-        {% endif %}
+{% if RUNSON.cpu %}
+        cpu        = {{ RUNSON.cpu }}
+{% endif %}
+{% if RUNSON.mem %}
+        memory     = {{ RUNSON.mem }}
+{% endif %}
+{% if RUNSON.maxmem %}
+        memory_max = {{ RUNSON.maxmem }}
+{% endif %}
       }
-      {% endif %}
+
+{% if SETTINGS.entrypoint %}
       template {
-        destination     = "local/nomadtools_startscript.sh"
+        destination     = "local/nomadtools_entrypoint.sh"
         change_mode     = "noop"
         left_delimiter  = "QWEQWEQEWQEEQ"
         right_delimiter = "ASDASDADSADSA"
-        data            = <<EOF
-{% if not param.startscript %}{{ 1/0 }}{% endif %}
-{{ escape(param.startscript) }}
-EOF
+        perms           = "755"
+        data            = <<EOFEOF
+{{ nomadlib.escape(SETTINGS.entrypoint) }}
+EOFEOF
       }
+{% endif %}
+
     }
   }
 }
