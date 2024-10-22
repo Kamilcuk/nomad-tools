@@ -25,7 +25,7 @@ def completor(
         try:
             return [x for x in cb() if x.startswith(incomplete)]
         except Exception:
-            pass
+            return []
 
     return completor_cb
 
