@@ -32,6 +32,7 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import override
 
 import click
 import clickdc
@@ -178,7 +179,7 @@ def github_repo_from_url(repo: str):
     return user.capitalize() + "/" + repo.capitalize()
 
 
-def labels_to_kv(labels: List[str]) -> Dict[str, str]:
+def labels_to_kv(labels: Iterable[str]) -> Dict[str, str]:
     arg = {}
     for label in labels:
         for part in shlex.split(label):
@@ -399,27 +400,34 @@ COUNTERS = Counters()
 # {{{1 abstract description
 
 
-@dataclass(frozen=True)
+@pydantic.dataclasses.dataclass(frozen=True)
 class Desc:
-    labels: List[str]
+    labelsstr: str
     repo_url: str
 
+    @classmethod
+    def mk(cls, labels: Iterable[str], repo_url: str):
+        tmp = sorted(list(labels))
+        assert not any("," in x for x in tmp), f"{tmp}"
+        return cls(",".join(tmp), repo_url)
+
     def __post_init__(self):
-        assert self.labels
+        assert self.labelsstr
         assert self.repo_url
         assert "://" in self.repo_url
+        assert self.repo_url.count("/") == 4
         assert any(PARSEDCONFIG.label_match.match(x) for x in self.labels)
+
+    @property
+    def labels(self):
+        return self.labelsstr.split(",")
 
     @property
     def repo(self):
         return github_repo_from_url(self.repo_url)
 
     def tostr(self):
-        return f"labels={self.labels} url={self.repo_url}"
-
-    @property
-    def labelsstr(self):
-        return ",".join(sorted(self.labels))
+        return f"labels={self.labelsstr} url={self.repo_url}"
 
 
 class DescProtocol(ABC):
@@ -429,7 +437,8 @@ class DescProtocol(ABC):
     def try_get_desc(self) -> Optional[Desc]:
         try:
             return self.get_desc()
-        except Exception:
+        except Exception as e:
+            log.warning(f"Could not create description from {self}: {e}")
             return None
 
 
@@ -610,8 +619,13 @@ class GithubJob(DescProtocol):
     run: dict
     job: dict
 
+    @property
+    def labels(self) -> List[str]:
+        return self.job["labels"]
+
+    @override
     def get_desc(self):
-        return Desc(self.job["labels"], self.job["html_url"])
+        return Desc.mk(self.labels, self.run["repository"]["html_url"])
 
 
 def get_gh_repos_one_to_many(repo: str) -> List[GithubRepo]:
@@ -657,8 +671,12 @@ def get_gh_run_jobs(repo: GithubRepo, run: dict) -> List[GithubJob]:
         for job in jobs:
             if job["status"] in interesting:
                 gj = GithubJob(repo, run, job)
-                if gj.try_get_desc():
-                    ret.append(gj)
+                if any("," in x for x in gj.labels):
+                    log.warning("Job has comma in labels {desc}. IGNORING")
+                else:
+                    if gj.try_get_desc():
+                        ret.append(gj)
+
     return ret
 
 
@@ -677,8 +695,7 @@ def get_gh_repo_jobs(repo: GithubRepo) -> Iterable[GithubJob]:
 
 def get_gh_state(repos: Set[GithubRepo]) -> list[GithubJob]:
     reqstate: list[GithubJob] = list(flatten(parallelmap(get_gh_repo_jobs, repos)))
-    # desc: str = ", ".join(s.labelsstr() + " for " + s.job_url() for s in reqstate)
-    # log.info(f"Found {len(reqstate)} required runners to run: {desc}")
+    log.debug(f"Found {len(reqstate)} github jobs")
     for idx, s in enumerate(reqstate):
         logging.info(f"GHJOB={idx} {s.get_desc().tostr()} {s.run['status']}")
     return reqstate
@@ -690,19 +707,15 @@ def get_gh_state(repos: Set[GithubRepo]) -> list[GithubJob]:
 
 def get_desc_from_nomadjob(job):
     txt = (job["Meta"] or {})[CONFIG.nomad.meta]
-    try:
-        data = json.loads(txt)
-    except Exception:
-        print(txt)
-        raise
-    return Desc(**data)
+    return Desc(**json.loads(txt))
 
 
 @dataclass
-class NomadJobToRun:
+class NomadJobToRun(DescProtocol):
     nj: nomadlib.Job
     hcl: str
 
+    @override
     def get_desc(self):
         return get_desc_from_nomadjob(self.nj)
 
@@ -755,6 +768,7 @@ class NomadRunner(DescProtocol):
     def is_dead(self):
         return self.nj.is_dead()
 
+    @override
     def get_desc(self):
         return get_desc_from_nomadjob(self.nj)
 
@@ -875,14 +889,10 @@ def get_nomad_state() -> List[NomadRunner]:
     curstate: list[NomadRunner] = []
     for jobsjob in jobsjobs:
         nr = NomadRunner(nomadlib.JobsJob(jobsjob))
-        try:
-            # Get only valid jobsjobs
-            nr.get_desc()
-        except (KeyError, AttributeError):
-            continue
-        curstate.append(nr)
+        if nr.try_get_desc():
+            curstate.append(nr)
     #
-    log.debug(f"Found {len(curstate)} runners:")
+    log.debug(f"Found {len(curstate)} nomad runners:")
     for i, s in enumerate(curstate):
         log.info(f"RUNNER={i} {s.tostr()}")
     return curstate
@@ -931,7 +941,7 @@ class RunnerGenerator:
     @staticmethod
     def make_example(labels: List[str]):
         return RunnerGenerator(
-            Desc(labels=labels, repo_url="http://example.repo.url/user/repo"),
+            Desc.mk(labels=labels, repo_url="http://example.repo.url/user/repo"),
             "This is an information",
             TakenNames(),
         )
@@ -965,7 +975,9 @@ class RunnerGenerator:
         )
         #
         nomadjobtorun = NomadJobToRun(nomadlib.Job(jobspec), jobtext)
-        assert nomadjobtorun.get_desc() == self.desc
+        assert (
+            nomadjobtorun.get_desc() == self.desc
+        ), f"{nomadjobtorun.get_desc()} != {self.desc}"
         return nomadjobtorun
 
 

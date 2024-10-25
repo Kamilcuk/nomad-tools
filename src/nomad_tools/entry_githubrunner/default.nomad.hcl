@@ -1,15 +1,18 @@
 locals {
     INFO = <<EOFEOF
+{% macro printer(v) %}{% for k, v in v.items() -%}
+  {{"  "}}{{ nomadlib.escape(k|string|replace("\n","\\n")) }}={{ nomadlib.escape(v|string|replace("\n","\\n")) }}
+{% endfor %}{% endmacro -%}
 This is a default runner shipped with nomadtools based on myoung34/github-runner image.
 
 User requested labels were parsed to the following:
-  {{ nomadlib.escape(RUNSON | tojson) }}
+{{ printer(RUNSON) }}
 
 The following parameters were generated for this job:
-  {{ nomadlib.escape(RUN | tojson) }}
+{{ printer(RUN) }}
 
 Job is running with the following settings:
-  {{ nomadlib.escape(SETTINGS | tojson) }}
+{{ printer(SETTINGS) }}
 
 {% if SETTINGS.docker == "dind" %}
 The container runs with --privileged and starts a docker-in-docker instance.
@@ -47,7 +50,7 @@ job "{{ RUN.RUNNER_NAME }}" {
       config {
         {{ SETTINGS.extra_config }}
 
-        image      = "myoung34/github-runner:{{ RUNSON.tag | default('latest') }}"
+        image      = "{{ RUNSON.image | default('myoung34/github-runner:' + RUNSON.tag | default('latest')) }}"
         init       = true
 {% if SETTINGS.entrypoint %}
         entrypoint = ["${NOMAD_TASK_DIR}/nomadtools_entrypoint.sh"]
@@ -80,7 +83,7 @@ job "{{ RUN.RUNNER_NAME }}" {
         ACCESS_TOKEN         = "{{ SETTINGS.access_token or CONFIG.github.token }}"
         REPO_URL             = "{{ RUN.REPO_URL }}"
         RUNNER_NAME          = "{{ RUN.RUNNER_NAME }}"
-        RUNSON               = "{{ RUN.LABELS }}"
+        LABELS               = "{{ RUN.LABELS }}"
         RUNNER_SCOPE         = "repo"
         DISABLE_AUTO_UPDATE  = "true"
 {% if not SETTINGS.run_as_root %}
