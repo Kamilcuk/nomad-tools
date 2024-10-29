@@ -57,9 +57,10 @@ run_githubrunner:
 			-var VERBOSE=$(VERBOSE) \
 			./deploy/nomadtools-githubrunner.nomad.hcl
 
+listrunners:
+	. ~/.env_nomad && watch -n1 nomadtools githubrunner -q listrunners
 remote_run_githubrunner_locally:
 	. ~/.env_nomad && $(MAKE) run_githubrunner_locally
-
 weles_rsync:
 	,rsync --exclude=*/__pycache__/ --no-group --no-owner $(CURDIR)/ kamil@weles:./myprojects/nomad-tools/
 weles_run_githubrunner_locally: weles_rsync

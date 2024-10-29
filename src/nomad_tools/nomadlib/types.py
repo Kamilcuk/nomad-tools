@@ -8,8 +8,8 @@ from typing import Any, Callable, Dict, List, Optional, TypeVar, Union
 
 import dateutil.parser
 
-from .tools import ns2dt
 from .datadict import DataDict
+from .tools import ns2dt
 
 log = logging.getLogger(__name__)
 
@@ -322,6 +322,7 @@ class AllocTaskStateEventType(MyStrEnum):
 
 
 class AllocTaskStateEvent(DataDict):
+    Message: str
     DisplayMessage: str
     Time: int
     Type: str
@@ -423,6 +424,13 @@ class Alloc(DataDict):
 
     def is_finished(self):
         return not self.is_pending_or_running()
+
+    def any_oom_killed(self):
+        return any(
+            event.Type == "Terminated" and "OOM Killed" in (event.Message or "")
+            for taskstate in self.get_taskstates().values()
+            for event in (taskstate.Events or [])
+        )
 
 
 class DeploymentStatus(MyStrEnum):
