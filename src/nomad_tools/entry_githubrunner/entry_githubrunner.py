@@ -32,7 +32,6 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import override
 
 import click
 import clickdc
@@ -41,6 +40,7 @@ import jinja2
 import pydantic
 import requests
 import yaml
+from typing_extensions import override
 
 from .. import common_click, nomadlib
 from ..aliasedgroup import AliasedGroup
@@ -103,7 +103,9 @@ PARSE_TIME_REGEX = re.compile(
 def parse_time(time_str: str) -> datetime.timedelta:
     # https://stackoverflow.com/a/4628148/9072753
     parts = PARSE_TIME_REGEX.match(time_str)
-    assert parts
+    assert (
+        parts
+    ), f"{time_str} is not a valid time interval and does not match {PARSE_TIME_REGEX}"
     parts = parts.groupdict()
     time_params = {}
     for name, param in parts.items():
@@ -210,20 +212,27 @@ def nomad_job_text_to_json(jobtext: str) -> dict:
 # {{{1 config
 
 
-class NomadConfig(pydantic.BaseModel, extra=pydantic.Extra.forbid):
+class NomadConfig(pydantic.BaseModel, frozen=True, extra=pydantic.Extra.forbid):
     """Nomad configuration"""
 
-    namespace: str = os.environ.get("NOMAD_NAMESPACE", "default")
+    namespace: str = "github"
     """The namespace to set on the job."""
-    token: Optional[str] = os.environ.get("NOMAD_TOKEN")
     jobprefix: str = "NTGithubRunner"
     """The string to prefix run jobs with.
     Preferably something short, there is a limit on Github runner name."""
     meta: str = "NOMADTOOLS"
     """The metadata where to put important arguments"""
 
+    def __post_init__(self):
+        assert self.namespace
+        assert (
+            self.namespace != "*"
+        ), "NOMAD_NAMESPACE is set to '*', something is wrong"
+        assert self.jobprefix
+        assert self.meta
 
-class GithubConfig(pydantic.BaseModel, extra=pydantic.Extra.forbid):
+
+class GithubConfig(pydantic.BaseModel, frozen=True, extra=pydantic.Extra.forbid):
     url: str = "https://api.github.com"
     """The url to github api"""
     token: Optional[str] = os.environ.get("GH_TOKEN", os.environ.get("GITHUB_TOKEN"))
@@ -231,10 +240,25 @@ class GithubConfig(pydantic.BaseModel, extra=pydantic.Extra.forbid):
     access_token: Optional[str] = None
     """The github access token consul-template template code."""
     cachefile: str = "~/.cache/nomadtools/githubcache.json"
-    """The location of cachefile. os.path.expanduser is used to expand."""
+    """The location of cachefile. os.path.frozen=True, expanduser is used to expand."""
 
 
-class Config(pydantic.BaseModel, extra=pydantic.Extra.forbid):
+class SchedulerConfig(pydantic.BaseModel, frozen=True, extra=pydantic.Extra.forbid):
+    runner_inactivity_timeout: str = ""
+    """How much time a runner will be inactive for it to be removed?"""
+    purge_successfull_timeout: str = "10m"
+    """Purge dead successfull jobs after this time"""
+    purge_failure_timeout: str = "1w"
+    """Purge dead problematic jobs after this time"""
+    max_runners: int = 0
+    """The maximum number of runners"""
+    pending_to_kill_listening: str = "1m"
+    """If a Nomad job is pending for this time, start killing other jobs
+    in listening state to make room for it"""
+    strict: bool = False
+
+
+class Config(pydantic.BaseModel, frozen=True, extra=pydantic.Extra.forbid):
     """Configuration"""
 
     nomad: NomadConfig = NomadConfig()
@@ -268,7 +292,7 @@ class Config(pydantic.BaseModel, extra=pydantic.Extra.forbid):
         "docker": "none",
         "ephemeral": True,
         "run_as_root": False,
-        "cachedir": "",
+        "cache": "",
         "entrypoint": get_package_file("entry_githubrunner/entrypoint.sh"),
     }
     """Default values for SETTINGS template variable"""
@@ -276,26 +300,33 @@ class Config(pydantic.BaseModel, extra=pydantic.Extra.forbid):
     template_settings: Dict[str, Any] = {}
     """ Overwrite settings according to your whim """
 
-    runner_inactivity_timeout: str = "12h"
-    """How much time a runner will be inactive for it to be removed?"""
-    purge_successfull_timeout: str = "10m"
-    """Purge dead successfull jobs after this time"""
-    purge_failure_timeout: str = "1w"
-    """Purge dead problematic jobs after this time"""
-    max_runners: int = 0
-    """The maximum number of runners"""
+    scheduler: SchedulerConfig = SchedulerConfig()
 
     def __post_init__(self):
         assert self.loop >= 0
         assert self.repos
 
+    def get_template(self):
+        try:
+            with Path(self.template).open() as f:
+                return f.read()
+        except OSError:
+            return self.template
+
 
 class ParsedConfig:
     def __init__(self, config: Config):
         self.label_match = re.compile(config.runson_match)
-        self.runner_inactivity_timeout = parse_time(config.runner_inactivity_timeout)
-        self.purge_successfull_timeout = parse_time(config.purge_successfull_timeout)
-        self.purge_failure_timeout = parse_time(config.purge_failure_timeout)
+        self.runner_inactivity_timeout = parse_time(
+            config.scheduler.runner_inactivity_timeout
+        )
+        self.purge_successfull_timeout = parse_time(
+            config.scheduler.purge_successfull_timeout
+        )
+        self.purge_failure_timeout = parse_time(config.scheduler.purge_failure_timeout)
+        self.pending_to_kill_listening = parse_time(
+            config.scheduler.pending_to_kill_listening
+        )
 
 
 ###############################################################################
@@ -404,12 +435,13 @@ COUNTERS = Counters()
 class Desc:
     labelsstr: str
     repo_url: str
+    version: int = 0
 
     @classmethod
     def mk(cls, labels: Iterable[str], repo_url: str):
         tmp = sorted(list(labels))
-        assert not any("," in x for x in tmp), f"{tmp}"
-        return cls(",".join(tmp), repo_url)
+        assert not any("," in x for x in tmp), f", in {tmp}"
+        return cls(",".join(tmp), repo_url, VERSION)
 
     def __post_init__(self):
         assert self.labelsstr
@@ -722,15 +754,31 @@ class NomadJobToRun(DescProtocol):
     def tostr(self):
         return f"id={self.nj.ID} {self.get_desc().tostr()}"
 
+    def start(self):
+        COUNTERS.nomad_run.inc()
+        mynomad.start_job(
+            self.nj.asdict(),
+            nomadlib.JobSubmission.mk_hcl(self.hcl),
+        )
+
 
 class RunnerState(enum.IntEnum):
-    unknown = enum.auto()
+    r"""
+                        /->----------/->--------/-> dead_oom
+           /->---------/->----------/->--------/--> dead_stopped
+    pending -> starting -> listening -> running --> dead_success
+                           ^---------------<-/ \--> dead_failure
+    """
+
     pending = enum.auto()
     starting = enum.auto()
     listening = enum.auto()
     running = enum.auto()
-    dead_success = enum.auto()
+    stopping = enum.auto()
+    dead_oom = enum.auto()
     dead_failure = enum.auto()
+    dead_stopped = enum.auto()
+    dead_success = enum.auto()
 
 
 @dataclass(frozen=True)
@@ -739,16 +787,25 @@ class RunnerStateSince:
     since: Optional[datetime.datetime] = None
 
     def is_dead(self):
-        return self.state in [RunnerState.dead_failure, RunnerState.dead_success]
+        return self.state in [
+            RunnerState.dead_stopped,
+            RunnerState.dead_oom,
+            RunnerState.dead_failure,
+            RunnerState.dead_success,
+        ]
 
     def passed(self):
         assert self.since
         return datetime.datetime.now().astimezone() - self.since
 
-    def cmp(self, o: RunnerState, timeout: Optional[datetime.timedelta] = None):
-        return self.state == o and (
-            timeout is None or self.since is None or self.passed() > timeout
-        )
+    def cmp(
+        self,
+        o: Union[RunnerState, List[RunnerState]],
+        timeout: Optional[datetime.timedelta] = None,
+    ):
+        return (
+            self.state == o if isinstance(o, RunnerState) else self.state in o
+        ) and (timeout is None or self.since is None or self.passed() > timeout)
 
     def tostr(self):
         return f"state={self.state.name} since={self.since.isoformat() if self.since else None}"
@@ -774,21 +831,33 @@ class NomadRunner(DescProtocol):
 
     @cached_property
     def state(self) -> RunnerStateSince:
-        if self.nj.is_pending():
-            since = self.get_since(self._evals)
-            return RunnerStateSince(RunnerState.pending)
         if self.nj.is_dead():
-            since = self.get_since(self._allocs)
-            if self.nj.JobSummary.get_sum_summary().only_completed():
-                return RunnerStateSince(RunnerState.dead_success, since)
-            return RunnerStateSince(RunnerState.dead_failure, since)
-        if self.nj.is_running():
+            allocs = self._allocs
+            if allocs:
+                alloc = allocs[0]
+                if alloc.any_oom_killed():
+                    since = self.get_since(allocs)
+                    return RunnerStateSince(RunnerState.dead_oom, since)
+        if self.nj.Stop:
+            since = self.get_since(self._evals)
+            if self.nj.is_dead():
+                return RunnerStateSince(RunnerState.dead_stopped, since)
+            else:
+                return RunnerStateSince(RunnerState.stopping, since)
+        elif self.nj.is_pending():
+            since = self.get_since(self._evals)
+            return RunnerStateSince(RunnerState.pending, since)
+        elif self.nj.is_running():
             logs = self.get_logs()
             if logs is None:
                 since = self.get_since(self._evals)
                 return RunnerStateSince(RunnerState.starting, since)
             return self._parse_logs(logs)
-        return RunnerStateSince(RunnerState.unknown)
+        else:  # dead
+            since = self.get_since(self._allocs) or self.get_since(self._evals)
+            if self.nj.JobSummary.get_sum_summary().only_completed():
+                return RunnerStateSince(RunnerState.dead_success, since)
+            return RunnerStateSince(RunnerState.dead_failure, since)
 
     def tostr(self):
         return f"id={self.nj.ID} {self.state.tostr()} {self.get_desc().tostr()}"
@@ -805,7 +874,7 @@ class NomadRunner(DescProtocol):
             nomadlib.Eval(x)
             for x in mynomad.get(
                 f"job/{urlquote(self.nj.ID)}/evaluations",
-                params=dict(namespace=CONFIG.nomad.namespace),
+                params=dict(namespace=self.nj.Namespace),
             )
         ]
         # Newest first
@@ -819,7 +888,7 @@ class NomadRunner(DescProtocol):
             nomadlib.Alloc(x)
             for x in mynomad.get(
                 f"job/{urlquote(self.nj.ID)}/allocations",
-                params=dict(namespace=CONFIG.nomad.namespace),
+                params=dict(namespace=self.nj.Namespace),
             )
         ]
         # Newest first
@@ -833,18 +902,20 @@ class NomadRunner(DescProtocol):
             return None
         alloc = allocs[0]
         COUNTERS.nomad_get.inc()
-        logs = mynomad.request(
-            "GET",
-            f"/client/fs/logs/{alloc.ID}",
-            params=dict(
-                namespace=CONFIG.nomad.namespace,
-                task=alloc.get_tasknames()[0],
-                type="stdout",
-                origin="end",
-                plain=True,
-            ),
-        ).text
-        return logs
+        try:
+            return mynomad.request(
+                "GET",
+                f"/client/fs/logs/{alloc.ID}",
+                params=dict(
+                    namespace=self.nj.Namespace,
+                    task=alloc.get_tasknames()[0],
+                    type="stdout",
+                    origin="end",
+                    plain=True,
+                ),
+            ).text
+        except nomadlib.LogNotFound:
+            return None
 
     def _parse_logs(self, logs: str) -> RunnerStateSince:
         """Check if this runner is _right now_
@@ -861,7 +932,7 @@ class NomadRunner(DescProtocol):
             parts = line.split(": ", 1)
             if len(parts) == 2:
                 try:
-                    since = dateutil.parser.parse(parts[0])
+                    since = dateutil.parser.parse(parts[0]).astimezone()
                 except Exception:
                     # log.exception(f"ERR")
                     continue
@@ -873,6 +944,14 @@ class NomadRunner(DescProtocol):
                 if "Running job".lower() in msg:
                     return RunnerStateSince(RunnerState.running, since)
         return RunnerStateSince(RunnerState.starting, self.get_since(self._allocs))
+
+    def stop(self):
+        COUNTERS.nomad_stop.inc()
+        mynomad.stop_job(self.nj.ID)
+
+    def purge(self):
+        COUNTERS.nomad_purge.inc()
+        mynomad.stop_job(self.nj.ID, purge=True)
 
 
 def get_nomad_state() -> List[NomadRunner]:
@@ -891,6 +970,8 @@ def get_nomad_state() -> List[NomadRunner]:
         nr = NomadRunner(nomadlib.JobsJob(jobsjob))
         if nr.try_get_desc():
             curstate.append(nr)
+        else:
+            nr.stop()
     #
     log.debug(f"Found {len(curstate)} nomad runners:")
     for i, s in enumerate(curstate):
@@ -909,7 +990,7 @@ def range_forever():
         i += 1
 
 
-class TakenNames(Set[str]):
+class TakenRunnerNames(Set[str]):
     pass
 
 
@@ -919,7 +1000,7 @@ class RunnerGenerator:
 
     desc: Desc
     info: str
-    takennames: TakenNames
+    takenrunnernames: TakenRunnerNames
 
     def _generate_job_name(self):
         # Github runner name can be max 64 characters and no special chars.
@@ -934,8 +1015,8 @@ class RunnerGenerator:
             ]
             name = re.sub(r"[^a-zA-Z0-9_.-]", "", "-".join(str(x) for x in parts))
             name = name[:64].rstrip("-")
-            if name not in self.takennames:
-                self.takennames.add(name)
+            if name not in self.takenrunnernames:
+                self.takenrunnernames.add(name)
                 return name
 
     @staticmethod
@@ -943,7 +1024,7 @@ class RunnerGenerator:
         return RunnerGenerator(
             Desc.mk(labels=labels, repo_url="http://example.repo.url/user/repo"),
             "This is an information",
-            TakenNames(),
+            TakenRunnerNames(),
         )
 
     def _to_template_args(self) -> dict:
@@ -985,108 +1066,155 @@ class RunnerGenerator:
 # {{{1 scheduler
 
 
+def get_runners_to_trim(runners: List[NomadRunner]) -> List[NomadRunner]:
+    """Generate runners to stop."""
+    order = [
+        RunnerState.pending,
+        RunnerState.starting,
+        RunnerState.listening,
+        RunnerState.running,
+    ]
+    runners = [runner for runner in runners if runner.state.state in order]
+    runners.sort(
+        key=lambda nr: (
+            order.index(nr.state.state),
+            nr.state.since,
+            -nr.nj.ModifyIndex,
+        )
+    )
+    return runners
+
+
 @dataclass
 class Scheduler:
     desc: Desc
-    gjs: List[GithubJob]
-    nrs: List[NomadRunner]
-    takennames: TakenNames
+    ghjobs: List[GithubJob]
+    runners: List[NomadRunner]
+    takenrunnernames: TakenRunnerNames
 
-    def gen_runners_to_trim(self) -> List[NomadRunner]:
-        """Generate runners to stop."""
-        order = [
-            RunnerState.unknown,
-            RunnerState.pending,
-            RunnerState.starting,
-            RunnerState.listening,
-            RunnerState.running,
-        ]
-        nrs = [nr for nr in self.nrs if nr.state.state in order]
-        nrs.sort(
-            key=lambda nr: (
-                order.index(nr.state.state),
-                nr.state.since,
-                -nr.nj.ModifyIndex,
-            )
-        )
-        return nrs
-
-    def schedule(self):
-        nrs_not_dead = [x for x in self.nrs if not x.state.is_dead()]
-        torun = len(self.gjs) - len(nrs_not_dead)
-        if torun > 0:
-            # if there are more github jobs associated with this repository and labels, start them.
-            for _ in range(torun):
-                if (
-                    CONFIG.max_runners > 0
-                    and len(self.takennames) >= CONFIG.max_runners
-                ):
-                    break
-                nomadjobtorun = RunnerGenerator(
-                    self.desc, "", self.takennames
-                ).get_runnertorun()
-                log.info(f"Starting runner {nomadjobtorun.tostr()}")
-                COUNTERS.nomad_run.inc()
-                mynomad.start_job(
-                    nomadjobtorun.nj.asdict(),
-                    nomadlib.JobSubmission.mk_hcl(nomadjobtorun.hcl),
-                )
-        elif torun < 0:
-            # If there are less github jobs with this repository and labels, stop them.
-            tostop = -torun
-            nomadjobstostop = self.gen_runners_to_trim()[:tostop]
-            for nr in nomadjobstostop:
-                log.info(f"Stopping runner {nr.tostr()}")
-                COUNTERS.nomad_stop.inc()
-                mynomad.stop_job(nr.nj.ID)
-        for nr in self.nrs:
-            if nr.state.cmp(
+    def cleanup_timeouted(self):
+        for runner in self.runners:
+            if CONFIG.scheduler.runner_inactivity_timeout and runner.state.cmp(
                 RunnerState.listening, PARSEDCONFIG.runner_inactivity_timeout
             ):
                 log.info(
-                    f"Stopping inactive runner {nr.tostr()} over timeout {CONFIG.runner_inactivity_timeout}"
+                    f"Stopping inactive runner {runner.tostr()} over timeout {CONFIG.scheduler.runner_inactivity_timeout}"
                 )
-                COUNTERS.nomad_stop.inc()
-                mynomad.stop_job(nr.nj.ID)
-            if nr.state.cmp(
-                RunnerState.dead_success, PARSEDCONFIG.purge_successfull_timeout
+                runner.stop()
+            if CONFIG.scheduler.purge_successfull_timeout and runner.state.cmp(
+                [RunnerState.dead_success, RunnerState.dead_stopped],
+                PARSEDCONFIG.purge_successfull_timeout,
             ):
                 log.info(
-                    f"Purging runner {nr.tostr()} over timeout {CONFIG.purge_successfull_timeout}"
+                    f"Purging runner {runner.tostr()} over timeout {CONFIG.scheduler.purge_successfull_timeout}"
                 )
-                COUNTERS.nomad_purge.inc()
-                mynomad.stop_job(nr.nj.ID, purge=True)
-            if nr.state.cmp(
-                RunnerState.dead_failure, PARSEDCONFIG.purge_failure_timeout
+                runner.purge()
+            if CONFIG.scheduler.purge_failure_timeout and runner.state.cmp(
+                [RunnerState.dead_oom, RunnerState.dead_failure],
+                PARSEDCONFIG.purge_failure_timeout,
             ):
                 log.info(
-                    f"Purging runner {nr.tostr()} over timeout {CONFIG.purge_failure_timeout}"
+                    f"Purging runner {runner.tostr()} over timeout {CONFIG.scheduler.purge_failure_timeout}"
                 )
-                COUNTERS.nomad_purge.inc()
-                mynomad.stop_job(nr.nj.ID, purge=True)
+                runner.purge()
+
+    def schedule(self) -> List[NomadRunner]:
+        """
+        Returns the runners that can be stopped without repercusions
+        """
+        not_dead_runners = [x for x in self.runners if not x.state.is_dead()]
+        diff = len(self.ghjobs) - len(not_dead_runners)
+        unneededrunners: List[NomadRunner] = []
+        #
+        if diff > 0:
+            # If there are more github jobs associated with this repository and labels, start them.
+            torun = diff
+            for _ in range(torun):
+                if (
+                    CONFIG.scheduler.max_runners > 0
+                    and len(self.takenrunnernames) >= CONFIG.scheduler.max_runners
+                ):
+                    log.info(
+                        f"The number of runners {len(self.takenrunnernames)} is greater than {CONFIG.scheduler.max_runners}, so ignoring starting runner for {self.desc}"
+                    )
+                    break
+                new_runner = RunnerGenerator(
+                    self.desc, "", self.takenrunnernames
+                ).get_runnertorun()
+                log.info(f"Starting runner {new_runner.tostr()}")
+                new_runner.start()
+        elif diff < 0:
+            # There are runners that are not needed right now - there are less github jobs.
+            unneededcnt = -diff
+            unneededrunners = get_runners_to_trim(self.runners)[:unneededcnt]
+            ret = []
+            for runner in unneededrunners:
+                # Pending runners should be stopped right away
+                if (
+                    runner.state.cmp(RunnerState.pending)
+                    or CONFIG.scheduler.strict
+                    or runner.get_desc().version != VERSION
+                ):
+                    log.info(f"Stopping runner {runner.tostr()}")
+                    runner.stop()
+                ret.append(runner)
+            unneededrunners = ret
+        self.cleanup_timeouted()
+        return unneededrunners
 
 
-def merge_states(gjs: List[GithubJob], nrs: List[NomadRunner]):
-    state: Dict[Desc, Tuple[List[GithubJob], List[NomadRunner]]] = {}
-    for i in gjs:
+MergedState = Dict[Desc, Tuple[List[GithubJob], List[NomadRunner]]]
+
+
+def merge_states(ghjobs: List[GithubJob], runners: List[NomadRunner]) -> MergedState:
+    state: MergedState = {}
+    for i in ghjobs:
         state.setdefault(i.get_desc(), ([], []))[0].append(i)
-    for i in nrs:
+    for i in runners:
         state.setdefault(i.get_desc(), ([], []))[1].append(i)
     return state
+
+
+def make_place_for_pending_scheduler(
+    runners: List[NomadRunner], unneededrunners: List[NomadRunner]
+):
+    # Remove listening runners if there are long pending jobs.
+    pending_want_kill = [
+        runner
+        for runner in runners
+        if runner.state.cmp(RunnerState.pending, PARSEDCONFIG.pending_to_kill_listening)
+    ]
+    print(PARSEDCONFIG.pending_to_kill_listening)
+    if not pending_want_kill:
+        return
+    pending_want_kill_str = (
+        "["
+        + ",".join(f"NomadRunner({runner.tostr()})" for runner in pending_want_kill)
+        + "]"
+    )
+    runners_can_die = get_runners_to_trim(unneededrunners)[: len(pending_want_kill)]
+    for runner in runners_can_die:
+        log.info(
+            f"Stopping runner {runner.tostr()} to make room for {pending_want_kill_str} that are waiting for more than {CONFIG.scheduler.pending_to_kill_listening}"
+        )
+        runner.stop()
 
 
 def loop():
     """The main loop of this program"""
     # Get the github state.
     repos = get_gh_repos()
-    reqstate: list[GithubJob] = get_gh_state(repos)
+    ghjobs: List[GithubJob] = get_gh_state(repos)
     # Get the nomad state.
-    curstate: list[NomadRunner] = get_nomad_state()
-    takennames = TakenNames(x.ID for x in curstate)
+    runners: List[NomadRunner] = get_nomad_state()
+    takenrunnernames = TakenRunnerNames(x.ID for x in runners)
     # Merge states on label and repo.
-    state = merge_states(reqstate, curstate)
+    unneededrunners: List[NomadRunner] = []
+    state: MergedState = merge_states(ghjobs, runners)
     for k, v in state.items():
-        Scheduler(k, v[0], v[1], takennames).schedule()
+        unneededrunners += Scheduler(k, v[0], v[1], takenrunnernames).schedule()
+    if CONFIG.scheduler.pending_to_kill_listening:
+        make_place_for_pending_scheduler(runners, unneededrunners)
     # Ending.
     COUNTERS.print()
 
@@ -1144,15 +1272,20 @@ def cli(args: Args):
         CONFIG = Config(**tmp)
     else:
         CONFIG = Config()
+    #
+    mynomad.namespace = os.environ["NOMAD_NAMESPACE"] = CONFIG.nomad.namespace
+    #
+    global VERSION
+    VERSION = hash(json.dumps(CONFIG.dict()))
     global PARSEDCONFIG
     PARSEDCONFIG = ParsedConfig(CONFIG)
     global GH
     GH = GithubConnection(CONFIG)
+    #
     global TEMPLATE
     TEMPLATE = jinja2.Environment(
         loader=jinja2.BaseLoader(), lstrip_blocks=True, trim_blocks=True
-    ).from_string(CONFIG.template)
-    mynomad.namespace = os.environ["NOMAD_NAMESPACE"] = CONFIG.nomad.namespace
+    ).from_string(CONFIG.get_template())
     global GITHUB_CACHE
     GITHUB_CACHE = GithubCache.load()
 
@@ -1161,34 +1294,34 @@ def cli(args: Args):
     help="""Stop all nomad containers associated with this runner confguration.
              Use with care."""
 )
-def stopall():
+def stopallrunners():
     for x in get_nomad_state():
         log.warning(f"Stopping {x.ID}")
         if not ARGS.dryrun:
-            mynomad.stop_job(x.ID)
+            x.stop()
 
 
 @cli.command(
     help="""Purge all nomad containers associated with this runner confguration.
              Use with care."""
 )
-def purgeall():
+def purgeallrunners():
     for x in get_nomad_state():
         log.warning(f"Purging {x.ID}")
         if not ARGS.dryrun:
-            mynomad.stop_job(x.ID, purge=True)
+            x.purge()
 
 
 @cli.command(
     help="""Purge all nomad containers associated with this runner confguration that are dead.
              Use with care."""
 )
-def purgealldead():
+def purgedeadrunners():
     for x in get_nomad_state():
         if x.is_dead():
             log.warning(f"Purging {x.ID}")
             if not ARGS.dryrun:
-                mynomad.stop_job(x.ID, purge=True)
+                x.purge()
 
 
 @cli.command(help="Dump the configuration")
@@ -1251,7 +1384,7 @@ def listrunners():
         elif not logs:
             dir = "empty_logs"
         else:
-            m = re.search(r"\n\+ export RUNNER_WORKDIR=([^\n]*)/configure\n", logs)
+            m = re.search("Using ([^\n]*) as cache directory", logs)
             if m:
                 dir = m[1]
             else:
@@ -1267,7 +1400,7 @@ def listrunners():
             ]
         )
     log.info("DONE")
-    data.sort(key=lambda x: (x[2], x[0], x[1]))
+    data.sort(key=lambda x: (RunnerState[x[2]].value, x[0], x[1]))
     data.insert(0, ["dir", "ID", "state", "since", "labels", "repo"])
     print(mytabulate(data, True))
 

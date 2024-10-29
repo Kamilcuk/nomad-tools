@@ -30,6 +30,14 @@ job "{{ RUN.RUNNER_NAME }}" {
   {{ SETTINGS.extra_job }}
   type = "batch"
 
+  {% if RUN.host %}
+  constriaint {
+    attribute = "${node.unique.hostname}"
+    operator = "regexp"
+    value = "{{run.host}}\..*"
+  }
+  {% endif %}
+
   group "{{ RUN.RUNNER_NAME }}" {
     {{ SETTINGS.extra_group }}
 
@@ -56,10 +64,19 @@ job "{{ RUN.RUNNER_NAME }}" {
         entrypoint = ["${NOMAD_TASK_DIR}/nomadtools_entrypoint.sh"]
 {% endif %}
 
-{% if SETTINGS.cachedir %}
+{% if SETTINGS.cache == "no" %}
+{% elif SETTINGS.cache %}
         mount {
           type     = "bind"
-          source   = "{{ SETTINGS.cachedir }}"
+          source   = "{{ SETTINGS.cache }}"
+          target   = "/_work"
+          readonly = false
+        }
+{% else %}
+        # Use docker volume for caching.
+        mount {
+          type     = "volume"
+          source   = "nomadtools_githubrunner_cache"
           target   = "/_work"
           readonly = false
         }
@@ -100,6 +117,8 @@ job "{{ RUN.RUNNER_NAME }}" {
 {% if SETTINGS.debug %}
         DEBUG_OUTPUT         = "true"
 {% endif %}
+        ENTRYPOINT_CLEANUP_FREE_BELOW_GB = "20"
+        ENTRYPOINT_CLEANUP_USAGE_PERCENT = "95"
       }
 
       resources {

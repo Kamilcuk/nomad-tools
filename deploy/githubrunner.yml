@@ -1,18 +1,21 @@
 ---
+loop: 10
+# loop: 60
+
 repos:
   # - Kamilcuk
   - Kamilcuk/nomad-tools
   - Kamilcuk/runnertest
   - Kamilcuk/builder
+  - Kamilcuk/ckd
+  - Kamilcuk/kamilscripts
 nomad:
   namespace: github
   # purge: false
   # purge: true
-runner_inactivity_timeout: 1w
-loop: 10
-# loop: 60
 template_settings:
   # docker: host
   docker: dind
-  cachedir: /home/kamil/myprojects/nomad-tools/deploy/cachedir
-
+  ephemeral: false
+scheduler:
+  runner_inactivity_timeout: 1w

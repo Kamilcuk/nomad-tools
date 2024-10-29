@@ -14,7 +14,7 @@ def unescape(txt: str) -> str:
 
 def ns2s(ns: int) -> float:
     """Convert nanoseconds to float seconds"""
-    return ns / 1000000000
+    return ns / 1e9
 
 
 def ns2dt(ns: int) -> datetime.datetime:
