@@ -256,6 +256,7 @@ class SchedulerConfig(pydantic.BaseModel, frozen=True, extra=pydantic.Extra.forb
     """If a Nomad job is pending for this time, start killing other jobs
     in listening state to make room for it"""
     strict: bool = False
+    """Remove a runner once it is unneeded. It's better to run the runner in ephemeral mode"""
 
 
 class Config(pydantic.BaseModel, frozen=True, extra=pydantic.Extra.forbid):
@@ -1149,7 +1150,7 @@ class Scheduler:
             unneededrunners = get_runners_to_trim(self.runners)[:unneededcnt]
             ret = []
             for runner in unneededrunners:
-                # Pending runners should be stopped right away
+                # Pending runners can be just stopped right away.
                 if (
                     runner.state.cmp(RunnerState.pending)
                     or CONFIG.scheduler.strict
@@ -1184,7 +1185,6 @@ def make_place_for_pending_scheduler(
         for runner in runners
         if runner.state.cmp(RunnerState.pending, PARSEDCONFIG.pending_to_kill_listening)
     ]
-    print(PARSEDCONFIG.pending_to_kill_listening)
     if not pending_want_kill:
         return
     pending_want_kill_str = (
