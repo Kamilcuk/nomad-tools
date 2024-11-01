@@ -8,6 +8,7 @@ import contextlib
 import datetime
 import enum
 import inspect
+import io
 import itertools
 import json
 import logging
@@ -47,19 +48,18 @@ from typing_extensions import override
 
 from . import colors, exit_on_thread_exception, flagdebug, nomaddbjob, nomadlib
 from .aliasedgroup import AliasedGroup
-from .common_base import andjoin, cached_property, composed, eprint
+from .common_base import andjoin, cached_property, composed, eprint, quotearr
 from .common_click import complete_set_namespace, help_h_option
 from .common_nomad import (
+    NoJobFound,
     completor,
     mynomad,
     namespace_option,
     nomad_find_job,
-    NoJobFound,
 )
 from .nomaddbjob import NomadDbJob
 from .nomadlib import Event, EventTopic, EventType, MyStrEnum, ns2dt
 from .nomadlib.types import strdict
-
 
 log = logging.getLogger(__name__)
 
@@ -1036,6 +1036,20 @@ class NotifierWorker:
 ###############################################################################
 
 
+class redirect_stdin_from_str(contextlib.AbstractContextManager):
+    def __init__(self, txt: str):
+        self.txt = txt
+
+    def __enter__(self):
+        self.old = sys.stdin
+        sys.stdin = self.new = io.StringIO(self.txt)
+        return self.new
+
+    def __exit__(self, exctype, excinst, exctb):
+        self.new.close()
+        sys.stdin = self.old
+
+
 def __nomad_job_run(args: List[str]) -> str:
     """Call nomad job run to start a Nomad job using nomad job run call with specified arguments"""
     cmd: List[str] = [*"nomad job run -detach -verbose".split(), *args]
@@ -1070,10 +1084,13 @@ def nomad_start_job(opts: List[str]) -> nomadlib.Eval:
     evalid: Optional[str] = None
     if ARGS.json or (len(opts) == 2 and opts[0] == "-json"):
         # If the input file is a json and we have no arguments, we can use the API ourselves.
-        file = opts[-1]
-        stream = contextlib.closing(sys.stdin) if file == "-" else open(file)
-        with stream as f:
-            data: str = f.read()
+        file: str = opts[-1]
+        if ARGS.jobarg:
+            data = file
+        else:
+            stream = contextlib.closing(sys.stdin) if file == "-" else open(file)
+            with stream as f:
+                data: str = f.read()
         job: dict = json.loads(data)
         if "Job" in job:
             job = job["Job"]
@@ -1087,7 +1104,12 @@ def nomad_start_job(opts: List[str]) -> nomadlib.Eval:
         # Otherwise, call nomad executable to schedule the job.
         if ARGS.json:
             opts = ["-json"] + opts
-        evalid = __nomad_job_run(opts)
+        if ARGS.jobarg:
+            with redirect_stdin_from_str(file):
+                opts[:-1] = "-"
+                evalid = __nomad_job_run(opts)
+        else:
+            evalid = __nomad_job_run(opts)
     evaluation = nomadlib.Eval(mynomad.get(f"evaluation/{evalid}"))
     mynomad.namespace = evaluation.Namespace
     return evaluation
@@ -1375,11 +1397,11 @@ class _NomadJobWatcherEvents(_NomadJobWatcherDetail):
         for file in files:
             line: str = json.dumps(arg)
             assert line.count("\n") == 0
-            flagdebug.logdebug("notify", f"notifyfd {file.name} {line!r}")
+            log.debug(f"notify fd {file.name} {line!r}")
             try:
                 file.write(line)
             except (BrokenPipeError, IOError) as e:
-                flagdebug.logdebug("notify", f"{e}")
+                log.debug(f"notify exception {file.name} {e}")
                 try:
                     file.close()
                 except Exception:
@@ -1389,15 +1411,16 @@ class _NomadJobWatcherEvents(_NomadJobWatcherDetail):
     def __notifyuser(self, event: NotifyEvent):
         flagdebug.logdebug("notify", f"notify {event}")
         arg: List[str] = [self.jobid, event]
+        cmd: List[str]
         for exe in ARGS.notifyexe:
             cmd = shlex.split(exe) + arg
-            flagdebug.logdebug("notify", f"notifyexe {cmd}")
+            log.debug(f"notify exe {quotearr(cmd)}")
             subprocess.check_call(cmd)
         self.__notifyfile(arg, self.notify)
         if event == NotifyEvent.started:
             for exe in ARGS.notifyexestarted:
                 cmd = shlex.split(exe)
-                flagdebug.logdebug("notify", f"notifyexestarted {cmd}")
+                log.debug(f"notify exestarted {quotearr(cmd)}")
                 subprocess.check_call(cmd)
             self.__notifyfile(arg, self.notifystarted)
             for file in self.notifystarted:
@@ -1887,6 +1910,9 @@ class Args(LogOptions, NotifyOptions):
              Job is successfull if all job summary metrics are zero except nonzero complete metric.
              Relevant in job, run, stop and stopped modes.
              """,
+    )
+    jobarg: bool = clickdc.option(
+        help="The jobfile argument is the Nomad job specification in HCL2 or JSON format"
     )
     json: bool = clickdc.option(
         help="The job file is in JSON format",
