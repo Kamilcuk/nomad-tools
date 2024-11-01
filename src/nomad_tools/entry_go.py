@@ -3,6 +3,7 @@ import datetime
 import io
 import json
 import logging
+import multiprocessing
 import os
 import re
 import shlex
@@ -14,6 +15,7 @@ import tempfile
 import threading
 import uuid
 from dataclasses import dataclass
+from functools import partialmethod
 from typing import IO, Any, Callable, Dict, List, Optional, Tuple, TypeVar
 
 import click
@@ -21,7 +23,7 @@ import clickdc
 import clickforward
 import dotenv
 
-from . import entry_watch, taskexec
+from . import entry_watch, exit_on_thread_exception, taskexec
 from .common_base import NOMAD_NAMESPACE, dict_remove_none, quotearr
 from .common_click import EPILOG, help_h_option
 from .common_nomad import namespace_option
@@ -43,18 +45,18 @@ def tempfile_with(txt: str):
         yield f.name
 
 
-class redirect_stdin_str(contextlib.AbstractContextManager):
-    def __init__(self, txt: str):
-        self.txt = txt
-
-    def __enter__(self):
-        self.old = sys.stdin
-        sys.stdin = self.new = io.StringIO(self.txt)
-        return self.new
-
-    def __exit__(self, exctype, excinst, exctb):
-        self.new.close()
-        sys.stdin = self.old
+@contextlib.contextmanager
+def terminating(p: multiprocessing.Process):
+    """Make Process be able to be used in with: clause"""
+    try:
+        p.start()
+        yield p
+    finally:
+        p.terminate()
+        p.join(15)
+        if p.exitcode is None:
+            p.kill()
+            p.join()
 
 
 def snake_to_camel_case(txt: str) -> str:
@@ -171,7 +173,7 @@ class MountNfsType(click.ParamType):
 
 
 @dataclass
-class Parsed:
+class ParsedArgs:
     job: dict
     jobid: str
     cmd: List[str]
@@ -213,7 +215,7 @@ class Args:
         type=click.File(), multiple=True, help="Read in a file of environment variables"
     )
     hostname: Optional[str] = clickdc.option(help="Container host name")
-    init: bool = clickdc.option(is_flag=True, help="Add init=true to config")
+    init: Optional[bool] = clickdc.option(help="Add init=true to config")
     name: Optional[str] = clickdc.option(
         help=f"Job, group and task name. Default: {NAME_PREFIX}<uuid>"
     )
@@ -332,7 +334,7 @@ class Args:
     image_pull_timeout: Optional[str] = clickdc.option(
         help="Add image_pull_timeout to task config"
     )
-    purge: bool = clickdc.option(
+    purge: Optional[bool] = clickdc.option(
         "--rm", is_flag=True, help="After the job is run, purge the job from Nomad"
     )
     output: int = clickdc.option(
@@ -344,8 +346,8 @@ class Args:
             If specified twice or more, will show the job and then run it.
             """,
     )
-    detach: bool = clickdc.option(is_flag=True, help="Run job in background")
-    interactive: bool = clickdc.option(
+    detach: Optional[bool] = clickdc.option(is_flag=True, help="Run job in background")
+    interactive: Optional[bool] = clickdc.option(
         "-i",
         is_flag=True,
         help="""
@@ -415,7 +417,7 @@ class Args:
         required=True, nargs=-1, type=clickforward.FORWARD
     )
 
-    def parse(self) -> Parsed:
+    def parse(self) -> ParsedArgs:
         name: str = self.name if self.name else f"{NAME_PREFIX}{uuid.uuid4()}"
         if self.image is None and self.driver in "podman docker containerd".split():
             self.image = self.command[0]
@@ -425,7 +427,6 @@ class Args:
             assert self.command, "No command to execute"
             cmd = list(self.command)
             self.command = tuple(shlex.split(self.interactive_foreground))
-            self.init = True
         #
         job = {
             "ID": name,
@@ -520,7 +521,9 @@ class Args:
                                 "group_add": trueornone(self.group_add),
                                 "cap_add": trueornone(self.cap_add),
                                 "cap_drop": trueornone(self.cap_drop),
-                                "tty": trueornone(self.tty),
+                                "tty": (
+                                    None if self.interactive else trueornone(self.tty)
+                                ),
                                 "force_pull": trueornone(self.force_pull),
                                 "work_dir": self.workdir,
                                 "image_pull_timeout": self.image_pull_timeout,
@@ -592,21 +595,18 @@ class Args:
             ],
             **self.extra_job,
         }
-        return Parsed(job, name, cmd)
+        return ParsedArgs(job, name, cmd)
 
 
 class Interactive:
     """Small wrapper to handle ineractivity properly"""
 
-    def __init__(self, par: Parsed):
+    def __init__(self, par: ParsedArgs, cmd: List[str]):
         self.par = par
-        self.returncode: Optional[int] = None
-        """The returncode returned from interactive command"""
-
-    def setup(self):
-        self.rfd, wfd = os.pipe()
-        threading.Thread(target=self.__thread).start()
-        return wfd
+        self.rfd, self.wfd = os.pipe()
+        threading.Thread(target=self.__thread, daemon=True).start()
+        cmd.insert(0, f"--notifystarted={self.wfd}")
+        self.proc = None
 
     def __thread(self):
         try:
@@ -625,14 +625,21 @@ class Interactive:
                 at[0],
             ] + self.par.cmd
             log.info(f"+ {quotearr(cmd)}")
-            ret = subprocess.run(cmd)
-            self.returncode = ret.returncode
+            with subprocess.Popen(cmd) as self.proc:
+                self.proc.wait()
         except Exception as e:
             log.exception(e)
             raise
         finally:
             # Stop the main thread from itself.
             os.kill(os.getpid(), signal.SIGINT)
+
+    def stop(self):
+        if self.proc:
+            self.proc.terminate()
+            self.proc.wait()
+            return self.proc.returncode
+        return -1
 
 
 @click.command()
@@ -685,8 +692,9 @@ def cli(
     logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO)
     if os.environ.get(NOMAD_NAMESPACE, "*") == "*":
         os.environ[NOMAD_NAMESPACE] = "default"
+    exit_on_thread_exception.install()
     log.debug(f"{args}")
-    par: Parsed = args.parse()
+    par: ParsedArgs = args.parse()
     # log.debug(f"{par}")
     job: dict = dict_remove_none(par.job)
     log.debug(f"{job}")
@@ -708,19 +716,23 @@ def cli(
             else []
         ),
         *clickdc.to_args(notifyargs),
+        "--jobarg",
         "start" if args.detach else "run",
-        "-",
+        jobjson,
     ]
     if args.purge:
         assert not args.detach, "detach conflicts with purge"
         cmd = ["--purge", *cmd]
+    terminal: Optional[Interactive] = None
     if args.interactive:
         assert not args.detach, "interactive with detach doesn't make sense"
-        wfd = Interactive(par).setup()
-        cmd = [f"--notifystarted={wfd}", *cmd]
-    with redirect_stdin_str(jobjson):
-        log.debug(f"+ nomadtools watch {quotearr(cmd)}")
+        terminal = Interactive(par, cmd)
+    log.debug(f"+ nomadtools watch {quotearr(cmd)}")
+    try:
         entry_watch.cli.main(args=cmd)
+    finally:
+        if terminal:
+            exit(terminal.stop())
 
 
 if __name__ == "__main__":
