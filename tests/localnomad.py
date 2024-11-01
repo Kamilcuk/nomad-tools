@@ -24,11 +24,12 @@ assert (
 
 if not args.version:
     cmdstr: str = "python -m nomad_tools.entrypoint downloadrelease --showversion nomad"
-    cmd: List[str] = split(cmdstr)
+    cmd = split(cmdstr)
     print(f"+ {cmdstr}")
     args.version = subprocess.check_output(cmd, text=True).strip()
 
-exe: Path = Path(f"./build/bin/nomad{args.version}")
+DIR = Path(__file__).absolute().parent.parent
+exe = DIR / f"build/bin/nomad{args.version}"
 if not exe.exists():
     cmdstr = f"python -m nomad_tools.entrypoint downloadrelease -p {quote(args.version)} nomad {quote(str(exe))}"
     cmd = split(cmdstr)
@@ -38,8 +39,8 @@ if not exe.exists():
 cmd: List[str] = [
     *(["sudo"] if os.getuid() != 0 else []),
     str(exe),
-    *f"agent -dev -config ./tests/nomad.d/nomad.hcl -log-level {args.log_level}".split(),
-    *(["-config", "./tests/nomad.d/tls.hcl"] if args.tls else []),
+    *f"agent -dev -config {quote(str(DIR))}/tests/nomad.d/nomad.hcl -log-level {quote(args.log_level)}".split(),
+    *(["-config", f"{DIR}/tests/nomad.d/tls.hcl"] if args.tls else []),
 ]
 cmdstr = " ".join(quote(x) for x in cmd)
 print(f"+ {cmdstr}")
