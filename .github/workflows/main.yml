@@ -33,7 +33,7 @@ jobs:
           cache: 'pip'
           cache-dependency-path: ./requirements*.txt
       - name: install editable package
-        run: pip install -e .
+        run: pip install .
       - name: install test requirements
         run: pip install -r ./requirements-test.txt
       - name: run pyright
@@ -58,7 +58,7 @@ jobs:
       - name: upgrade pip
         run: pip install --upgrade pip
       - name: install editable package
-        run: pip install -e .
+        run: pip install .
       - name: install nomad server
         run: bash ./tests/provision.sh nomad_install 1.8.0
       - name: run nomad server tls
