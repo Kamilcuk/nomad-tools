@@ -1082,9 +1082,9 @@ def nomad_start_job(opts: List[str]) -> nomadlib.Eval:
     """Start a nomad job using nomad job run parameters. Return evluation from running the job"""
     assert opts
     evalid: Optional[str] = None
+    file: str = opts[-1]
     if ARGS.json or (len(opts) == 2 and opts[0] == "-json"):
         # If the input file is a json and we have no arguments, we can use the API ourselves.
-        file: str = opts[-1]
         if ARGS.jobarg:
             data = file
         else:
