@@ -21,7 +21,7 @@ jobs:
           - nomad: 1.6.8
             python: 3.7
     name: Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 7
     steps:
       - name: checkout
@@ -47,7 +47,7 @@ jobs:
       - name: run nomad server
         run: bash ./tests/provision.sh nomad_start
       - name: run integration tests
-        run: ./integration_tests.sh --durations=10 --cov=nomad_tools -n 3
+        run: ./integration_tests.sh --durations=10 --cov=nomad_tools -n 2
 
   test_ssl:
     runs-on: ubuntu-latest
