@@ -18,23 +18,28 @@ if args.verbose:
     args.log_level = "debug"
 
 assert Path("/sys/module/bridge"), "ERROR: bridge module not loaded"
-assert (
-    subprocess.run("docker status".split()).returncode != 0
-), "ERROR: docker does not work"
-
-if not args.version:
-    cmdstr: str = "python -m nomad_tools.entrypoint downloadrelease --showversion nomad"
-    cmd = split(cmdstr)
-    print(f"+ {cmdstr}")
-    args.version = subprocess.check_output(cmd, text=True).strip()
-
+assert subprocess.run("docker info".split()).returncode == 0, (
+    "ERROR: docker does not work"
+)
 DIR = Path(__file__).absolute().parent.parent
-exe = DIR / f"build/bin/nomad{args.version}"
-if not exe.exists():
-    cmdstr = f"python -m nomad_tools.entrypoint downloadrelease -p {quote(args.version)} nomad {quote(str(exe))}"
-    cmd = split(cmdstr)
-    print(f"+ {cmdstr}")
-    subprocess.check_call(cmd)
+
+if args.version == "system":
+    exe = "nomad"
+else:
+    if not args.version:
+        cmdstr: str = (
+            "python -m nomad_tools.entrypoint downloadrelease --showversion nomad"
+        )
+        cmd = split(cmdstr)
+        print(f"+ {cmdstr}")
+        args.version = subprocess.check_output(cmd, text=True).strip()
+
+    exe = DIR / f"build/bin/nomad{args.version}"
+    if not exe.exists():
+        cmdstr = f"python -m nomad_tools.entrypoint downloadrelease -p {quote(args.version)} nomad {quote(str(exe))}"
+        cmd = split(cmdstr)
+        print(f"+ {cmdstr}")
+        subprocess.check_call(cmd)
 
 cmd: List[str] = [
     *(["sudo"] if os.getuid() != 0 else []),
