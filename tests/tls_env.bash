@@ -30,7 +30,7 @@ while (($#)); do
 		_r export NOMAD_ADDR=https://localhost:4646
 		_r unset NOMAD_TLS_SERVER_NAME
 		_r unset NOMAD_CACERT
-		_r export NOMAD_CAPATH="$_DIR"/capath
+		_r export NOMAD_CAPATH="$_DIR"
 		_r export NOMAD_CLIENT_CERT="$_DIR"/global-cli-nomad.pem
 		_r export NOMAD_CLIENT_KEY="$_DIR"/global-cli-nomad-key.pem
 		;;
