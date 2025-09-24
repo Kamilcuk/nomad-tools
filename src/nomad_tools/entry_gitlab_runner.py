@@ -8,21 +8,29 @@ import logging
 import os
 import socket
 import string
+import subprocess
 import sys
 import tempfile
 from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 from shlex import quote, split
 from textwrap import dedent
-from typing import Callable, Dict, List, Optional, Union
+from typing import Callable, Dict, List, Optional, Set, Union
 
 import click
 import yaml
 
 from . import entry_watch, nomadlib, taskexec
 from .aliasedgroup import AliasedGroup
-from .common import (cached_property, help_h_option, get_package_file,
-                     get_version, mynomad, quotearr)
+from .common import (
+    cached_property,
+    get_package_file,
+    get_version,
+    help_h_option,
+    mynomad,
+    quotearr,
+)
 from .nomadlib.datadict import DataDict
 from .nomadlib.types import Job, JobTask, JobTaskConfig
 
@@ -74,9 +82,9 @@ class ServiceSpec(DataDict):
         data: List[Union[str, Dict[str, str]]] = (
             json.loads(CI_JOB_SERVICES) if CI_JOB_SERVICES else []
         )
-        assert isinstance(
-            data, list
-        ), f"CUSTOM_ENV_CI_JOB_SERVICES is not a list: {CI_JOB_SERVICES}"
+        assert isinstance(data, list), (
+            f"CUSTOM_ENV_CI_JOB_SERVICES is not a list: {CI_JOB_SERVICES}"
+        )
         ret: List[ServiceSpec] = []
         for x in data:
             if isinstance(x, str):
@@ -119,9 +127,9 @@ class ConfigCustom(DataDict):
     """User to execute the task."""
 
     def apply(self, nomadjob: Job):
-        assert (
-            not ServiceSpec.get_servicespecs()
-        ), "Services only handled in Docker mode"
+        assert not ServiceSpec.get_servicespecs(), (
+            "Services only handled in Docker mode"
+        )
         assert nomadjob
 
     def get_task_for_stage(self, stage: str) -> str:
@@ -148,8 +156,10 @@ class ConfigDocker(ConfigCustom):
     force_pull: bool = True
     """https://developer.hashicorp.com/nomad/docs/drivers/docker#force_pull"""
     waiter_image: str = "docker:25.0.3-cli"
-    """A image with POSIX sh and docker that waits for services to have open ports"""
-    helper_image: str = "gitlab/gitlab-runner:alpine-v16.9.1"
+    """A image with POSIX sh and docker that waits for services to have open ports
+    Url: https://hub.docker.com/r/gitlab/gitlab-runner/tags"""
+    # helper_image: str = "gitlab/gitlab-runner:alpine-v16.9.1"
+    helper_image: str = "gitlab/gitlab-runner:bleeding"
     """(Advanced) The default helper image used to clone repositories and upload artifacts."""
     auto_fix_docker_dind: bool = True
     """
@@ -169,11 +179,7 @@ class ConfigDocker(ConfigCustom):
             "Driver": "docker",
             "Config": {
                 "image": "${CUSTOM_ENV_CI_JOB_IMAGE}",
-                "entrypoint": [],
-                "command": "sleep",
-                "args": [
-                    "${CUSTOM_ENV_CI_JOB_TIMEOUT}",
-                ],
+                "entrypoint": ["sleep", "${CUSTOM_ENV_CI_JOB_TIMEOUT}"],
             },
         }
     )
@@ -187,11 +193,7 @@ class ConfigDocker(ConfigCustom):
                 "Driver": "docker",
                 "Config": {
                     "image": self.helper_image,
-                    "entrypoint": [],
-                    "command": "sleep",
-                    "args": [
-                        "${CUSTOM_ENV_CI_JOB_TIMEOUT}",
-                    ],
+                    "entrypoint": ["sleep", "${CUSTOM_ENV_CI_JOB_TIMEOUT}"],
                 },
                 "RestartPolicy": {"Attempts": 0},
                 "Lifecycle": {
@@ -384,6 +386,23 @@ class ConfigMode(enum.Enum):
     custom = enum.auto()
 
 
+def min_none(*data: Optional[int]):
+    return min((x for x in data if x), default=None)
+
+
+def int_list_to_ints(data: str) -> Set[int]:
+    ret: Set[int] = set()
+    for i in data.split(","):
+        if i:
+            if "-" in i:
+                a, b = i.split("-", 1)
+                for k in range(int(a), int(b)):
+                    ret.add(k)
+            else:
+                ret.add(int(i))
+    return ret
+
+
 class Config(DataDict):
     """Configuration of this program"""
 
@@ -403,17 +422,17 @@ class Config(DataDict):
 
     mode: str = "docker"
     """Mode to execute with. Has to be set."""
-    verbose: int = 0
+    verbose: Union[bool, int] = 0
     """Enable debugging?"""
     purge: Optional[bool] = None
     """Should the job be purged after we are done?"""
     purge_successful: bool = True
     """Should the successful Nomad jobs be purged after we are done? Only relevant when purge=none."""
-    jobname: str = (
-        "gitlabrunner.${CUSTOM_ENV_CI_RUNNER_ID}.${CUSTOM_ENV_CI_PROJECT_PATH_SLUG}.${CUSTOM_ENV_CI_JOB_ID}"
-    )
+    jobname: str = "gitlabrunner.${CUSTOM_ENV_CI_RUNNER_ID}.${CUSTOM_ENV_CI_PROJECT_PATH_SLUG}.${CUSTOM_ENV_CI_JOB_ID}"
     """The job name"""
     CPU: Optional[int] = None
+    """The default job constraints."""
+    cores: Optional[int] = None
     """The default job constraints."""
     MemoryMB: Optional[int] = None
     """The default job constraints."""
@@ -442,6 +461,18 @@ class Config(DataDict):
             if k.startswith("NOMAD_") and v:
                 assert isinstance(v, str)
                 os.environ[k] = v
+        # If cpuset_cpus and NOMADRUNNER_CPUSET_CPUS are given, restrict the number of cpus only to cpuset_cpus.
+        tmp = os.environ.get("CUSTOM_ENV_NOMADRUNNER_CPUSET_CPUS", "")
+        self.cpuset_cpus: str = (
+            ",".join(
+                str(x)
+                for x in sorted(
+                    int_list_to_ints(self.cpuset_cpus) - int_list_to_ints(tmp)
+                )
+            )
+            if self.cpuset_cpus
+            else tmp
+        )
 
     @cached_property
     def get_driverconfig(self) -> ConfigCustom:
@@ -459,28 +490,36 @@ class Config(DataDict):
         return cc
 
     def _add_meta(self, job: Job):
+        cenv = get_CUSTOM_ENV()
         dc = self.get_driverconfig
         task = job.TaskGroups[0].Tasks[0]
         job.Meta = job.Meta if "Meta" in job and job.Meta else {}
         job.Meta.update(
             {
+                # These variables are for easy navigation documenation in the Nomad gui.
                 "CI_JOB_URL": os.environ.get("CUSTOM_ENV_CI_JOB_URL", ""),
                 "CI_JOB_NAME": os.environ.get("CUSTOM_ENV_CI_JOB_NAME", ""),
                 "CI_PROJECT_URL": os.environ.get("CUSTOM_ENV_CI_PROJECT_URL", ""),
                 "CI_DRIVER": task.Driver,
                 "CI_RUNUSER": dc.user,
                 "CI_OOM_SCORE_ADJUST": str(self.oom_score_adjust),
-                "CI_CPUSET_CPUS": str(self.cpuset_cpus),
-                "CI_EXIT_FAILURE": str(BuildFailure.code),
+                "CI_CPUSET_CPUS": self.cpuset_cpus,
             }
         )
 
     def resources(self):
+        cenv = get_CUSTOM_ENV()
         return {
             "Resources": {
-                "CPU": self.CPU,
-                "MemoryMB": self.MemoryMB,
-                "MemoryMaxMB": self.MemoryMaxMB,
+                "CPU": min_none(int(cenv.get("NOMADRUNNER_CPU", 0)), self.CPU),
+                "Cores": min_none(int(cenv.get("NOMADRUNNER_CORES", 0)), self.cores),
+                "MemoryMB": min_none(
+                    int(cenv.get("NOMADRUNNER_MEMORY_MB", 0)), self.MemoryMB
+                ),
+                "MemoryMaxMB": min_none(
+                    int(cenv.get("NOMADRUNNER_MEMORY_MAX_MB", 0)),
+                    self.MemoryMaxMB,
+                ),
             }
         }
 
@@ -552,11 +591,13 @@ def purge_previous_nomad_job(jobname: str):
     try:
         job = Job(jobdata.get("Job", jobdata))
     except KeyError:
-        log.exception("Something wrong with purging the nomad job. Feel free to fill an issue")
+        log.exception(
+            "Something wrong with purging the nomad job. Feel free to fill an issue"
+        )
         return
-    assert (
-        job.Stop is True or job.Status == "dead"
-    ), f"Job {job.description()} already exists and is not stopped or not dead. Bailing out"
+    assert job.Stop is True or job.Status == "dead", (
+        f"Job {job.description()} already exists and is not stopped or not dead. Bailing out"
+    )
     run_entry_watch(f"--purge -xn0 stop {quote(jobname)}")
 
 
@@ -612,9 +653,9 @@ class Jobenv:
 
     def __init__(self):
         NOMAD_GITLAB_RUNNER_JOB = os.environ.get("NOMAD_GITLAB_RUNNER_JOB")
-        assert (
-            NOMAD_GITLAB_RUNNER_JOB is not None
-        ), "Env variable set in config NOMAD_GITLAB_RUNNER_JOB is missing"
+        assert NOMAD_GITLAB_RUNNER_JOB is not None, (
+            "Env variable set in config NOMAD_GITLAB_RUNNER_JOB is missing"
+        )
         jobjson = json.loads(NOMAD_GITLAB_RUNNER_JOB)
         self.job = Job(jobjson)
         self.assert_job(self.job)
@@ -649,14 +690,15 @@ class Jobenv:
 ###############################################################################
 
 
+@dataclass
 class BuildFailure(Exception):
     """Raising this exception makes the code exit with BUILD_FAILURE_EXIT_CODE"""
 
-    code: int = 76
+    code: int
     """Special chosen exit status returned by script.sh that the build script has failed."""
 
 
-@click.command(
+@click.group(
     "gitlab-runner",
     cls=AliasedGroup,
     help=""" Custom gitlab-runner executor to run gitlab-ci jobs in Nomad. """,
@@ -709,14 +751,20 @@ def cli(verbose: int, configpath: Path, runner_id: int):
 
 
 def executor_exit(f: Callable) -> Callable:
-    """Custom executor should always exit with specific exit codes"""
+    """
+    Custom executor should always exit with specific exit codes
+    https://docs.gitlab.com/runner/executors/custom/#build-failure-exit-code
+    """
 
     def executor_exiting(*args, **kvargs):
         try:
             f(*args, **kvargs)
-        except BuildFailure:
-            log.debug("build failure")
-            exit(int(os.environ.get("BUILD_FAILURE_EXIT_CODE", BuildFailure.code)))
+        except BuildFailure as e:
+            log.debug(f"build failure {e}")
+            BUILD_EXIT_CODE_FILE = os.environ.get("BUILD_EXIT_CODE_FILE")
+            if BUILD_EXIT_CODE_FILE:
+                Path(BUILD_EXIT_CODE_FILE).write_text(str(e.code))
+            exit(int(os.environ.get("BUILD_FAILURE_EXIT_CODE", e.code)))
         except Exception as e:
             log.exception(e)
             exit(int(os.environ.get("SYSTEM_FAILURE_EXIT_CODE", 111)))
@@ -764,6 +812,9 @@ def mode_prepare():
         run_entry_watch(f"--json start {f.name}")
 
 
+FILE_ISSUE: str = "File an issue at https://github.com/Kamilcuk/nomadtools/issues/new"
+
+
 @cli.command("run", help="https://docs.gitlab.com/runner/executors/custom.html#run")
 @click.argument("script")
 @click.argument("stage")
@@ -775,22 +826,29 @@ def mode_run(script: str, stage: str):
     taskname = config.get_driverconfig.get_task_for_stage(stage)
     # Find our running allocation.
     allocid = taskexec.find_job_alloc(je.jobname, taskname)
-    with open(script) as f:
-        scriptcontent = f.read()
+    scriptcontent = Path(script).read_text()
     # Run our script with positional arguments with the gitlab script passed as first argument.
-    shcmd: str = f'set -- {quote(scriptcontent)} "$@"' + "\n" + config.script
+    log.debug(f"executing {allocid}/{taskname} state={stage}")
     rr = taskexec.run(
         allocid,
         taskname,
-        # stage will be visible in Nomad logs.
-        split(f"sh {set_x} -s {quote(stage)}"),
-        # Pass the script on stdin.
-        input=shcmd.encode(),
+        split(
+            f"sh {set_x} -c {quote(config.script)} sh {quote(scriptcontent)} {quote(stage)}"
+        ),
     )
-    if rr.returncode == BuildFailure.code:
-        raise BuildFailure()
-    else:
-        rr.check_returncode()
+    # 155 is hardcoded in script.sh
+    if rr.returncode == 155:
+        cmd = f"nomad alloc fs {quote(allocid)} {quote(taskname)}/local/code.txt"
+        log.debug(f"Getting exit status from {cmd}")
+        try:
+            code = int(subprocess.check_output(split(cmd)))
+        except (subprocess.CalledProcessError, ValueError):
+            log.exception(
+                f"nomad gitlab script failed to store exit code. This might be an internal error. {FILE_ISSUE}"
+            )
+            raise
+        raise BuildFailure(code)
+    rr.check_returncode()
 
 
 @cli.command(
