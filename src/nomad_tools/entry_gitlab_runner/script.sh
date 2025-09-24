@@ -11,13 +11,14 @@ if hash renice 2>/dev/null; then renice -n 40 $$ >/dev/null; fi
 if hash chrt 2>/dev/null; then chrt -i -p 0 $$; fi
 # Check if all variables are fine passed from Nomad meta.
 for i in \
+	NOMAD_TASK_DIR \
 	NOMAD_META_CI_DRIVER \
 	NOMAD_META_CI_RUNUSER \
 	NOMAD_META_CI_JOB_URL \
 	NOMAD_META_CI_PROJECT_URL \
 	NOMAD_META_CI_OOM_SCORE_ADJUST \
 	NOMAD_META_CI_CPUSET_CPUS \
-	NOMAD_META_CI_EXIT_FAILURE; do
+; do
 	if eval "[ -z \"\${$i+x}\" ]"; then
 		fatal "variable is not set: $i"
 	fi
@@ -62,4 +63,4 @@ docker)
 	;;
 esac
 # Finally execute the commands script. Exit with proper exit status.
-"$@" || exit "$NOMAD_META_CI_EXIT_FAILURE"
+"$@" || { echo $? > "$NOMAD_TASK_DIR"/code.txt && exit 155; }
