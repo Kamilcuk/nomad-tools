@@ -47,7 +47,7 @@ jobs:
       - name: run nomad server
         run: bash ./tests/provision.sh nomad_start
       - name: run integration tests
-        run: ./integration_tests.sh --durations=10 --cov=nomad_tools -n 2
+        run: ./integration_tests.sh --durations=10 --cov=nomad_tools -n 3
 
   test_ssl:
     runs-on: ubuntu-latest

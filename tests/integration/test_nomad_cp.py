@@ -90,8 +90,7 @@ def test_entry_cp_dir():
 def test_entry_cp_file():
     with run_temp_job() as (jobname, nomaddir, hostdir):
         txt = f"{time.time()}"
-        with Path(f"{hostdir}/file").open("w") as f:
-            f.write(txt)
+        Path(f"{hostdir}/file").write_text(txt)
         run_entry_cp(f"{hostdir}/file {jobname}:{nomaddir}/file")
         run_entry_cp(f"{jobname}:{nomaddir}/file {hostdir}/file2")
         with Path(f"{hostdir}/file2").open() as f:

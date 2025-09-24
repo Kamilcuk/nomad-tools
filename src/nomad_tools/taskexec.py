@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from dataclasses import dataclass
 import functools
 import io
 import json
@@ -47,12 +48,13 @@ def find_alloc_task(
     if allocid:
         assert not job
     else:
+        assert job
         allocations = [Alloc(x) for x in mynomad.get(f"job/{job}/allocations")]
-        assert allocations, f"Did not find any allocations for job {job}"
+        assert allocations, f"Did not find any allocations for job {job}: {allocations}"
         if task:
             allocations = [x for x in allocations if task in x.get_tasknames()]
         allocation = next((alloc for alloc in allocations if alloc.is_running()), None)
-        assert allocation, f"Did not find running allocation for job {job}"
+        assert allocation, f"Did not find running allocation for job {job}: allocation"
         allocid = allocation.ID
     if not task:
         if not allocation:
@@ -221,6 +223,21 @@ _InputString = Optional[_StrAny]
 T = TypeVar("T", bytes, str)
 
 
+@dataclass
+class MyIO:
+    """Wrapper around IO[bytes] that optionally closes the io on with block"""
+
+    io: IO[bytes]
+    close: bool
+
+    def __enter__(self):
+        return self.io
+
+    def __exit__(self, *_):
+        if self.close:
+            self.io.close()
+
+
 class NomadPopen(Generic[T]):
     """
     An implementation of subprocess.Popen on top of Nomad Exec Alocation API.
@@ -274,44 +291,44 @@ class NomadPopen(Generic[T]):
         self.__initialize_stdin(self.__stdin_to_fd(stdin))
         self.__initialize_stdout(self.__stdout_to_fd(stdout))
 
-    def __stdin_to_fd(self, stdin: _FILE) -> Optional[IO[bytes]]:
+    def __stdin_to_fd(self, stdin: _FILE) -> Optional[MyIO]:
         self.stdin: Optional[IO[T]] = None
         if stdin == DEVNULL or stdin is None:
             return None
         elif isinstance(stdin, BinaryIO):
-            return stdin
+            return MyIO(stdin, close=False)
         elif isinstance(stdin, TextIO):
-            return stdin.buffer
+            return MyIO(stdin.buffer, close=False)
+        elif isinstance(stdin, int) and stdin >= 0:
+            return MyIO(os.fdopen(stdin, "rb"), close=True)
         elif stdin == PIPE:
             pipe = os.pipe()
             self.stdin = os.fdopen(pipe[1], "w" if self.text else "wb")
-            return os.fdopen(pipe[0], "rb")
-        elif isinstance(stdin, int) and stdin >= 0:
-            return os.fdopen(stdin, "rb")
+            return MyIO(os.fdopen(pipe[0], "rb"), close=True)
         else:
             assert 0, f"Unhandled stdin={stdin}"
 
-    def __stdout_to_fd(self, stdout: _FILE) -> IO[bytes]:
+    def __stdout_to_fd(self, stdout: _FILE) -> MyIO:
         self.stdout: Optional[IO[T]] = None
         if stdout is None:
-            return sys.stdout.buffer
-        elif stdout == DEVNULL:
-            pass
+            return MyIO(sys.stdout.buffer, close=False)
         elif isinstance(stdout, BinaryIO):
-            return stdout
+            return MyIO(stdout, close=False)
         elif isinstance(stdout, TextIO):
-            return stdout.buffer
+            return MyIO(stdout.buffer, close=False)
+        elif isinstance(stdout, int) and stdout >= 0:
+            return MyIO(os.fdopen(stdout, "wb"), close=False)
         elif stdout == PIPE:
             pipe = os.pipe()
             self.stdout = os.fdopen(pipe[0], "r" if self.text else "rb")
-            return os.fdopen(pipe[1], "wb")
-        elif isinstance(stdout, int) and stdout >= 0:
-            return os.fdopen(stdout, "wb")
+            return MyIO(os.fdopen(pipe[1], "wb"), close=True)
+        elif stdout == DEVNULL:
+            pass
         else:
             assert 0, f"Unhandled stdout={self.stdout}"
-        return open(os.devnull, "wb")
+        return MyIO(open(os.devnull, "wb"), close=True)
 
-    def __initialize_stdin(self, fd: Optional[IO[bytes]]):
+    def __initialize_stdin(self, fd: Optional[MyIO]):
         if fd is not None:
 
             def writer():
@@ -337,7 +354,7 @@ class NomadPopen(Generic[T]):
         else:
             self.np.close_stdin()
 
-    def __initialize_stdout(self, fd: IO[bytes]):
+    def __initialize_stdout(self, fd: MyIO):
         def reader():
             try:
                 with fd as f:
