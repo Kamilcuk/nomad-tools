@@ -168,18 +168,23 @@ def run(
         stdin=subprocess.PIPE if input else subprocess.DEVNULL,
         **kwargs,
     ) as pp:
-        if input:
-            assert pp.stdin
-            pp.stdin.write(input)
-            pp.stdin.close()
-        captured_stdout: Optional[Union[bytes, str]] = None
-        if stdout:
-            captured_stdout = "" if text else b""
-            assert pp.stdout
-            for line in pp.stdout:
-                line: Any = line.rstrip()
-                captured_stdout += line + ("\n" if text else b"\n")
-                print(line)
+        try:
+            if input:
+                assert pp.stdin
+                pp.stdin.write(input)
+                pp.stdin.close()
+            captured_stdout: Optional[Union[bytes, str]] = None
+            if stdout:
+                captured_stdout = "" if text else b""
+                assert pp.stdout
+                for line in pp.stdout:
+                    line: Any = line.rstrip()
+                    captured_stdout += line + ("\n" if text else b"\n")
+                    print(line)
+        except Exception:
+            pp.terminate()
+        finally:
+            pp.wait()
     rr = subprocess.CompletedProcess(cmda, pp.returncode, captured_stdout, None)
     #
     if check is True:
