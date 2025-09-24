@@ -6,6 +6,7 @@ import io
 import json
 import logging
 import os
+import sys
 import subprocess
 import threading
 import urllib.parse
@@ -25,7 +26,6 @@ from typing import (
     Union,
     cast,
 )
-
 import websocket
 from typing_extensions import Literal, overload
 
@@ -236,9 +236,7 @@ class NomadPopen(Generic[T]):
         args: List[str],
         stdin: _FILE = ...,
         stdout: _FILE = ...,
-        text: Literal[False] = ...,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @overload
     def __init__(
@@ -249,8 +247,7 @@ class NomadPopen(Generic[T]):
         stdin: _FILE = ...,
         stdout: _FILE = ...,
         text: Literal[True] = ...,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @overload
     def __init__(
@@ -261,8 +258,7 @@ class NomadPopen(Generic[T]):
         stdin: _FILE = ...,
         stdout: _FILE = ...,
         text: bool = ...,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     def __init__(
         self,
@@ -297,7 +293,9 @@ class NomadPopen(Generic[T]):
 
     def __stdout_to_fd(self, stdout: _FILE) -> IO[bytes]:
         self.stdout: Optional[IO[T]] = None
-        if stdout == DEVNULL or stdout is None:
+        if stdout is None:
+            return sys.stdout.buffer
+        elif stdout == DEVNULL:
             pass
         elif isinstance(stdout, BinaryIO):
             return stdout
@@ -413,8 +411,7 @@ def run(
     stdout: _FILE = ...,
     check: bool = ...,
     text: Literal[False] = False,
-) -> CompletedProcess[bytes]:
-    ...
+) -> CompletedProcess[bytes]: ...
 
 
 @overload
@@ -428,8 +425,7 @@ def run(
     input: str = ...,
     stdout: _FILE = ...,
     check: bool = ...,
-) -> CompletedProcess[str]:
-    ...
+) -> CompletedProcess[str]: ...
 
 
 @overload
@@ -443,8 +439,7 @@ def run(
     stdin: _FILE = ...,
     stdout: _FILE = ...,
     check: bool = ...,
-) -> CompletedProcess[Any]:
-    ...
+) -> CompletedProcess[Any]: ...
 
 
 def run(
@@ -483,10 +478,9 @@ def check_output(
     task: str,
     cmd: List[str],
     *,
-    input: Optional[bytes] = ...,
     text: Literal[False] = False,
-) -> bytes:
-    ...
+    input: Optional[bytes] = ...,
+) -> bytes: ...
 
 
 @overload
@@ -497,31 +491,7 @@ def check_output(
     *,
     text: Literal[True],
     input: Optional[str] = ...,
-) -> str:
-    ...
-
-
-@overload
-def check_output(
-    allocid: str,
-    task: str,
-    cmd: List[str],
-    *,
-    input: T,
-    text: bool,
-) -> T:
-    ...
-
-
-@overload
-def check_output(
-    allocid: str,
-    task: str,
-    cmd: List[str],
-    *,
-    text: bool,
-) -> Union[str, bytes]:
-    ...
+) -> str: ...
 
 
 def check_output(
@@ -529,8 +499,8 @@ def check_output(
     task: str,
     cmd: List[str],
     *,
-    input: Optional[Union[str, bytes]] = None,
     text: bool = False,
+    input: Optional[Union[str, bytes]] = None,
 ) -> Union[str, bytes]:
     return run(
         allocid, task, cmd, input=input, stdout=PIPE, text=text, check=True
