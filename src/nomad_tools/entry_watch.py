@@ -475,6 +475,7 @@ class MyloggerDelayer:
         self.thread = threading.Thread(
             name=self.__class__.__name__, target=self.__run, daemon=False
         )
+        self.threadstarted = False
         """Thread that after lines_timeout outputs log lines"""
         self.lock = threading.Lock()
         """Synchronize thread with log producer"""
@@ -528,7 +529,9 @@ class MyloggerDelayer:
             # If args is lower than 0, we set finished right away.
             self.finished = True
         else:
-            self.thread.start()
+            if not self.threadstarted:
+                self.threadstarted = True
+                self.thread.start()
 
     def join(self):
         """The only possible way the thread can get stuck is if print() output
