@@ -4,7 +4,7 @@ import dataclasses
 import datetime
 import enum
 import logging
-from typing import Any, Callable, Dict, List, Optional, TypeVar, Union
+from typing import Any, Callable, Dict, List, Optional, TypeVar, Union, cast
 
 import dateutil.parser
 
@@ -61,7 +61,7 @@ class JobTaskLifecycle(DataDict):
     Sidecar: bool
 
     def get_sidecar(self) -> bool:
-        return self.get("Sidecar", False)
+        return bool(self.get("Sidecar", False))
 
 
 class JobTaskTemplate(DataDict):
@@ -89,11 +89,11 @@ class JobTaskGroup(DataDict):
 
 
 class JobStatus(MyStrEnum):
-    pending = enum.auto()
+    pending = "pending"
     """Pending means the job is waiting on scheduling"""
-    running = enum.auto()
+    running = "running"
     """Running means the job has non-terminal allocations"""
-    dead = enum.auto()
+    dead = "dead"
     """Dead means all evaluation's and allocations are terminal"""
 
 
@@ -108,13 +108,13 @@ class _BothJobAndJobsJob(DataDict):
     JobModifyIndex: int
 
     def is_dead(self):
-        return self.Status == JobStatus.dead
+        return self.Status == JobStatus.dead.value
 
     def is_pending(self):
-        return self.Status == JobStatus.pending
+        return self.Status == JobStatus.pending.value
 
     def is_running(self):
-        return self.Status == JobStatus.running
+        return self.Status == JobStatus.running.value
 
 
 class Job(_BothJobAndJobsJob):
@@ -212,11 +212,11 @@ class AllocationMetric(DataDict):
 
 
 class EvalStatus(MyStrEnum):
-    blocked = enum.auto()
-    pending = enum.auto()
-    complete = enum.auto()
-    failed = enum.auto()
-    canceled = enum.auto()
+    blocked = "blocked"
+    pending = "pending"
+    complete = "complete"
+    failed = "failed"
+    canceled = "canceled"
 
 
 def fromisoformat(txt: str) -> datetime.datetime:
@@ -245,7 +245,7 @@ class Eval(DataDict):
         return self.Status in [EvalStatus.pending, EvalStatus.blocked]
 
     def is_blocked(self):
-        return self.Status == EvalStatus.blocked
+        return self.Status == EvalStatus.blocked.value
 
     def is_finished(self) -> bool:
         return not self.is_pending_or_blocked()
@@ -358,12 +358,12 @@ class AllocTaskState(DataDict):
 
 
 class AllocClientStatus(MyStrEnum):
-    pending = enum.auto()
-    running = enum.auto()
-    complete = enum.auto()
-    failed = enum.auto()
-    lost = enum.auto()
-    unknown = enum.auto()
+    pending = "pending"
+    running = "running"
+    complete = "complete"
+    failed = "failed"
+    lost = "lost"
+    unknown = "unknown"
 
 
 class Alloc(DataDict):
@@ -409,10 +409,10 @@ class Alloc(DataDict):
         ]
 
     def is_pending(self):
-        return self.ClientStatus == AllocClientStatus.pending
+        return self.ClientStatus == AllocClientStatus.pending.value
 
     def is_running(self):
-        return self.ClientStatus == AllocClientStatus.running
+        return self.ClientStatus == AllocClientStatus.running.value
 
     def any_was_started(self):
         return any(
@@ -434,15 +434,15 @@ class Alloc(DataDict):
 
 
 class DeploymentStatus(MyStrEnum):
-    running = enum.auto()
-    paused = enum.auto()
-    failed = enum.auto()
-    successful = enum.auto()
-    cancelled = enum.auto()
-    initializing = enum.auto()
-    pending = enum.auto()
-    blocked = enum.auto()
-    unblocking = enum.auto()
+    running = "running"
+    paused = "paused"
+    failed = "failed"
+    successful = "successful"
+    cancelled = "cancelled"
+    initializing = "initializing"
+    pending = "pending"
+    blocked = "blocked"
+    unblocking = "unblocking"
 
 
 class DeploymentStatusDescription(MyStrEnum):
@@ -647,7 +647,7 @@ class JobSummarySummary(DataDict):
 
     def __iadd__(self, o: JobSummarySummary) -> JobSummarySummary:
         for k in set(self.asdict()) | set(o.asdict()):
-            self[k] = self.get(k, 0) + o.get(k, 0)
+            self[k] = cast(int, self.get(k, 0)) + cast(int, o.get(k, 0))
         return self
 
     def only_completed(self):

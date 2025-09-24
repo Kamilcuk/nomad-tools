@@ -922,7 +922,7 @@ class NotifierWorker:
     def notify_eval(self, evaluation: nomadlib.Eval):
         if (
             LOGENABLED.eval
-            and evaluation.Status == nomadlib.EvalStatus.blocked
+            and evaluation.Status == nomadlib.EvalStatus.blocked.value
             and "FailedTGAllocs" in evaluation
             and self.lineno_key_not_printed(evaluation.ID)
         ):

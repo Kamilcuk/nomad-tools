@@ -161,7 +161,7 @@ class NomadDbJob:
         actionstr = ""
         if e.topic == EventTopic.Job:
             job = e.job()
-            self.jobversions[job.get("Version")] = job
+            self.jobversions[job.Version] = job
             if self.job is None or job.ModifyIndex >= self.job.ModifyIndex:
                 # self.job follows newest modify index.
                 self.job = job
