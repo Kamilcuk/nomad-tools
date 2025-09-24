@@ -549,7 +549,11 @@ def purge_previous_nomad_job(jobname: str):
         jobdata = mynomad.get(f"job/{jobname}")
     except nomadlib.JobNotFound:
         return
-    job = Job(jobdata["Job"])
+    try:
+        job = Job(jobdata.get("Job", jobdata))
+    except KeyError:
+        log.exception("Something wrong with purging the nomad job. Feel free to fill an issue")
+        return
     assert (
         job.Stop is True or job.Status == "dead"
     ), f"Job {job.description()} already exists and is not stopped or not dead. Bailing out"
