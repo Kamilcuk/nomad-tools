@@ -756,9 +756,9 @@ def executor_exit(f: Callable) -> Callable:
     https://docs.gitlab.com/runner/executors/custom/#build-failure-exit-code
     """
 
-    def executor_exiting(*args, **kvargs):
+    def executor_exiting(*args, **kwargs):
         try:
-            f(*args, **kvargs)
+            f(*args, **kwargs)
         except BuildFailure as e:
             log.debug(f"build failure {e}")
             BUILD_EXIT_CODE_FILE = os.environ.get("BUILD_EXIT_CODE_FILE")

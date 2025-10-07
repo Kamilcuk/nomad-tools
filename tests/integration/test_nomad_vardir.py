@@ -8,8 +8,8 @@ class VardirCaller:
     def __init__(self, name: str):
         self.name = name
 
-    def __call__(self, cmd, **kvargs):
-        return run_entry_vardir(f"{self.name} {cmd}", **kvargs)
+    def __call__(self, cmd, **kwargs):
+        return run_entry_vardir(f"{self.name} {cmd}", **kwargs)
 
     def __enter__(self):
         return self

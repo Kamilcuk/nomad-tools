@@ -95,27 +95,27 @@ class VariableConflict(Exception):
 
 class Requestor(ABC):
     @abstractmethod
-    def request(self, method: str, url: str, *args, **kvargs) -> requests.Response:
+    def request(self, method: str, url: str, *args, **kwargs) -> requests.Response:
         raise NotImplementedError()
 
-    def _reqjson(self, mode: str, *args, **kvargs):
-        rr = self.request(mode, *args, **kvargs)
+    def _reqjson(self, mode: str, *args, **kwargs):
+        rr = self.request(mode, *args, **kwargs)
         return rr.json()
 
     def get(self, *args, **kvargs):
         return self._reqjson("GET", *args, **kvargs)
 
-    def put(self, *args, **kvargs):
-        return self._reqjson("PUT", *args, **kvargs)
+    def put(self, *args, **kwargs):
+        return self._reqjson("PUT", *args, **kwargs)
 
-    def post(self, *args, **kvargs):
-        return self._reqjson("POST", *args, **kvargs)
+    def post(self, *args, **kwargs):
+        return self._reqjson("POST", *args, **kwargs)
 
-    def delete(self, *args, **kvargs):
-        return self._reqjson("DELETE", *args, **kvargs)
+    def delete(self, *args, **kwargs):
+        return self._reqjson("DELETE", *args, **kwargs)
 
-    def stream(self, *args, **kvargs):
-        return self.request("GET", *args, stream=True, **kvargs)
+    def stream(self, *args, **kwargs):
+        return self.request("GET", *args, stream=True, **kwargs)
 
 
 @dataclasses.dataclass
@@ -123,8 +123,8 @@ class ChildRequestor(Requestor):
     parent: "Requestor"
     path: str
 
-    def request(self, method: str, url: str, *args, **kvargs):
-        return self.parent.request(method, self.path + "/" + url, *args, **kvargs)
+    def request(self, method: str, url: str, *args, **kwargs):
+        return self.parent.request(method, self.path + "/" + url, *args, **kwargs)
 
 
 class _Conn:
@@ -196,7 +196,7 @@ class NomadConn(Requestor):
         url: str,
         params: Optional[dict] = None,
         *args,
-        **kvargs,
+        **kwargs,
     ):
         params = dict(params or {})
         params.setdefault(
@@ -240,7 +240,7 @@ class NomadConn(Requestor):
                 if NOMAD_CLIENT_CERT in os.environ and NOMAD_CLIENT_KEY in os.environ
                 else None
             ),
-            **kvargs,
+            **kwargs,
         )
         try:
             req.raise_for_status()
