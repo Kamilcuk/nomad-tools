@@ -102,8 +102,27 @@ class Requestor(ABC):
         rr = self.request(mode, *args, **kwargs)
         return rr.json()
 
-    def get(self, *args, **kvargs):
-        return self._reqjson("GET", *args, **kvargs)
+    def get(self, *args, params: Optional[Dict] = None, **kwargs) -> Any:
+        # Handle pagination
+        ret = None
+        while True:
+            rr = self.request("GET", *args, params=params, **kwargs)
+            data = rr.json()
+            if ret is None:
+                ret = data
+            else:
+                assert isinstance(ret, list) and isinstance(data, list), (
+                    f"Do not know how to merge {type(ret)} with {type(rr.json)}. There is an internal error in how pagination is implemented in nomadtools library. Please kindly report this error on github."
+                )
+                ret.extend(data)
+            next_token = rr.headers.get("X-Nomad-Nexttoken")
+            if next_token:
+                if not params:
+                    params = {}
+                params["next_token"] = next_token
+            else:
+                break
+        return ret
 
     def put(self, *args, **kwargs):
         return self._reqjson("PUT", *args, **kwargs)
