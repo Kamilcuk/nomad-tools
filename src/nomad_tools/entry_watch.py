@@ -138,8 +138,8 @@ class CommaList(click.ParamType):
     name = "CommaList"
 
     @override
-    def __init__(self, values: List[Any], separator: str = ",", **kvargs):
-        super().__init__(**kvargs)
+    def __init__(self, values: List[Any], separator: str = ",", **kwargs):
+        super().__init__(**kwargs)
         self.separator = separator
         self.values = values
 

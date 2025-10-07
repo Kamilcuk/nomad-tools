@@ -14,9 +14,9 @@ from .tools import ns2dt
 log = logging.getLogger(__name__)
 
 
-def strdict(__map: Dict[str, Any] = {}, **kvargs):
+def strdict(__map: Dict[str, Any] = {}, **kwargs):
     """Dictionary to var=val space separated elements"""
-    __map.update(kvargs)
+    __map.update(kwargs)
     return " ".join(
         f"{k}={int(v) if v is True or v is False else v}"
         for k, v in __map.items()
