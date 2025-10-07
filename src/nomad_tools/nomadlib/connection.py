@@ -188,6 +188,7 @@ class JobSubmission:
     def mk_hcl(hcl: str):
         return JobSubmission(hcl, "hcl2")
 
+
 class NomadConn(Requestor):
     """Represents connection to Nomad"""
 
@@ -214,6 +215,7 @@ class NomadConn(Requestor):
         method: str,
         url: str,
         params: Optional[dict] = None,
+        headers: Optional[dict] = None,
         *args,
         **kwargs,
     ):
@@ -241,6 +243,8 @@ class NomadConn(Requestor):
                     if NOMAD_TLS_SERVER_NAME in os.environ
                     else {}
                 ),
+                "Accept-Encoding": "gzip",
+                **(headers or {}),
             },
             params=params,
             verify=(
