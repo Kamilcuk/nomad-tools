@@ -7,7 +7,7 @@ import os
 import shlex
 import string
 import sys
-from dataclasses import dataclass, fields
+from dataclasses import asdict, dataclass, fields
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 import click
@@ -85,7 +85,7 @@ def is_optional(field):
     return get_origin(field) is Union and type(None) in get_args(field)
 
 
-@dataclass
+@dataclass()
 class FindTask:
     alloc: Optional[str] = clickdc.option(
         "-a",
@@ -117,10 +117,10 @@ class FindTask:
         help="Filter allocation only running task named like that.",
     )
     multiple: Optional[bool] = clickdc.option(
-        "-m", help="Allow returning multiple tasks, instead of only one"
+        "-m", default=None, help="Allow returning multiple tasks, instead of only one"
     )
     notonlyrunning: Optional[bool] = clickdc.option(
-        "-N", help="Find also tasks that are not running"
+        "-N", default=None, help="Find also tasks that are not running"
     )
 
     @property
@@ -239,11 +239,16 @@ class FindTask:
 
     def find_tasks(self) -> List[TaskAlloc]:
         allocs = self.find_allocations()
-        assert len(allocs) > 0, f"Found no running allocations matching {self}"
+        assert len(allocs) > 0, (
+            f"Found no running allocations matching {self.desc()}. The job might be not running. Consider adjusting command line options."
+        )
         if not self.multiple:
-            assert (
-                len(allocs) == 1
-            ), f"Found multiple running allocations matching {self}"
+            allocstr: str = " ".join(a.ID for a in allocs)
+            if len(allocstr) > 120:
+                allocstr = allocstr[:120 - 3] + "..."
+            assert len(allocs) == 1, (
+                f"Found multiple running allocations matching {self.desc()}: {allocstr}. Consider --group and --task options to select a single allocation with more precitions."
+            )
         #
         ret: List[TaskAlloc] = []
         for alloc in allocs:
@@ -254,6 +259,13 @@ class FindTask:
             task = tasks[0]
             ret.append(TaskAlloc(task=task, alloc=alloc))
         return ret
+
+    def desc(self):
+        return " ".join(
+            f"--{k}={shlex.quote(v) if isinstance(v, str) else v}"
+            for k, v in asdict(self).items()
+            if v is not None
+        )
 
 
 TASKS: List[TaskAlloc]
