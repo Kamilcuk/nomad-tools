@@ -4,7 +4,7 @@ import shlex
 import subprocess
 import sys
 from dataclasses import dataclass
-from typing import IO, Any, Dict, List, Optional, Tuple
+from typing import IO, Any, Dict, List, Tuple
 
 import click.shell_completion
 import clickdc

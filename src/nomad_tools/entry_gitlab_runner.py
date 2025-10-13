@@ -463,7 +463,7 @@ class Config(DataDict):
                 os.environ[k] = v
         # If cpuset_cpus and NOMADRUNNER_CPUSET_CPUS are given, restrict the number of cpus only to cpuset_cpus.
         tmp = os.environ.get("CUSTOM_ENV_NOMADRUNNER_CPUSET_CPUS", "")
-        self.cpuset_cpus: str = (
+        self.cpuset_cpus = (
             ",".join(
                 str(x)
                 for x in sorted(
@@ -490,7 +490,7 @@ class Config(DataDict):
         return cc
 
     def _add_meta(self, job: Job):
-        cenv = get_CUSTOM_ENV()
+        # cenv = get_CUSTOM_ENV()
         dc = self.get_driverconfig
         task = job.TaskGroups[0].Tasks[0]
         job.Meta = job.Meta if "Meta" in job and job.Meta else {}

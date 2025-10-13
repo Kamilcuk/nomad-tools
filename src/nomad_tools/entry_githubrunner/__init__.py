@@ -1,1 +1,1 @@
-from .entry_githubrunner import *
+from .entry_githubrunner import *  # noqa
