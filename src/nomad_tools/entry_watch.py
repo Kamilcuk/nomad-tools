@@ -1582,7 +1582,7 @@ class _NomadJobWatcherEvents(_NomadJobWatcherDetail):
                         return True
             groupallocsidsstr = andjoin(alloc.ID[:6] for alloc in groupallocs)
             groupmsgs.append(
-                f"allocations {groupallocsidsstr} running group {group.Name!r} with {len(maintasks)} main tasks"
+                f"allocation{'s' if len(groupallocs) > 1 else ''} {groupallocsidsstr} running group {group.Name!r} with {len(maintasks)} main tasks"
             )
         self.started = True
         msg = f"Job {self.job.description()} started " + andjoin(groupmsgs)
