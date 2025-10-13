@@ -219,9 +219,9 @@ class LogLine:
     """The task name, for stdout and stderr logs"""
 
     def __post_init__(self):
-        assert self.what in [
-            e.value for e in LogWhat
-        ], f"{self.what} value is not a valid what"
+        assert self.what in [e.value for e in LogWhat], (
+            f"{self.what} value is not a valid what"
+        )
         assert not datetime_is_naive(self.now), f"{self}"
 
     @property
@@ -1768,9 +1768,9 @@ class NomadAllocationWatcher:
                 for event in events:
                     if event.topic == EventTopic.Allocation:
                         alloc = nomadlib.Alloc(event.data)
-                        assert (
-                            self.alloc.ID == alloc.ID
-                        ), f"Internal error in Db filter: {alloc} {self.alloc}"
+                        assert self.alloc.ID == alloc.ID, (
+                            f"Internal error in Db filter: {alloc} {self.alloc}"
+                        )
                         self.allocworkers.notify_alloc(alloc)
                         if alloc.is_finished():
                             log.info(
@@ -1806,9 +1806,9 @@ class JobPath:
         elif len(a) == 3:
             self.group = re.compile(a[1])
             self.task = re.compile(a[2])
-        assert (
-            1 <= len(a) <= 3
-        ), f"Invalid job/job@task/job@group@task specification: {param}"
+        assert 1 <= len(a) <= 3, (
+            f"Invalid job/job@task/job@group@task specification: {param}"
+        )
 
     @staticmethod
     def complete(ctx: click.Context, _: str, incomplete: str) -> List[str]:
@@ -2161,7 +2161,7 @@ def cli_jobfile_command(name: str, where: str, help: str):
 
 @cli.command(
     "alloc",
-    help="Watch over specific allocation. Like job mode, but only one allocation is filtered.",
+    help="Watch over specific allocation until it is finished. Like job mode, but only one allocation is filtered.",
 )
 @click.argument(
     "allocid",
@@ -2177,7 +2177,7 @@ def mode_alloc(allocid):
 
 
 @cli.command(
-    "eval", help="Watch like job mode the job that results from a specific evaluation."
+    "eval", help="Watch all allocations from evaluation until they are finished."
 )
 @click.argument(
     "evalid",
@@ -2263,7 +2263,7 @@ def mode_stop(jobid: str):
 @cli.command(
     "purge",
     help=f"""
-Alias to `--purge stop`, with the following difference in exit status.
+Alias to `--purge stop` with differnce in exit status.
 
 \b
 If the option --no-preserve-status is given, then exit with the following status:
@@ -2318,17 +2318,24 @@ def mode_stopped(jobid: str):
     "plan",
     "plan",
     help="""
-    This is an alias to nomad job plan for ease of typing.
+    Executes nomad job plan, but exit code 1 is translated to exit code 0 for use in CI pipelines.
     """,
 )
 def mode_plan(args: Tuple[str, ...], jobfile: str):
-    cmd: List[str] = [*"nomad job plan".split(), *args, jobfile]
+    quiet = ARGS.verbose < 0
+    cmd: List[str] = [
+        *"nomad job plan".split(),
+        *(["-force-color"] if quiet and colors.has_color() else []),
+        *args,
+        jobfile,
+    ]
     log.info(f"+ {' '.join(shlex.quote(x) for x in cmd)}")
-    try:
-        subprocess.check_call(cmd, text=True)
-    except subprocess.CalledProcessError as e:
-        # nomad will print its error, we can just exit
-        exit(e.returncode)
+    rr = subprocess.run(cmd, text=True, stdout=subprocess.PIPE if quiet else None)
+    if rr.returncode == 1:
+        if quiet:
+            print(rr.stdout)
+    else:
+        exit(rr.returncode)
 
 
 ###############################################################################
