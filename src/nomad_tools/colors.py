@@ -32,9 +32,15 @@ empty = Colors(**{f.name: "" for f in dataclasses.fields(Colors)})
 """Empty colors"""
 
 
+def has_color() -> bool:
+    return (
+        sys.stdout.isatty() and sys.stderr.isatty() and not os.environ.get("NO_COLOR")
+    )
+
+
 def init_ex() -> Colors:
     """Return Colors with ANSI escape sequences extracted from tput"""
-    if not sys.stdout.isatty() or not sys.stderr.isatty() or os.environ.get("NO_COLOR"):
+    if not has_color():
         return empty
     tputdict = dataclasses.asdict(Colors())
     tputscript = "\nlongname\nlongname\n".join(tputdict.values())
