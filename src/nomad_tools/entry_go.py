@@ -1,6 +1,5 @@
 import contextlib
 import datetime
-import io
 import json
 import logging
 import multiprocessing
@@ -10,12 +9,10 @@ import shlex
 import signal
 import socket
 import subprocess
-import sys
 import tempfile
 import threading
 import uuid
 from dataclasses import dataclass
-from functools import partialmethod
 from typing import IO, Any, Callable, Dict, List, Optional, Tuple, TypeVar
 
 import click

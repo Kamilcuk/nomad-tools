@@ -240,8 +240,8 @@ def test_entry_watch_starting_with_preinit_tasks():
     ]
     assert allocs
     allocs.sort(key=lambda x: x.ModifyIndex, reverse=True)
-    lastalloc: nomadlib.Alloc = allocs[0]
-    states: Dict[str, nomadlib.AllocTaskState] = lastalloc.get_taskstates()
+    lastalloc = allocs[0]
+    states = lastalloc.get_taskstates()
     #
     tmp = [f"name={n} finishedat={s.FinishedAt}" for n, s in states.items()]
     assert all([s.FinishedAt for s in states.values()]), f"{states} | {tmp}"
