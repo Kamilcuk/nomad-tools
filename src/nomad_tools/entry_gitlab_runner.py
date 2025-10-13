@@ -15,7 +15,6 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from shlex import quote, split
-from textwrap import dedent
 from typing import Callable, Dict, List, Optional, Set, Union
 
 import click
@@ -127,9 +126,11 @@ class ConfigCustom(DataDict):
     """User to execute the task."""
 
     def apply(self, nomadjob: Job):
-        assert not ServiceSpec.get_servicespecs(), (
-            "Services only handled in Docker mode"
-        )
+        # Note - this function is overwritten by docker mode config.
+        if ServiceSpec.get_servicespecs():
+            log.warning(
+                f"Services only handled in Docker mode. The .gitlab-ci.yml configuration requested services: to be running for the current job. In nomadtools project for gitlab-runner the services: is only supported in docker mode configuration, while current mode is {config.mode}. The job will be run without any services. To remove this warning remove the services: from .gitlab-ci.yml of this job or change the nomadtools gitlab-runner configuration to run in docker mode."
+            )
         assert nomadjob
 
     def get_task_for_stage(self, stage: str) -> str:
@@ -158,8 +159,9 @@ class ConfigDocker(ConfigCustom):
     waiter_image: str = "docker:25.0.3-cli"
     """A image with POSIX sh and docker that waits for services to have open ports
     Url: https://hub.docker.com/r/gitlab/gitlab-runner/tags"""
-    # helper_image: str = "gitlab/gitlab-runner:alpine-v16.9.1"
-    helper_image: str = "gitlab/gitlab-runner:bleeding"
+    # helper_image: str = "docker.io/gitlab/gitlab-runner:alpine-v16.9.1"
+    # helper_image: str = "docker.io/gitlab/gitlab-runner:bleeding"
+    helper_image: str = "docker.io/gitlab/gitlab-runner:alpine-v18.4.0"
     """(Advanced) The default helper image used to clone repositories and upload artifacts."""
     auto_fix_docker_dind: bool = True
     """
@@ -209,6 +211,7 @@ class ConfigDocker(ConfigCustom):
 
     def get_waiter_task(self, services: List[ServiceSpec]) -> JobTask:
         """https://docs.gitlab.com/ee/ci/services/#how-the-health-check-of-services-works"""
+        log.info(f"Using Nomad executor with Waiter docker image {self.waiter_image}")
         return JobTask(
             {
                 "Name": "ci-wait",
@@ -240,6 +243,7 @@ class ConfigDocker(ConfigCustom):
 
     def get_service_task(self, s: ServiceSpec):
         """Task that will run specific service. Generated from specification given to us by Gitlab"""
+        log.info(f"Using Nomad executor with Service docker image {s.name}")
         return JobTask(
             {
                 "Name": s.alias,
@@ -324,6 +328,10 @@ class ConfigDocker(ConfigCustom):
             # Apply volumes.
             if self.volumes:
                 taskconfig.setdefault("volumes", []).extend(self.volumes)
+        log.info(f"Using Nomad executor with Helper docker image {self.helper_image}")
+        log.info(
+            f"Using Nomad executor with docker image {os.environ.get('CUSTOM_ENV_CI_JOB_IMAGE')}"
+        )
 
     def get_task_for_stage(self, stage: str) -> str:
         return (
@@ -343,40 +351,38 @@ class ConfigExec(ConfigCustom):
             "Driver": "exec",
             "Config": {
                 "command": "sleep",
-                "args": [
-                    "${CUSTOM_ENV_CI_JOB_TIMEOUT}",
-                ],
+                "args": ["${CUSTOM_ENV_CI_JOB_TIMEOUT}"],
             },
         }
     )
 
+    def apply(self, nomadjob: Job):
+        super().apply(nomadjob)
+        # In constrast to raw_exec, this actually also changes the group.
+        nomadjob.TaskGroups[0].Tasks[0]["User"] = self.user
+
 
 class ConfigRawExec(ConfigCustom):
-    builds_dir: str = "/var/lib/gitlab-runner/builds"
-    cache_dir: str = "/var/lib/gitlab-runner/cache"
+    builds_dir: str = "/var/lib/gitlab-runner/builds/${CUSTOM_ENV_CI_CONCURRENT_PROJECT_ID}/${CUSTOM_ENV_CI_PROJECT_PATH_SLUG}"
+    cache_dir: str = "/var/lib/gitlab-runner/cache/${CUSTOM_ENV_CI_CONCURRENT_PROJECT_ID}/${CUSTOM_ENV_CI_PROJECT_PATH_SLUG}"
     builds_dir_is_shared: Optional[bool] = True
     user: str = "gitlab-runner"
     task: JobTask = JobTask(
         {
             "Driver": "raw_exec",
             "Config": {
-                "command": "${NOMAD_TASK_DIR}/command.sh",
+                "command": "sleep",
+                "args": ["${CUSTOM_ENV_CI_JOB_TIMEOUT}"],
             },
-            "Templates": [
-                {
-                    "ChangeMode": "noop",
-                    "DestPath": "local/command.sh",
-                    "EmbeddedTmpl": dedent(
-                        """\
-                        #!/bin/sh
-                        exec sleep ${CUSTOM_ENV_CI_JOB_TIMEOUT}
-                        """
-                    ),
-                    "Perms": "777",
-                },
-            ],
         }
     )
+
+    # raw_exec executor does not support changing the group
+    # I do not want to leave the group to root, that is super wrong.
+    # So the task is run as root and runuser is used to change the user AND GROUP to gitlab-runner.
+    # def apply(self, nomadjob: Job):
+    #     super().apply(nomadjob)
+    #     nomadjob.TaskGroups[0].Tasks[0]["User"] = self.user
 
 
 class ConfigMode(enum.Enum):
@@ -663,6 +669,7 @@ class Jobenv:
     @classmethod
     def create_job(cls) -> Job:
         global config
+        log.info(f"Using Nomad executor in {config.mode} mode")
         nomadjob: Job = config.get_nomad_job()
         # Template the job - expand all ${CUSTOM_ENV_*} references.
         jobjson = json.dumps(nomadjob.asdict())
@@ -733,7 +740,7 @@ def cli(verbose: int, configpath: Path, runner_id: int):
     configs = {key: val for key, val in (data or {}).items()}
     global config
     config = Config(
-        {**configs.get("default", {}), **configs.get(runner_id, {})}
+        {**(configs.get("default") or {}), **(configs.get(runner_id) or {})}
     ).remove_none()
     if verbose:
         config.verbose = 1
@@ -829,11 +836,14 @@ def mode_run(script: str, stage: str):
     scriptcontent = Path(script).read_text()
     # Run our script with positional arguments with the gitlab script passed as first argument.
     log.debug(f"executing {allocid}/{taskname} state={stage}")
+    if config.verbose > 2:
+        log.debug("Script to execute:\n{scriptcontent}")
+        log.debug("End of script to execute")
     rr = taskexec.run(
         allocid,
         taskname,
         split(
-            f"sh {set_x} -c {quote(config.script)} sh {quote(scriptcontent)} {quote(stage)}"
+            f"sh {set_x} -c {quote(config.script)} sh {set_x} -c {quote(scriptcontent)} sh {quote(stage)}"
         ),
     )
     # 155 is hardcoded in script.sh

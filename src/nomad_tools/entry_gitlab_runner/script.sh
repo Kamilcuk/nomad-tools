@@ -20,11 +20,11 @@ for i in \
 	NOMAD_META_CI_CPUSET_CPUS \
 ; do
 	if eval "[ -z \"\${$i+x}\" ]"; then
-		fatal "variable is not set: $i"
+		fatal "variable is not set: $i. This is an internal error from nomadtools project. Please report it to it. The variables should be set from the job definition when running the job."
 	fi
 done
-if [ "$#" -ne 2 ]; then
-	fatal "wrong number of arguments: $#"
+if [ "$#" -lt 4 ]; then
+	fatal "wrong number of arguments: \$#=$#. This is an internal error from nomadtools project. The variables are passed to this script from the statement in nomadtools source code. Please report it to nomadtools project github issues page."
 fi
 # Adjust oom score.
 if [ "$NOMAD_META_CI_OOM_SCORE_ADJUST" -ne 0 ] &&
@@ -34,9 +34,6 @@ if [ "$NOMAD_META_CI_OOM_SCORE_ADJUST" -ne 0 ] &&
 	echo "$NOMAD_META_CI_OOM_SCORE_ADJUST" >/proc/self/oom_score_adj
 fi
 # Command is accumulated in script positional arguments.
-set -- -c "$@"
-# If we are executing with -x, pass it also to the subshell.
-case "$-" in *x*) set -- -x "$@" ;; esac
 # Choose the shell if available.
 if hash bash 2>/dev/null; then
 	set -- bash "$@"
@@ -49,9 +46,9 @@ raw_exec | exec)
 	if [ -n "$NOMAD_META_CI_CPUSET_CPUS" ]; then
 		taskset -pc "$NOMAD_META_CI_CPUSET_CPUS" "$$" >/dev/null || true
 	fi
-	if [ -n "$NOMAD_META_CI_RUNUSER" ]; then
+	if [ $(id -u) -eq 0 ] && [ -n "$NOMAD_META_CI_RUNUSER" ]; then
 		if ! hash runuser 2>/dev/null; then
-			fatal "command runuser not found but requested"
+			fatal "Command runuser not found but requested. It was requested to run the command inside a runuser call. But the executable runuser was not found. There is no way I can run the command. Giving up."
 		fi
 		set -- runuser -u "$NOMAD_META_CI_RUNUSER" -- "$@"
 	fi
@@ -59,6 +56,14 @@ raw_exec | exec)
 docker)
 	if [ -n "$NOMAD_META_CI_CPUSET_CPUS" ] && hash taskset 2>/dev/null; then
 		taskset -pc "$NOMAD_META_CI_CPUSET_CPUS" "$$" >/dev/null || true
+	fi
+	# Fix permissions between ci-task and ci-help images.
+	# ci-help runs gitlab-runner-helper image that runs as user root:root
+	# But ci-task runs the user specified image with the user specified user.
+	# When ci-help creates files in /builds directory they cannot be overwritten by ci-task.
+	# This is a temporary fix until I can find proper solution.
+	if [ "$NOMAD_TASK_NAME" = "ci-help" ]; then
+		umask 000
 	fi
 	;;
 esac
