@@ -63,7 +63,10 @@ def get_testname() -> str:
 
 
 def gen_job(
-    script=""" echo hello world """, name: Optional[str] = None, mode: str = "raw_exec"
+    script=""" echo hello world """,
+    name: Optional[str] = None,
+    mode: str = "raw_exec",
+    count: int = 1,
 ):
     assert name is None or " " not in name
     name = name or get_testname()
@@ -94,6 +97,7 @@ def gen_job(
         "TaskGroups": [
             {
                 "Name": jobname,
+                "Count": count,
                 "ReschedulePolicy": {"Attempts": 0},
                 "RestartPolicy": {"Attempts": 0},
                 "Tasks": [
@@ -192,17 +196,17 @@ def run(
     if check is None:
         check = None
     elif check is False:
-        assert (
-            rr.returncode != 0
-        ), f"Command {rr} died with zero {rr.returncode}, which is wrong"
+        assert rr.returncode != 0, (
+            f"Command {rr} died with zero {rr.returncode}, which is wrong"
+        )
         check = None
         print("+ all fine - command is expected to fail")
     if isinstance(check, int):
         check = [check]
     if isinstance(check, list):
-        assert (
-            rr.returncode in check
-        ), f"Command {rr} died with {rr.returncode} not in {check}"
+        assert rr.returncode in check, (
+            f"Command {rr} died with {rr.returncode} not in {check}"
+        )
     #
     if output:
         assert rr.stdout is not None
