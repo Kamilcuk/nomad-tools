@@ -7,7 +7,7 @@ from shlex import split
 from typing import List
 
 from nomad_tools import taskexec
-from nomad_tools.common import mynomad
+from nomad_tools.common_nomad import mynomad
 from nomad_tools.entry_cp import ArgPath
 from tests.testlib import get_templatejob, run, run_entry_cp, run_entry_watch
 
