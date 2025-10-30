@@ -432,7 +432,7 @@ COUNTERS = Counters()
 # {{{1 abstract description
 
 
-@pydantic.dataclasses.dataclass(frozen=True)
+@dataclass(frozen=True)
 class Desc:
     labelsstr: str
     repo_url: str
