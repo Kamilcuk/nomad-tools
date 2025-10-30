@@ -2164,7 +2164,7 @@ def mode_job(jobid: str):
     """,
 )
 def mode_ifplanstart(args: Tuple[str, ...]):
-    if has_nomad_job_changed(True, args):
+    if has_nomad_job_changed(bool(ARGS.verbose), args):
         evaluation = nomad_start_job(list(args))
         NomadJobWatcherUntilStarted(None, evaluation).run_and_exit()
 
