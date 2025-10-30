@@ -24,6 +24,11 @@ pylava:
 ruff:
 	ruff check src/ tests/ $(ARGS)
 
+autofix:
+	uvx ruff check --select I --fix
+	uvx ruff check --fix
+	uvx ruff format
+
 integration_tests:
 	./integration_tests.sh $(ARGS)
 

@@ -44,9 +44,9 @@ from typing_extensions import override
 
 from .. import common_click, nomadlib
 from ..aliasedgroup import AliasedGroup
-from ..common_nomad import mynomad
 from ..common import cached_property, dict_remove_none, get_package_file
 from ..common_click import help_h_option
+from ..common_nomad import mynomad
 from ..mytabulate import mytabulate
 from ..nomadlib.connection import urlquote
 

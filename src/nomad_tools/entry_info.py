@@ -5,8 +5,8 @@ from typing import List
 
 import click
 
-from .aliasedgroup import AliasedGroup
 from . import common_click
+from .aliasedgroup import AliasedGroup
 from .common_nomad import mynomad
 
 log = logging.getLogger(__name__)

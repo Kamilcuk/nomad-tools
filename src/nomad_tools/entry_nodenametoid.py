@@ -4,8 +4,8 @@ from typing import Dict, Tuple
 
 import click
 
+from .common_click import completor, h_help_quiet_verbose_logging_options
 from .common_nomad import mynomad
-from .common_click import h_help_quiet_verbose_logging_options, completor
 
 
 def get_nodenametoid() -> Dict[str, str]:

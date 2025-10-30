@@ -129,6 +129,10 @@ def h_help_quiet_verbose_logging_options(
     )
 
 
+def is_verbose() -> bool:
+    return logging.getLogger().isEnabledFor(logging.DEBUG)
+
+
 def __alias_option_callback(
     aliased: Dict[str, Any],
     ctx: click.Context,
