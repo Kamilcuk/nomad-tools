@@ -94,6 +94,7 @@ docker_config = {
 def test_entry_gitlab_runner_nomad_supports_bridge():
     run_nomadt("constrainteval '${attr.plugins.cni.version.bridge}' semver '>= 0.4.0'")
 
+
 def test_entry_gitlab_runner_raw_exec():
     cycle(raw_exec_config, "echo hello world")
 
@@ -102,9 +103,7 @@ def test_entry_gitlab_runner_docker():
     cycle(docker_config, "echo hello world ")
 
 
-docker_test_script = (
-    "env | grep DOCKER_ && docker info && docker run --rm busybox:stable echo hello world"
-)
+docker_test_script = "env | grep DOCKER_ && docker info && docker run --rm busybox:stable echo hello world"
 
 
 def test_entry_gitlab_runner_dockerd_tls():
