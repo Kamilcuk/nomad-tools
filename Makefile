@@ -16,13 +16,13 @@ vagrant_destroy:
 lint: pyright pylava ruff
 
 pyright:
-	pyright src/ tests/ $(ARGS)
+	uv run --with pyright --with pytest pyright $(ARGS)
 
 pylava:
 	pylava src/ tests/ $(ARGS)
 
 ruff:
-	ruff check src/ tests/ $(ARGS)
+	ruff check $(ARGS)
 
 autofix:
 	uvx ruff check --select I --fix

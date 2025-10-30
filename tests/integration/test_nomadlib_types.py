@@ -1,5 +1,5 @@
 from nomad_tools import nomadlib
-from nomad_tools.common import mynomad
+from nomad_tools.common_nomad import mynomad
 
 
 def test_nomadlib_types_alloc():

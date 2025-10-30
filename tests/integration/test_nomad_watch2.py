@@ -2,7 +2,7 @@ import re
 from shlex import quote
 from typing import List, Union
 
-from nomad_tools.common import mynomad
+from nomad_tools.common_nomad import mynomad
 from tests.testlib import get_testjobs, run_entry_watch, run_nomadt
 
 testjobs = get_testjobs()

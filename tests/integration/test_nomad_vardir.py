@@ -1,6 +1,6 @@
 import tempfile
 
-from nomad_tools.common import mynomad
+from nomad_tools.common_nomad import mynomad
 from tests.testlib import caller, run, run_entry_vardir
 
 
