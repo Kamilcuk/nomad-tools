@@ -31,13 +31,13 @@ import websocket
 from typing_extensions import Literal, overload
 
 from . import nomadlib
-from .common_base import eprint
+from .common import eprint
 from .common_nomad import mynomad
 from .nomadlib.datadict import DataDict
 from .nomadlib.types import Alloc
 
 log = logging.getLogger(__name__)
-log.setLevel(level=logging.INFO)
+# log.setLevel(level=logging.INFO)
 
 
 def find_alloc_task(

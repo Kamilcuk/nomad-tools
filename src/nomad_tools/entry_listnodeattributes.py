@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import json
-import logging
 from typing import Dict, List, Tuple
 
 import click
 import clickdc
 
-from .common import help_h_option, mynomad, verbose_option
-from .common_click import completor
+from .common_click import (
+    completor,
+    h_help_quiet_verbose_logging_options,
+)
+from .common_nomad import mynomad
 from .entry_constrainteval import NodeCacheArgs, NodesAttributes
 from .mytabulate import mytabulate
 
@@ -31,10 +33,8 @@ Uses same cache as constrainteval.
     shell_complete=completor(get_all_node_names),
 )
 @clickdc.adddc("args", NodeCacheArgs)
-@verbose_option()
-@help_h_option()
+@h_help_quiet_verbose_logging_options()
 def cli(args: NodeCacheArgs, nodenameorid: Tuple[str, ...]):
-    logging.basicConfig()
     nodesattributes = NodesAttributes.load(args)
     arr: List[Dict[str, str]] = []
     if nodenameorid:

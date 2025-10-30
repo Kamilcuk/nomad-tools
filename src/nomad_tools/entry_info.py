@@ -17,15 +17,13 @@ log = logging.getLogger(__name__)
     cls=AliasedGroup,
     help="Get information about current Nomad state",
 )
-@common_click.help_h_option()
-@common_click.verbose_option()
+@common_click.h_help_quiet_verbose_logging_options()
 def cli():
     pass
 
 
 @cli.command(help="Like topology web interface")
 def topology():
-    logging.basicConfig()
     allocations = mynomad.get(
         "allocations", params=dict(resources=True, task_states=False)
     )
@@ -54,8 +52,8 @@ def topology():
                 node["Datacenter"],
                 node["Name"],
                 node["Status"],
-                f'{used_memory}MB/{node["NodeResources"]["Memory"]["MemoryMB"]}MB',
-                f'{used_cpu}MHz/{node["NodeResources"]["Cpu"]["CpuShares"]}MHz',
+                f"{used_memory}MB/{node['NodeResources']['Memory']['MemoryMB']}MB",
+                f"{used_cpu}MHz/{node['NodeResources']['Cpu']['CpuShares']}MHz",
                 f"{len(nodeallocs)}allocs",
                 *[
                     "["
@@ -64,8 +62,8 @@ def topology():
                             alloc["Name"],
                             taskname,
                             alloc["Namespace"],
-                            f'{task["Memory"]["MemoryMB"]}MB',
-                            f'{task["Cpu"]["CpuShares"]}MHz',
+                            f"{task['Memory']['MemoryMB']}MB",
+                            f"{task['Cpu']['CpuShares']}MHz",
                         ]
                     )
                     + "]"

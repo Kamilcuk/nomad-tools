@@ -15,7 +15,7 @@ import urllib3
 import websocket
 from typing_extensions import Literal
 
-from ..common_base import cached_property
+from ..common import cached_property
 from . import types
 
 log = logging.getLogger(__name__)

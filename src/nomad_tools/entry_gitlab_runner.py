@@ -26,10 +26,10 @@ from .common import (
     cached_property,
     get_package_file,
     get_version,
-    help_h_option,
-    mynomad,
     quotearr,
 )
+from .common_nomad import mynomad
+from .common_click import h_help_quiet_verbose_logging_options
 from .nomadlib.datadict import DataDict
 from .nomadlib.types import Job, JobTask, JobTaskConfig
 
@@ -711,7 +711,6 @@ class BuildFailure(Exception):
     help=""" Custom gitlab-runner executor to run gitlab-ci jobs in Nomad. """,
     epilog="Written by Kamil Cukrowski 2023. Licensed under GNU GPL version or later.",
 )
-@click.option("-v", "--verbose", count=True)
 @click.option(
     "-c",
     "--config",
@@ -732,8 +731,11 @@ The value defaults to CUSTOM_ENV_CI_RUNNER_ID which is set to the unique ID of t
     envvar="CUSTOM_ENV_CI_RUNNER_ID",
     show_default=True,
 )
-@help_h_option()
-def cli(verbose: int, configpath: Path, runner_id: int):
+@h_help_quiet_verbose_logging_options(
+    format=f"%(asctime)s:{NAME}:%(lineno)s: %(levelname)s %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S%z",
+)
+def cli(configpath: Path, runner_id: int):
     # Read configuration
     configcontent = configpath.read_text()
     data = yaml.safe_load(configcontent)
@@ -742,14 +744,9 @@ def cli(verbose: int, configpath: Path, runner_id: int):
     config = Config(
         {**(configs.get("default") or {}), **(configs.get(runner_id) or {})}
     ).remove_none()
-    if verbose:
+    if log.isEnabledFor(logging.DEBUG):
         config.verbose = 1
     #
-    logging.basicConfig(
-        format=f"%(asctime)s:{NAME}:%(lineno)s: %(levelname)s %(message)s",
-        datefmt="%Y-%m-%dT%H:%M:%S%z",
-        level=logging.DEBUG if config.verbose else logging.INFO,
-    )
     log.debug(f"+ {sys.argv}")
     #
     dc = config.get_driverconfig

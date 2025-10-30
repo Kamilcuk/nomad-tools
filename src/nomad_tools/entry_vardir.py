@@ -20,7 +20,9 @@ from typing_extensions import override
 
 from . import nomadlib
 from .aliasedgroup import AliasedGroup
-from .common import andjoin, help_h_option, mynomad, namespace_option
+from .common import andjoin
+from .common_click import h_help_quiet_verbose_logging_options
+from .common_nomad import namespace_option, mynomad
 from .nomadlib.connection import VariableConflict
 
 log = logging.getLogger(__file__)
@@ -175,7 +177,11 @@ class NomadVariable:
             cas: Optional[int] = (
                 check_index
                 if check_index is not None
-                else None if force else oldvar.ModifyIndex if oldvar else 0
+                else None
+                if force
+                else oldvar.ModifyIndex
+                if oldvar
+                else 0
             )
             if newitems:
                 log.info(
@@ -293,9 +299,9 @@ def load_directory(paths: Iterable[Path]) -> Dict[str, str]:
     if limit_mb:
         for file in files:
             filesize_mb = int(file.stat().st_size / 1024 / 1024)
-            assert (
-                filesize_mb < limit_mb
-            ), f"{file} size is {filesize_mb} greater than {limit_mb} mb, exiting"
+            assert filesize_mb < limit_mb, (
+                f"{file} size is {filesize_mb} greater than {limit_mb} mb, exiting"
+            )
     log.debug(f"Found files: {files} {ARGS.filter}")
     return {str(file): file.read_text() for file in files}
 
@@ -402,9 +408,8 @@ Examples:
 Written by Kamil Cukrowski 2023. All rights reserved.
 """,
 )
-@click.option("-v", "--verbose", is_flag=True)
 @namespace_option()
-@help_h_option()
+@h_help_quiet_verbose_logging_options()
 @click.option(
     "--test",
     type=click.Path(dir_okay=False, writable=True, path_type=Path),
@@ -447,16 +452,11 @@ def cli(
     path: str,
     job: Optional[bool],
     jobfile: Optional[bool],
-    verbose: bool,
     maxsize: float,
     relative: Path,
     test: Optional[Path],
     **kwargs,
 ):
-    logging.basicConfig(
-        format="%(levelname)s %(module)s:%(filename)s:%(lineno)s: %(message)s",
-        level=logging.DEBUG if verbose else logging.INFO,
-    )
     global ARGS
     ARGS = Arguments(maxsize=maxsize, test=test, relative=relative)
     global VAR

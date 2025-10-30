@@ -10,13 +10,8 @@ from typing import List
 import click.shell_completion
 
 from . import nomadlib
-from .common import (
-    alias_option,
-    help_h_option,
-    mynomad,
-    namespace_option,
-    nomad_find_job,
-)
+from .common_click import alias_option, h_help_quiet_verbose_logging_options
+from .common_nomad import mynomad, namespace_option, nomad_find_job
 
 log = logging.getLogger(__name__)
 args: argparse.Namespace
@@ -122,7 +117,6 @@ Exits with the following exit status:
 @click.option(
     "-s", "--separator", default="\n", help="Line separator. [default: newline]"
 )
-@click.option("-v", "--verbose", count=True, help="Be more verbose.")
 @click.option("--alloc", is_flag=True, help="The argument is an allocation, not job id")
 @click.option(
     "--all",
@@ -135,24 +129,13 @@ Exits with the following exit status:
     type=re.compile,
     help="Show only ports which name matches this regex.",
 )
-@help_h_option()
+@h_help_quiet_verbose_logging_options()
 @namespace_option()
 @click.argument("id", shell_complete=id_completor)
 @click.argument("label", required=False)
 def cli(id: str, **kwargs):
     global args
     args = argparse.Namespace(**kwargs)
-    logging.basicConfig(
-        level=(
-            logging.DEBUG
-            if args.verbose > 0
-            else logging.INFO
-            if args.verbose == 0
-            else logging.WARN
-            if args.verbose == 1
-            else logging.ERROR
-        ),
-    )
     out: List[str] = []
     if args.alloc:
         allocs = mynomad.get("allocations", params={"prefix": id})

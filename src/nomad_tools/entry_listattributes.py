@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import json
-import logging
 from typing import Optional, Tuple
 
 import click
 import clickdc
 
 from . import entry_constrainteval
-from .common import help_h_option, verbose_option
+from .common_click import h_help_quiet_verbose_logging_options
 from .common_click import completor
 from .entry_constrainteval import ConstraintArgs, NodeCacheArgs, NodesAttributes
 
@@ -36,10 +35,8 @@ Alias to constrainteval arg1 is_set '' arg2 is_set '' ...
     shell_complete=completor(get_all_nodes_attributes),
 )
 @clickdc.adddc("args", NodeCacheArgs)
-@verbose_option()
-@help_h_option()
+@h_help_quiet_verbose_logging_options()
 def cli(args: NodeCacheArgs, attributes: Tuple[str, ...]):
-    logging.basicConfig()
     if attributes:
         return entry_constrainteval.main(
             args,

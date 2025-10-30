@@ -9,7 +9,7 @@ from typing import IO, Any, Dict, List, Tuple
 import click.shell_completion
 import clickdc
 
-from . import common, nomadlib
+from . import common_click, common_nomad, nomadlib
 
 log = logging.getLogger(__name__)
 
@@ -19,7 +19,7 @@ def complete_job(
 ) -> List[click.shell_completion.CompletionItem]:
     if "job" in ctx.params:
         try:
-            jobs = common.mynomad.get("jobs", params=dict(prefix=incomplete))
+            jobs = common_nomad.mynomad.get("jobs", params=dict(prefix=incomplete))
         except Exception:
             return []
         print(jobs, file=sys.stderr)
@@ -49,7 +49,6 @@ def load_job_file(file: IO) -> nomadlib.Job:
 
 @dataclass
 class Args:
-    verbose: int = clickdc.option("-v", count=True, help="Be verbose")
     format: str = clickdc.option(
         "-f",
         help="Passed to python .format()",
@@ -81,10 +80,9 @@ class Args:
     `nomadtools dockers ./file.nomad.hcl | xargs docker pull`.
     """,
 )
-@common.help_h_option()
+@common_click.h_help_quiet_verbose_logging_options()
 @clickdc.adddc("args", Args)
 def cli(args: Args):
-    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO)
     if not (args.all or args.files or args.job):
         raise click.ClickException(
             "One of --all --job or positional arguments have to given"
@@ -93,12 +91,14 @@ def cli(args: Args):
     njobs += [
         nomadlib.Job(njobversion)
         for job in args.all
-        for njobversion in common.mynomad.get(
-            f"job/{common.nomad_find_job(job)}/versions"
+        for njobversion in common_nomad.mynomad.get(
+            f"job/{common_nomad.nomad_find_job(job)}/versions"
         )["Versions"]
     ]
     njobs += [
-        nomadlib.Job(common.mynomad.get(f"job/{common.nomad_find_job(job)}"))
+        nomadlib.Job(
+            common_nomad.mynomad.get(f"job/{common_nomad.nomad_find_job(job)}")
+        )
         for job in args.job
     ]
     njobs += [load_job_file(file) for file in args.files]

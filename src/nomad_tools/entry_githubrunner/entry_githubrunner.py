@@ -44,8 +44,8 @@ from typing_extensions import override
 
 from .. import common_click, nomadlib
 from ..aliasedgroup import AliasedGroup
-from ..common import get_package_file, mynomad
-from ..common_base import cached_property, dict_remove_none
+from ..common_nomad import mynomad
+from ..common import cached_property, dict_remove_none, get_package_file
 from ..common_click import help_h_option
 from ..mytabulate import mytabulate
 from ..nomadlib.connection import urlquote
@@ -103,9 +103,9 @@ PARSE_TIME_REGEX = re.compile(
 def parse_time(time_str: str) -> datetime.timedelta:
     # https://stackoverflow.com/a/4628148/9072753
     parts = PARSE_TIME_REGEX.match(time_str)
-    assert (
-        parts
-    ), f"{time_str} is not a valid time interval and does not match {PARSE_TIME_REGEX}"
+    assert parts, (
+        f"{time_str} is not a valid time interval and does not match {PARSE_TIME_REGEX}"
+    )
     parts = parts.groupdict()
     time_params = {}
     for name, param in parts.items():
@@ -225,9 +225,9 @@ class NomadConfig(pydantic.BaseModel, frozen=True, extra=pydantic.Extra.forbid):
 
     def __post_init__(self):
         assert self.namespace
-        assert (
-            self.namespace != "*"
-        ), "NOMAD_NAMESPACE is set to '*', something is wrong"
+        assert self.namespace != "*", (
+            "NOMAD_NAMESPACE is set to '*', something is wrong"
+        )
         assert self.jobprefix
         assert self.meta
 
@@ -1057,9 +1057,9 @@ class RunnerGenerator:
         )
         #
         nomadjobtorun = NomadJobToRun(nomadlib.Job(jobspec), jobtext)
-        assert (
-            nomadjobtorun.get_desc() == self.desc
-        ), f"{nomadjobtorun.get_desc()} != {self.desc}"
+        assert nomadjobtorun.get_desc() == self.desc, (
+            f"{nomadjobtorun.get_desc()} != {self.desc}"
+        )
         return nomadjobtorun
 
 
@@ -1250,16 +1250,13 @@ class Args:
 )
 @clickdc.adddc("args", Args)
 @help_h_option()
-@common_click.quiet_option()
-@common_click.verbose_option()
+@common_click.h_help_quiet_verbose_logging_options(
+    format="%(asctime)s:githubrunner:%(lineno)04d: %(levelname)s %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S%z",
+)
 def cli(args: Args):
     global ARGS
     ARGS = args
-    logging.root.level -= 10
-    logging.basicConfig(
-        format="%(asctime)s:githubrunner:%(lineno)04d: %(levelname)s %(message)s",
-        datefmt="%Y-%m-%dT%H:%M:%S%z",
-    )
     #
     global CONFIG
     if args.config:

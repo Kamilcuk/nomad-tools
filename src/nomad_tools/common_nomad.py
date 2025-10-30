@@ -32,9 +32,9 @@ def nomad_find_job(id: str, namespace: Optional[str] = None):
         jobsstr = " ".join(f"{j.ID}@{j.Namespace}" for j in jobs)
         assert len(jobs) < 2, f"Found multiple jobs named {id}: {jobsstr}"
         found = jobs[0]
-        assert (
-            found.Namespace
-        ), "Internal error: Nomad returned NULL for found job namespace"
+        assert found.Namespace, (
+            "Internal error: Nomad returned NULL for found job namespace"
+        )
         os.environ[NOMAD_NAMESPACE] = mynomad.namespace = found.Namespace
     else:
         try:
