@@ -17,8 +17,8 @@ import clickdc
 from click.shell_completion import CompletionItem
 from packaging.version import Version
 
-from .common import mynomad
-from .common_click import EPILOG, help_h_option, verbose_option
+from .common_click import EPILOG, h_help_quiet_verbose_logging_options
+from .common_nomad import mynomad
 from .mytabulate import mytabulate
 
 log = logging.getLogger(__name__)
@@ -125,10 +125,6 @@ class NodeCacheArgs:
         "-P",
         default=20,
         help="When getting all nodes metadata, make this many connections in parallel.",
-        show_default=True,
-    )
-    verbose: bool = clickdc.option(
-        "-v",
         show_default=True,
     )
 
@@ -325,14 +321,12 @@ def grouper(thelist: List[str], count: int) -> List[List[str]]:
 )
 @clickdc.adddc("args", NodeCacheArgs)
 @clickdc.adddc("constraintsargs", ConstraintArgs)
-@verbose_option()
-@help_h_option()
+@h_help_quiet_verbose_logging_options()
 def cli(args: NodeCacheArgs, constraintsargs: ConstraintArgs):
     return main(args, constraintsargs)
 
 
 def main(args: NodeCacheArgs, constraintsargs: ConstraintArgs):
-    logging.basicConfig()
     nodesattributes = NodesAttributes.load(args)
     # Group attributes in groups of 3 for constraints.
     for group in grouper(list(constraintsargs.constraints), 3):

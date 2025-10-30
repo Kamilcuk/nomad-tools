@@ -245,7 +245,7 @@ class FindTask:
         if not self.multiple:
             allocstr: str = " ".join(a.ID for a in allocs)
             if len(allocstr) > 120:
-                allocstr = allocstr[:120 - 3] + "..."
+                allocstr = allocstr[: 120 - 3] + "..."
             assert len(allocs) == 1, (
                 f"Found multiple running allocations matching {self.desc()}: {allocstr}. Consider --group and --task options to select a single allocation with more precitions."
             )
@@ -279,10 +279,8 @@ Find task inside an allocation given command line arguments and execute an actio
 """,
 )
 @clickdc.adddc("findtask", FindTask)
-@common_click.help_h_option()
-@common_click.verbose_option()
+@common_click.h_help_quiet_verbose_logging_options()
 def cli(findtask: FindTask):
-    logging.basicConfig()
     if findtask.has_no_filters():
         opts = " ".join("--" + name for name in findtask.get_filter_options())
         click.get_current_context().fail(

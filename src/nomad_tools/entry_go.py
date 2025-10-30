@@ -21,9 +21,12 @@ import clickforward
 import dotenv
 
 from . import entry_watch, exit_on_thread_exception, taskexec
-from .common_base import NOMAD_NAMESPACE, dict_remove_none, quotearr
-from .common_click import EPILOG, help_h_option
-from .common_nomad import namespace_option
+from .common import dict_remove_none, quotearr
+from .common_click import (
+    EPILOG,
+    h_help_quiet_verbose_logging_options,
+)
+from .common_nomad import NOMAD_NAMESPACE, namespace_option
 
 clickforward.init()
 log = logging.getLogger(__name__)
@@ -66,10 +69,10 @@ def timestr_to_nanos(time_str: str) -> int:
         r"^((?P<days>[\.\d]+?)d)?((?P<hours>[\.\d]+?)h)?((?P<minutes>[\.\d]+?)m)?((?P<seconds>[\.\d]+?)s)?$"
     )
     parts = RGX.match(time_str)
-    assert (
-        parts is not None
-    ), "Could not parse any time information from '{}'.  Examples of valid strings: '8h', '2d8h5m20s', '2m4s'".format(
-        time_str
+    assert parts is not None, (
+        "Could not parse any time information from '{}'.  Examples of valid strings: '8h', '2d8h5m20s', '2m4s'".format(
+            time_str
+        )
     )
     time_params = {
         name: float(param) for name, param in parts.groupdict().items() if param
@@ -670,12 +673,11 @@ Examples:
 """
     f"{EPILOG}",
 )
-@help_h_option()
 @namespace_option()
 @clickdc.adddc("args", Args)
 @clickdc.adddc("logoptions", entry_watch.LogOptions)
 @clickdc.adddc("notifyargs", entry_watch.NotifyOptions)
-@click.option("-v", "--verbose", is_flag=True)
+@h_help_quiet_verbose_logging_options()
 def cli(
     args: Args,
     notifyargs: entry_watch.NotifyOptions,
@@ -686,7 +688,6 @@ def cli(
     ARGS = args
     if args.command[0].startswith("-"):
         raise click.UsageError(f"No such option: {args.command[0]}")
-    logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO)
     if os.environ.get(NOMAD_NAMESPACE, "*") == "*":
         os.environ[NOMAD_NAMESPACE] = "default"
     exit_on_thread_exception.install()

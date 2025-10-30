@@ -4,8 +4,8 @@ from typing import Dict, Tuple
 
 import click
 
-from .common import mynomad
-from .common_click import help_h_option, completor
+from .common_nomad import mynomad
+from .common_click import h_help_quiet_verbose_logging_options, completor
 
 
 def get_nodenametoid() -> Dict[str, str]:
@@ -29,7 +29,7 @@ def get_nodenametoid() -> Dict[str, str]:
     required=True,
     shell_complete=completor(lambda: list(get_nodenametoid().keys())),
 )
-@help_h_option()
+@h_help_quiet_verbose_logging_options()
 def cli(prefix: bool, nodename: Tuple[str, ...]):
     nodenametoid = get_nodenametoid()
     for name in nodename:

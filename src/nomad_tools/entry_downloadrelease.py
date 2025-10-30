@@ -13,7 +13,7 @@ from zipfile import ZipFile
 import click
 import requests
 
-from .common_click import help_h_option
+from .common_click import h_help_quiet_verbose_logging_options
 
 log = logging.getLogger(__name__)
 
@@ -46,7 +46,6 @@ Examples:
     %(prog) consul ./bin/consul
 """,
 )
-@click.option("--verbose", is_flag=True)
 @click.option(
     "-p", "--pinversion", help="Use this version instead of autodetecting latest"
 )
@@ -85,19 +84,17 @@ Examples:
     is_flag=True,
     help="Instead of downloading, only show the chosen version",
 )
-@help_h_option()
+@h_help_quiet_verbose_logging_options()
 def cli(
     pinversion: Optional[str],
     arch: str,
     os: str,
     tool: str,
     destination: Path,
-    verbose: bool,
     suffix: str,
     ent: bool,
     showversion: bool,
 ):
-    logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO)
     if ent:
         assert suffix == "", "--ent and --suffix are in conflict"
         suffix = "+ent"

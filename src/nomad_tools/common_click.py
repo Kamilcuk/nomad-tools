@@ -4,9 +4,9 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 
 import click
 
-from .common_base import composed, print_version, shell_completion
+from .common import composed, print_version, shell_completion
 
-EPILOG = "Written by Kamil Cukrowski 2024. Licensed under GNU GPL version or later."
+EPILOG = "Written by Kamil Cukrowski 2025. Licensed under GNU GPL version or later."
 
 
 def complete_set_namespace(ctx: click.Context):
@@ -83,8 +83,9 @@ def verbose_option():
         expose_value=False,
         is_eager=True,
         callback=lambda ctx, opt, value: (
-            logging.root.setLevel(max(logging.DEBUG, logging.root.level - 10 * value))
+            logging.root.setLevel(max(logging.NOTSET, logging.root.level - 10 * value))
         ),
+        help="Be more verbose",
     )
 
 
@@ -97,9 +98,34 @@ def quiet_option():
         is_eager=True,
         callback=lambda ctx, opt, value: (
             logging.root.setLevel(
-                min(logging.CRITICAL, logging.root.level + 10 * value)
+                min(logging.CRITICAL + 10, logging.root.level + 10 * value)
             )
         ),
+        help="Be more quiet",
+    )
+
+
+def logging_config(format: Optional[str] = None, datefmt: Optional[str] = None):
+    def wrapper(f):
+        logging.basicConfig(
+            level=logging.root.level - 10,
+            format=format
+            or "%(levelname)s %(name)s:%(funcName)s:%(lineno)d: %(message)s",
+            datefmt=datefmt,
+        )
+        return f
+
+    return wrapper
+
+
+def h_help_quiet_verbose_logging_options(
+    format: Optional[str] = None, datefmt: Optional[str] = None
+):
+    return composed(
+        logging_config(format=format, datefmt=datefmt),
+        verbose_option(),
+        quiet_option(),
+        help_h_option(),
     )
 
 

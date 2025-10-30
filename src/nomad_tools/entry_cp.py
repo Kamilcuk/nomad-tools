@@ -27,14 +27,9 @@ from click.shell_completion import CompletionItem
 from typing_extensions import Protocol, override
 
 from . import nomadlib, taskexec
-from .common import (
-    cached_property,
-    help_h_option,
-    mynomad,
-    namespace_option,
-    nomad_find_job,
-)
-from .common_base import quotearr
+from .common import cached_property, quotearr
+from .common_click import h_help_quiet_verbose_logging_options
+from .common_nomad import mynomad, namespace_option, nomad_find_job
 from .transferstats import transfer_stats
 
 log = logging.getLogger(Path(__file__).name)
@@ -330,12 +325,14 @@ class ArgPath:
             (not self.alloc and not self.job)
             or (self.alloc and not self.job)
             or (not self.alloc and self.job)
-        ), f"Internal error: initialized in both alloc and job mode: {self.arg!r} {self.alloc} {self.job}"
+        ), (
+            f"Internal error: initialized in both alloc and job mode: {self.arg!r} {self.alloc} {self.job}"
+        )
         if self.alloc:
             alloweddigits = string.hexdigits + "-"
-            assert all(
-                c in alloweddigits for c in self.alloc
-            ), f"Allocation ID can only be one of {alloweddigits!r}: {self.alloc}"
+            assert all(c in alloweddigits for c in self.alloc), (
+                f"Allocation ID can only be one of {alloweddigits!r}: {self.alloc}"
+            )
 
     @cached_property
     def __find_jobid(self):
@@ -378,9 +375,9 @@ class ArgPath:
         assert self.alloc
         allocs = self.__allocations
         assert len(allocs) > 0, f"Found no running allocations matching {self.arg!r}"
-        assert (
-            len(allocs) == 1
-        ), f"Found multiple running allocations matching {self.arg!r}"
+        assert len(allocs) == 1, (
+            f"Found multiple running allocations matching {self.arg!r}"
+        )
         return allocs[0]
 
     def to_mypath(self) -> Mypath:
@@ -401,18 +398,18 @@ class ArgPath:
         # Filter using group.
         if self.group:
             allocations = [x for x in allocations if x.TaskGroup == self.group]
-            assert (
-                len(allocations) >= 1
-            ), f"No running allocations after matching group: {self.arg!r}"
+            assert len(allocations) >= 1, (
+                f"No running allocations after matching group: {self.arg!r}"
+            )
         # Filter on the task.
         if self.task:
             allocations = [x for x in allocations if self.task in x.get_tasknames()]
-            assert (
-                len(allocations) >= 1
-            ), f"No running allocations after matching task: {self.arg!r}"
-        assert (
-            len(allocations) == 1
-        ), f"Found multiple running allocations mathing {self.arg!r}: {' '.join(x.ID for x in allocations)}"
+            assert len(allocations) >= 1, (
+                f"No running allocations after matching task: {self.arg!r}"
+            )
+        assert len(allocations) == 1, (
+            f"Found multiple running allocations mathing {self.arg!r}: {' '.join(x.ID for x in allocations)}"
+        )
         allocation = allocations[0]
         if self.task:
             task = self.task
@@ -423,9 +420,9 @@ class ArgPath:
                 for task, state in allocation.get_taskstates().items()
                 if state.FinishedAt is None
             ]
-            assert (
-                len(runningtasks) != 0
-            ), f"No running tasks found in allocation {allocation.ID} matching {self.arg!r}"
+            assert len(runningtasks) != 0, (
+                f"No running tasks found in allocation {allocation.ID} matching {self.arg!r}"
+            )
             assert len(runningtasks) == 1, (
                 f"Multiple running tasks found in allocation {allocation.ID}"
                 f" matching {self.arg!r}: {' '.join(runningtasks)}"
@@ -499,10 +496,13 @@ class ArgPath:
             return [files] + add
         elif arr[0] == "" and len(arr) == 2:
             # :ALLOCATION...
-            assert (
-                self.alloc is not None
-            ), f"Internal error: self.alloc is None on allocation path: {self}"
-            return [NOSPACE, *self.__filter([x.ID for x in self.__allocations], self.alloc)]
+            assert self.alloc is not None, (
+                f"Internal error: self.alloc is None on allocation path: {self}"
+            )
+            return [
+                NOSPACE,
+                *self.__filter([x.ID for x in self.__allocations], self.alloc),
+            ]
         # If there is only a single matching allocation:task pair, just use it.
         try:
             # :ALLOCATION:PATH...
@@ -800,7 +800,7 @@ The logic mimics docker cp.
 
 \b
 Both source and dest take one of the forms:
-{textwrap.indent(ArgPath._description, '   ')}
+{textwrap.indent(ArgPath._description, "   ")}
 
 To use colon in any part of the path, escape it with backslash.
 
@@ -814,22 +814,11 @@ Written by Kamil Cukrowski 2023. Licensed under GNU GPL version or later.
 """,
 )
 @namespace_option()
-@help_h_option()
+@h_help_quiet_verbose_logging_options()
 @clickdc.adddc("args", Args)
 def cli(args: Args):
     global ARGS
     ARGS = args
-    verbose = 1 + ARGS.verbose - ARGS.quiet
-    logging.basicConfig(
-        level=(
-            logging.DEBUG
-            if verbose > 1
-            else logging.INFO
-            if verbose > 0
-            else logging.WARNING
-        ),
-        format="%(levelname)s %(name)s:%(funcName)s:%(lineno)d: %(message)s",
-    )
     log.debug(f"ARGS={ARGS}")
     if ARGS.rsync:
         rsync_mode(ARGS.source, ARGS.dest)

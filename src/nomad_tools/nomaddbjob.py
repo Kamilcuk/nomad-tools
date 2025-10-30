@@ -6,7 +6,8 @@ from typing import Callable, Dict, Iterable, List, Optional, TypeVar, Union
 import requests
 
 from . import flagdebug, nomadlib
-from .common import eprint, json_loads, mynomad
+from .common import eprint, json_loads
+from .common_nomad import mynomad
 from .nomadlib import Event, EventTopic, EventType
 from .nomadlib.types import JobStatus
 
@@ -130,9 +131,9 @@ class NomadDbJob:
 
     def start(self):
         """Start the database thread"""
-        assert (
-            mynomad.namespace
-        ), "Nomad namespace has to be set before starting to listen"
+        assert mynomad.namespace, (
+            "Nomad namespace has to be set before starting to listen"
+        )
         self.thread.start()
 
     def select_is_in_db(self, e: Event):
