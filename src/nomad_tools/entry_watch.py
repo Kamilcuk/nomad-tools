@@ -48,8 +48,8 @@ from typing_extensions import override
 
 from . import colors, exit_on_thread_exception, flagdebug, nomaddbjob, nomadlib
 from .aliasedgroup import AliasedGroup
-from .common_base import andjoin, cached_property, composed, eprint, quotearr
-from .common_click import complete_set_namespace, help_h_option
+from .common import andjoin, cached_property, eprint, quotearr
+from .common_click import EPILOG, complete_set_namespace, help_h_option
 from .common_nomad import (
     NoJobFound,
     completor,
@@ -57,6 +57,7 @@ from .common_nomad import (
     namespace_option,
     nomad_find_job,
 )
+from .forward_args_to_nomad import command_forward_args_to_nomad, has_nomad_job_changed
 from .nomaddbjob import NomadDbJob
 from .nomadlib import Event, EventTopic, EventType, MyStrEnum, ns2dt
 from .nomadlib.types import strdict
@@ -1996,7 +1997,7 @@ Some commands take argument of type JOB_ID_OR_FILE . If this argument is
 an existing file and that ends with .hcl .nomad or .json, the job name
 and optionally job namespaces are extracted from that file.
 """,
-    epilog="""
+    epilog=f"""
 \b
 Examples:
     nomadtools watch run ./some-job.nomad.hcl
@@ -2004,7 +2005,7 @@ Examples:
     nomadtools watch alloc af94b2
     nomadtools watch -N services --task redis -1f job redis
 
-Written by Kamil Cukrowski 2024. Licensed under GNU GPL version 3 or later.
+{EPILOG}
 """,
 )
 @flagdebug.click_debug_option("NOMADTOOLS_DEBUG")
@@ -2095,67 +2096,6 @@ class JobIdOrFile(click.ParamType):
 cli_jobid = click.argument("jobid", metavar="JOB_ID_OR_FILE", type=JobIdOrFile())
 
 
-def cli_jobfile_disabled(name: str, help: str):
-    # Disabled, because maintenance.
-    nomad_job_run_flags = [
-        click.option("-check-index", type=int),
-        click.option("-detach", is_flag=True),
-        click.option("-eval-priority", type=int),
-        click.option("-json", is_flag=True),
-        click.option("-hcl1", is_flag=True),
-        click.option("-hcl2-strict", is_flag=True),
-        click.option("-policy-override", is_flag=True),
-        click.option("-preserve-counts", is_flag=True),
-        click.option("-consul-token"),
-        click.option("-vault-token"),
-        click.option("-vault-namespace"),
-        click.option("-var", multiple=True),
-        click.option("-var-file", type=click.File()),
-    ]
-    cli_jobfile_help = """
-    JOBFILE can be file with a HCL or JSON nomad job or
-    it can be a string containing a HCL or JSON nomad job.
-    """
-    return composed(
-        cli.command(
-            name,
-            help + cli_jobfile_help,
-            context_settings=dict(ignore_unknown_options=True),
-        ),
-        *nomad_job_run_flags,
-        click.argument(
-            "jobfile",
-            shell_complete=click.File().shell_complete,
-        ),
-    )
-
-
-def cli_jobfile_command(name: str, where: str, help: str):
-    f"""Command that forwards all arguments to 'nomad job {where}' command."""
-    return composed(
-        cli.command(
-            name,
-            help=help.rstrip()
-            + f"""
-
-            All following arguments are forwarded to 'nomad job {where}' command.
-            Note that 'nomad job {where}' has arguments starting with a single dash.
-            """,
-            context_settings=dict(ignore_unknown_options=True),
-        ),
-        click.argument(
-            "args",
-            nargs=-1,
-            shell_complete=click.File().shell_complete,
-        ),
-        click.argument(
-            "jobfile",
-            nargs=1,
-            shell_complete=click.File().shell_complete,
-        ),
-    )
-
-
 ###############################################################################
 
 
@@ -2190,13 +2130,14 @@ def mode_eval(evalid):
     NomadJobWatcherUntilFinished(None, nomadlib.Eval(evaluation[0])).run_and_exit()
 
 
-@cli_jobfile_command(
+@command_forward_args_to_nomad(
+    cli,
     "run",
     "run",
     help="Run a Nomad job and then act like stopped command.",
 )
-def mode_run(args: Tuple[str, ...], jobfile: str):
-    evaluation = nomad_start_job(list(args) + [jobfile])
+def mode_run(args: Tuple[str, ...]):
+    evaluation = nomad_start_job(list(args))
     NomadJobWatcherUntilFinished(None, evaluation).run_and_exit()
 
 
@@ -2210,28 +2151,32 @@ def mode_job(jobid: str):
     NomadJobWatcherUntilFinished(jobid).run_and_exit()
 
 
-@cli_jobfile_command(
-    "changestart",
+@command_forward_args_to_nomad(
+    cli,
+    "changedstart",
     "run",
     help="""
-    If nomad job plan detects any job changes, then run start command, otherwise do nothing.
+    If nomadtools changed detects job changes, then run start command, otherwise do nothing.
 
-    The intention is to run from CI/CD.
+    The intention is to start only changed jobs.
 
-    See also plan --help.
+    See also nomadtools changed --help.
     """,
 )
-def mode_ifplanstart(args: Tuple[str, ...], jobfile: str):
-    if run_nomad_plan(True, args, jobfile):
-        evaluation = nomad_start_job(list(args) + [jobfile])
+def mode_ifplanstart(args: Tuple[str, ...]):
+    if has_nomad_job_changed(True, args):
+        evaluation = nomad_start_job(list(args))
         NomadJobWatcherUntilStarted(None, evaluation).run_and_exit()
 
 
-@cli_jobfile_command(
-    "start", "run", help="Start a Nomad job file and then act like started command."
+@command_forward_args_to_nomad(
+    cli,
+    "start",
+    "run",
+    help="Start a Nomad job file and then act like started command.",
 )
-def mode_start(args: Tuple[str, ...], jobfile: str):
-    evaluation = nomad_start_job(list(args) + [jobfile])
+def mode_start(args: Tuple[str, ...]):
+    evaluation = nomad_start_job(list(args))
     NomadJobWatcherUntilStarted(None, evaluation).run_and_exit()
 
 
@@ -2314,7 +2259,7 @@ no active deployments and no active evaluations.
 If the option --no-preserve-status is given, then exit with the following status:
   {ExitCode.success}    when the job was stopped.
 Otherwise, exit with the following status:
-  {"?"}    when the job has one task, with that task exit status,
+  with the task exit status, when the job has one task,
   {ExitCode.success}    when all tasks of the job exited with 0 exit status,
   {ExitCode.any_failed_tasks}  when any of the job tasks have failed,
   {ExitCode.all_failed_tasks}  when all job tasks have failed,
@@ -2331,70 +2276,22 @@ def mode_stopped(jobid: str):
     NomadJobWatcherUntilFinished(jobid).run_and_exit()
 
 
-def escape_ansi(line):
-    """https://superuser.com/a/1657976/892783"""
-    re1 = re.compile(r"\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]")
-    re2 = re.compile(r"\x1b[PX^_].*?\x1b\\")
-    re3 = re.compile(r"\x1b\][^\a]*(?:\a|\x1b\\)")
-    re4 = re.compile(r"\x1b[\[\]A-Z\\^_@]")
-    # re5: zero-width ASCII characters
-    # see https://superuser.com/a/1388860
-    re5 = re.compile(r"[\x00-\x1f\x7f-\x9f\xad]+")
-
-    for r in [re1, re2, re3, re4, re5]:
-        line = r.sub("", line)
-
-    return line
-
-
-def run_nomad_plan(quiet: bool, args: Tuple[str, ...], jobfile: str) -> bool:
-    """Return True if nomad job plan detected any changes to the job definition"""
-    cmd: List[str] = [
-        *"nomad job plan".split(),
-        *(["-force-color"] if colors.has_color() else []),
-        *args,
-        jobfile,
-    ]
-    log.info(f"+ {' '.join(shlex.quote(x) for x in cmd)}")
-    rr = subprocess.run(cmd, text=True, stdout=subprocess.PIPE)
-    if rr.returncode != 0 and rr.returncode != 1:
-        exit(rr.returncode)
-    haschanges = rr.returncode == 1
-    if not haschanges and rr.returncode == 0:
-        stdout = escape_ansi(rr.stdout)
-        haschanges = stdout.startswith("+/-")
-        if not haschanges:
-            # https://github.com/hashicorp/nomad/blob/ce8c3995a23d0dbf3cb81f4dea35f5bd054b52fb/command/job_plan.go#L701
-            haschanges = any(
-                line.endswith(i)
-                for i in [
-                    " (forces create/destroy update)",
-                    " (forces destroy)",
-                    " (forces create)",
-                ]
-                for line in stdout.splitlines()
-            )
-    if not quiet or haschanges:
-        print(rr.stdout)
-    return haschanges
-
-
-@cli_jobfile_command(
+@command_forward_args_to_nomad(
+    cli,
     "plan",
     "plan",
     help="""
-    Executes nomad job plan and exits with 0 if the job is correct.
-
-    If --quiet, output will only be printed if there are any changes to the job.
-
-    Changes are currently detected if nomad job plan:
-      - exited with 1,
-      - or exited with 0 and there is a string '+/-' in the output.
+    This is an alias to nomad job plan for ease of typing.
     """,
 )
-def mode_plan(args: Tuple[str, ...], jobfile: str):
-    quiet = ARGS.verbose < 0
-    run_nomad_plan(quiet, args, jobfile)
+def mode_plan(args: Tuple[str, ...]):
+    cmd: List[str] = [*"nomad job plan".split(), *args]
+    log.debug(f"+ {' '.join(shlex.quote(x) for x in cmd)}")
+    try:
+        subprocess.check_call(cmd)
+    except subprocess.CalledProcessError as e:
+        # nomad will print its error, we can just exit
+        exit(e.returncode)
 
 
 ###############################################################################

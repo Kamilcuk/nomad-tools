@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional, TextIO, Tuple, Union
 
-from .common import mynomad
+from .common_nomad import mynomad
 from .nomadlib.connection import JobSubmission
 
 log = logging.getLogger(__name__)

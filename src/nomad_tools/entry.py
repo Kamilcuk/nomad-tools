@@ -4,7 +4,13 @@ import clickforward
 from click.shell_completion import BashComplete
 
 from .aliasedlazygroup import AliasedLazyGroup
-from .common_click import EPILOG, help_h_option, main_options
+from .common_click import (
+    EPILOG,
+    help_h_option,
+    main_options,
+    quiet_option,
+    verbose_option,
+)
 from .common_nomad import namespace_option
 
 clickforward.init()
@@ -44,6 +50,7 @@ BashComplete.source_template = r"""\
 """
 
 subcommands = """
+    changed
     constrainteval
     cp
     dockers
@@ -65,13 +72,17 @@ subcommands = """
 @click.command(
     "nomadtools",
     cls=AliasedLazyGroup,
-    lazy_subcommands={cmd: f"{__package__}.entry_{cmd.replace('-', '_')}.cli" for cmd in subcommands},
+    lazy_subcommands={
+        cmd: f"{__package__}.entry_{cmd.replace('-', '_')}.cli" for cmd in subcommands
+    },
     help="Collection of useful tools for HashiCorp Nomad.",
     epilog=EPILOG,
 )
 @namespace_option()
 @help_h_option()
 @main_options()
+@verbose_option()
+@quiet_option()
 def cli():
     pass
 
