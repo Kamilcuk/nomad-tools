@@ -129,7 +129,7 @@ def remove_ansi_escapes(line):
     return line
 
 
-def has_nomad_job_changed(quiet: bool, args: Iterable[str]) -> bool:
+def has_nomad_job_changed(verbose: bool, args: Iterable[str]) -> bool:
     """Return True if nomad job plan detected any changes to the job definition"""
     args = list(args)
     jobfile: str = args[-1]
@@ -158,6 +158,6 @@ def has_nomad_job_changed(quiet: bool, args: Iterable[str]) -> bool:
                 for line in stdout.splitlines()
             )
     log.debug(f"Nomad job {jobfile} has{' not' if not haschanged else ''} changed")
-    if not quiet or haschanged:
+    if verbose or haschanged:
         print(rr.stdout)
     return haschanged

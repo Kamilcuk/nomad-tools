@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+import logging
 from typing import Tuple
 
 import click
@@ -46,4 +47,5 @@ from .forward_args_to_nomad import command_forward_args_to_nomad, has_nomad_job_
 )
 @h_help_quiet_verbose_logging_options()
 def cli(args: Tuple[str, ...]):
-    return has_nomad_job_changed(False, args)
+    verbose = logging.getLogger().isEnabledFor(logging.DEBUG)
+    return has_nomad_job_changed(verbose, args)
