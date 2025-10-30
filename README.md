@@ -5,7 +5,7 @@ Set of tools and utilities to ease interacting with HashiCorp Nomad scheduling s
 ## Table of Contents
 
 
-<!-- mtoc-start -->
+<!-- vim-markdown-toc GFM -->
 
 * [Installation](#installation)
   * [Shell completion](#shell-completion)
@@ -17,6 +17,7 @@ Set of tools and utilities to ease interacting with HashiCorp Nomad scheduling s
   * [`listnodeattributes` - list all available node attributes](#listnodeattributes---list-all-available-node-attributes)
   * [`port` - list ports allocated by job or allocation](#port---list-ports-allocated-by-job-or-allocation)
   * [`vardir` - manipulate nomad variable keys as files](#vardir---manipulate-nomad-variable-keys-as-files)
+  * [`changed` - improve `nomad job plan`](#changed---improve-nomad-job-plan)
   * [`cp` - copy files to/from/between nomad allocations](#cp---copy-files-tofrombetween-nomad-allocations)
   * [`gitlab-runner` - dynamically schedule gitlab CI jobs](#gitlab-runner---dynamically-schedule-gitlab-ci-jobs)
   * [`githubrunner` - dynamically schedule GitHub actions jobs](#githubrunner---dynamically-schedule-github-actions-jobs)
@@ -35,7 +36,7 @@ Set of tools and utilities to ease interacting with HashiCorp Nomad scheduling s
   * [Running tests](#running-tests)
 * [License](#license)
 
-<!-- mtoc-end -->
+<!-- vim-markdown-toc -->
 
 If you use this package, wheather you like it or not, would you want something to improve,
 or you feel like talking, consider leaving your opinion on github discussions
@@ -235,6 +236,30 @@ nomad_vardir: Removing passwordfile.txt
 nomad_vardir: Removing empty var nomad/jobs/nginx@default
 $ nomadtools vardir -j nginx ls
 nomad_vardir: Nomad variable not found at nomad/jobs/nginx@default
+```
+
+## `changed` - improve `nomad job plan`
+
+The command `nomadtools changed` outputs _nothing_ if the job has not changed.
+
+If the job has changed, the command outputs the output from `nomad job plan` and exits with 0 exit status.
+
+If the job is invalid, the command exits with non-zero exit code.
+
+The idea is to use within CI/CD easily to show what has changed compared to what is currently on the cluster.
+
+Example usage:
+
+```
+if output=$(nomadtools changed jobfile.nomad.hcl); then
+   if [ -z "$output" ]; then
+       echo "jobfile is up to date"
+   else
+       echo "jobfile changed"
+   fi
+else
+   echo "error"
+fi
 ```
 
 ## `cp` - copy files to/from/between nomad allocations
