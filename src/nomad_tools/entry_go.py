@@ -25,6 +25,7 @@ from .common import dict_remove_none, quotearr
 from .common_click import (
     EPILOG,
     h_help_quiet_verbose_logging_options,
+    is_verbose,
 )
 from .common_nomad import NOMAD_NAMESPACE, namespace_option
 
@@ -682,7 +683,6 @@ def cli(
     args: Args,
     notifyargs: entry_watch.NotifyOptions,
     logoptions: entry_watch.LogOptions,
-    verbose: bool,
 ):
     global ARGS
     ARGS = args
@@ -703,7 +703,7 @@ def cli(
     if args.output >= 2:
         print(jobjson)
     cmd: List[str] = [
-        *(["--verbose"] if verbose else []),
+        *(["--verbose"] if is_verbose() else []),
         "--attach",
         "--json",
         "-0",

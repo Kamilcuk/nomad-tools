@@ -1,13 +1,12 @@
 import functools
+import json
+import logging
 import os
 import pkgutil
 import shlex
 import subprocess
 import sys
 from typing import Any, Callable, Generic, Iterable, List, TypeVar, cast
-import json
-import logging
-
 
 NOMAD_NAMESPACE = "NOMAD_NAMESPACE"
 

@@ -1,6 +1,7 @@
 import subprocess
 
 import pytest
+
 import nomad_tools.entry
 
 scripts = nomad_tools.entry.cli.commands.keys()

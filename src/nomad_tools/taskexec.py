@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 import base64
-from dataclasses import dataclass
 import functools
 import io
 import json
 import logging
 import os
-import sys
 import subprocess
+import sys
 import threading
 import urllib.parse
+from dataclasses import dataclass
 from typing import (
     IO,
     Any,
@@ -27,6 +27,7 @@ from typing import (
     Union,
     cast,
 )
+
 import websocket
 from typing_extensions import Literal, overload
 

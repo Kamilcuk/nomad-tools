@@ -22,7 +22,7 @@ from . import nomadlib
 from .aliasedgroup import AliasedGroup
 from .common import andjoin
 from .common_click import h_help_quiet_verbose_logging_options
-from .common_nomad import namespace_option, mynomad
+from .common_nomad import mynomad, namespace_option
 from .nomadlib.connection import VariableConflict
 
 log = logging.getLogger(__file__)

@@ -28,8 +28,8 @@ from .common import (
     get_version,
     quotearr,
 )
+from .common_click import h_help_quiet_verbose_logging_options, is_verbose
 from .common_nomad import mynomad
-from .common_click import h_help_quiet_verbose_logging_options
 from .nomadlib.datadict import DataDict
 from .nomadlib.types import Job, JobTask, JobTaskConfig
 
@@ -744,7 +744,7 @@ def cli(configpath: Path, runner_id: int):
     config = Config(
         {**(configs.get("default") or {}), **(configs.get(runner_id) or {})}
     ).remove_none()
-    if log.isEnabledFor(logging.DEBUG):
+    if is_verbose():
         config.verbose = 1
     #
     log.debug(f"+ {sys.argv}")

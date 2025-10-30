@@ -7,8 +7,7 @@ import click
 import clickdc
 
 from . import entry_constrainteval
-from .common_click import h_help_quiet_verbose_logging_options
-from .common_click import completor
+from .common_click import completor, h_help_quiet_verbose_logging_options
 from .entry_constrainteval import ConstraintArgs, NodeCacheArgs, NodesAttributes
 
 
