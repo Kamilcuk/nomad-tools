@@ -84,7 +84,7 @@ class shell_completion:
         dir = "~/.local/share/bash-completion/completions"
         script: List[str] = []
         script.append(f"mkdir -vp {dir}")
-        name = "nomadtools"
+        name = "nomad-tools"
         upname = name.upper().replace("-", "_")
         script.append(
             f"echo 'eval \"$(_{upname}_COMPLETE=bash_source {name})\"' > {dir}/{name}"

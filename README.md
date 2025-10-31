@@ -1,4 +1,4 @@
-# nomadtools
+# nomad-tools
 
 Set of tools and utilities to ease interacting with HashiCorp Nomad scheduling solution.
 
@@ -26,7 +26,7 @@ Set of tools and utilities to ease interacting with HashiCorp Nomad scheduling s
   * [`task` - find task and allocation and execute action on it](#task---find-task-and-allocation-and-execute-action-on-it)
     * [`task exec` - execute a command inside the allocation](#task-exec---execute-a-command-inside-the-allocation)
     * [`task json` - output found allocations and task names in json form](#task-json---output-found-allocations-and-task-names-in-json-form)
-    * [`task path` - output path in the form properly escaped for use with nomadtools cp](#task-path---output-path-in-the-form-properly-escaped-for-use-with-nomadtools-cp)
+    * [`task path` - output path in the form properly escaped for use with nomad-tools cp](#task-path---output-path-in-the-form-properly-escaped-for-use-with-nomad-tools-cp)
     * [`task xargs` - output in the form -task <task> <allocid> that is usable with xargs nomad alloc](#task-xargs---output-in-the-form--task-task-allocid-that-is-usable-with-xargs-nomad-alloc)
   * [`nodenametoid` - convert node name to id](#nodenametoid---convert-node-name-to-id)
   * [`info topology` - show some information about Nomad node usage](#info-topology---show-some-information-about-nomad-node-usage)
@@ -63,25 +63,25 @@ Install the project using `pipx` project.
 pipx install nomad-tools
 ```
 
-After installation the executable `nomadtools` should be available.
+After installation the executable `nomad-tools` should be available.
 
 ```
-nomadtools --help
+nomad-tools --help
 ```
 
 ## Shell completion
 
-After installation, see `nomadtools watch --autocomplete-info` for shell
+After installation, see `nomad-tools watch --autocomplete-info` for shell
 completion installation instruction.
 
 # Usage
 
-This module installs command line tool `nomadtools` with several modes of
+This module installs command line tool `nomad-tools` with several modes of
 operation:
 
 ## `watch` - get all logs and events of a Nomad job in terminal
 
-`nomadtools watch` is meant to watch over a job change that you type in
+`nomad-tools watch` is meant to watch over a job change that you type in
 terminal. It prints all relevant messages - messages about allocation,
 evaluation, deployment and stdout and stderr logs from all the
 processes. Depending on the mode of operation, the tool waits until an
@@ -118,7 +118,7 @@ It creates a Nomad job specification from command line arguments and then
 "watches" over the execution of the job.
 
 ```
-$ nomadtools go --rm alpine apk add bash
+$ nomad-tools go --rm alpine apk add bash
 INFO:nomad_tools.nomad_watch:Watching job nomad_tools_go_5305da8f-b376-4c35-9a05-71027aadd587@default until it is finished
 Allocation 70c4ac9d-0e03-53d7-6e34-9c86cf8ee768 started on leonidas
 Received Task received by client
@@ -150,13 +150,13 @@ evaluating the constraint given on command line arguments. Useful for
 searching for which hosts contain what value of a attribute.
 
 ```
-$ nomadtools constrainteval '${attr.cpu.arch}' = amd64
+$ nomad-tools constrainteval '${attr.cpu.arch}' = amd64
 name   attr.cpu.arch
 node1  amd64
 node2  amd64
 ```
 
-This mode uses a cache in `~/.cache/nomadtools/nodes.json` for caching all the
+This mode uses a cache in `~/.cache/nomad-tools/nodes.json` for caching all the
 attributes of nodes downloaded from Nomad. This is used to speed up. The
 program needs to make one query for every single node in Nomad, which for a
 lot of nodes is costly.
@@ -164,7 +164,7 @@ lot of nodes is costly.
 ## `listattributes` - List nodes with given attributes or show all available attributes.
 
 ```
-$ nomadtools listattributes attr.cpu.arch
+$ nomad-tools listattributes attr.cpu.arch
 name   attr.cpu.arch
 node1  amd64
 node2  amd64
@@ -180,7 +180,7 @@ Additionally with a leading dot lists the whole json return from Nomad API.
 This is meant to be used with `grep` and other unix tools for easy parsing.
 
 ```
-$ nomadtools listnodeattributes node1 | grep datacenter
+$ nomad-tools listnodeattributes node1 | grep datacenter
 dc.datacenter                                   dc
 ```
 
@@ -192,18 +192,18 @@ Prints out the ports allocated for a particular Nomad job or
 allocation. It is meant to mimic `docker port` command.
 
 ```
-$ nomadtools port httpd
+$ nomad-tools port httpd
 192.168.0.5:31076
-$ nomadtools port -l httpd
+$ nomad-tools port -l httpd
 192.168.0.5 31076 http httpd.listen[0] d409e855-bf13-a342-fe7a-6fb579d2de85
-$ nomadtools port --alloc d409e855
+$ nomad-tools port --alloc d409e855
 192.168.0.5:31076
 ```
 
 Further argument allows to filter for port label.
 
 ```
-$ nomadtools port httpd http
+$ nomad-tools port httpd http
 192.168.0.5:31076
 ```
 
@@ -218,11 +218,11 @@ Example execution of putting a `passwordfile.txt` into `nomad/jobs/nginx`
 Nomad variable:
 
 ```
-$ nomadtools vardir -j nginx put ./passwordfile.txt 
+$ nomad-tools vardir -j nginx put ./passwordfile.txt 
 nomad_vardir: Putting var nomad/jobs/nginx@default with keys: passwordfile.txt
-$ nomadtools vardir -j nginx cat passwordfile.txt 
+$ nomad-tools vardir -j nginx cat passwordfile.txt 
 secretpassword
-$ nomadtools vardir -j nginx ls
+$ nomad-tools vardir -j nginx ls
 nomad_vardir: Listing Nomad variable at nomad/jobs/nginx@default
 key              size
 passwordfile.txt 15
@@ -231,16 +231,16 @@ passwordfile.txt 15
 You can then remove the `passwordfile.txt` key from the Nomad variable:
 
 ```
-$ nomadtools vardir -j nginx rm passwordfile.txt 
+$ nomad-tools vardir -j nginx rm passwordfile.txt 
 nomad_vardir: Removing passwordfile.txt
 nomad_vardir: Removing empty var nomad/jobs/nginx@default
-$ nomadtools vardir -j nginx ls
+$ nomad-tools vardir -j nginx ls
 nomad_vardir: Nomad variable not found at nomad/jobs/nginx@default
 ```
 
 ## `changed` - improve `nomad job plan`
 
-The command `nomadtools changed` outputs _nothing_ if the job has not changed.
+The command `nomad-tools changed` outputs _nothing_ if the job has not changed.
 
 If the job has changed, the command outputs the output from `nomad job plan` and exits with 0 exit status.
 
@@ -251,7 +251,7 @@ The idea is to use within CI/CD easily to show what has changed compared to what
 Example usage:
 
 ```
-if output=$(nomadtools changed jobfile.nomad.hcl); then
+if output=$(nomad-tools changed jobfile.nomad.hcl); then
    if [ -z "$output" ]; then
        echo "jobfile is up to date"
    else
@@ -268,7 +268,7 @@ This is a copy of the `docker cp` command. The syntax is meant to be the
 same with docker. The rules of copying a file vs directory are meant to be
 in-line with `docker cp` documentation.
 
-`nomadtools cp` uses some special syntax for specifying from which allocation/task
+`nomad-tools cp` uses some special syntax for specifying from which allocation/task
 exactly do you want to copy by using colon `:`. The number of colons in the
 arguments determines the format. The colon can be escaped with slash `\` in
 the path if needed.
@@ -295,9 +295,9 @@ inside the allocation it is coping to/from. It has to be available there.
 Example:
 
 ```
-$ nomadtools cp -v nginx:/etc/nginx/nginx.conf ./nginx.conf
+$ nomad-tools cp -v nginx:/etc/nginx/nginx.conf ./nginx.conf
 INFO nomad_cp.py:copy_mode:487: File :d409e855-bf13-a342-fe7a-6fb579d2de85:listen:/etc/nginx/nginx.conf -> ./nginx.conf
-$ nomadtools cp -v alpine:/etc/. ./etc/
+$ nomad-tools cp -v alpine:/etc/. ./etc/
 INFO nomad_cp.py:copy_mode:512: New mkdir :d409e855-bf13-a342-fe7a-6fb579d2de85:listen:/etc/. -> /home/kamil/tmp/etc2/
 ```
 
@@ -331,9 +331,9 @@ See documentation in [doc/githubrunner.md](doc/githubrunner.md) .
 Lists docker images referenced in Nomad job file or a running Nomad job.
 
 ```
-$ nomadtools dockers ./httpd.nomad.hcl
+$ nomad-tools dockers ./httpd.nomad.hcl
 busybox:stable
-$ nomadtools dockers --job httpd
+$ nomad-tools dockers --job httpd
 busybox:stable
 ```
 
@@ -343,13 +343,13 @@ Program for downloading specific Nomad release binary from their release page.
 I use it for testing and checking new Nomad versions.
 
 ```
-$ nomadtools downloadrelease nomad
+$ nomad-tools downloadrelease nomad
 INFO:nomad_tools.nomad_downloadrelease:Downloading https://releases.hashicorp.com/nomad/1.7.3/nomad_1.7.3_linux_amd64.zip to nomad
 INFO:nomad_tools.nomad_downloadrelease:https://releases.hashicorp.com/nomad/1.7.3/nomad_1.7.3_linux_amd64.zip -> -rwxr-xr-x 105.7MB nomad
-$ nomadtools downloadrelease consul
+$ nomad-tools downloadrelease consul
 INFO:nomad_tools.nomad_downloadrelease:Downloading https://releases.hashicorp.com/consul/1.9.9/consul_1.9.9_linux_amd64.zip to consul
 INFO:nomad_tools.nomad_downloadrelease:https://releases.hashicorp.com/consul/1.9.9/consul_1.9.9_linux_amd64.zip -> -rwxr-xr-x 105.8MB consul
-$ nomadtools downloadrelease -p 1.6.3 nomad ./nomad1.6.3
+$ nomad-tools downloadrelease -p 1.6.3 nomad ./nomad1.6.3
 INFO:nomad_tools.nomad_downloadrelease:Downloading https://releases.hashicorp.com/nomad/1.6.3/nomad_1.6.3_linux_amd64.zip to nomad1.6.3
 INFO:nomad_tools.nomad_downloadrelease:https://releases.hashicorp.com/nomad/1.6.3/nomad_1.6.3_linux_amd64.zip -> -rwxr-xr-x 101.8MB nomad1.6.3
 ```
@@ -362,7 +362,7 @@ and then copy it in the terminal. There is also no bash completion for task name
 I decided I want to have advanced filtering, where given a job name and node name some tool
 automatically finds an allocation and task to copy from.
 
-Given a system job promtail running on all machines, `nomadtools task -j promtail -n host1 exec bash -l`
+Given a system job promtail running on all machines, `nomad-tools task -j promtail -n host1 exec bash -l`
 will drop into a bash shell inside promtail job allocation running on host1.
 
 This tool can be used to get a shell to the chosen allocation.
@@ -372,16 +372,16 @@ This tool can be used to get a shell to the chosen allocation.
 This internally calls `nomad alloc exec`.
 
 ```
-$ nomadtools task -j mail exec bash -l
+$ nomad-tools task -j mail exec bash -l
 root@main:/#
 ```
 
 ### `task json` - output found allocations and task names in json form
 
-### `task path` - output path in the form properly escaped for use with nomadtools cp
+### `task path` - output path in the form properly escaped for use with nomad-tools cp
 
 ```
-$ nomadtools cp "$(nomadtools task -j mail path /etc/fstab)" ./fstab
+$ nomad-tools cp "$(nomad-tools task -j mail path /etc/fstab)" ./fstab
 INFO entry_cp.py:copy_mode:650: File :0c18e9aa-f053-cc3e-6fe3-3d23f159c2e5:mail:/etc/fstab -> ./fstab
 37.0  B 0:00:00 [73.3  B/s] [ <=>
 ```
@@ -389,22 +389,22 @@ INFO entry_cp.py:copy_mode:650: File :0c18e9aa-f053-cc3e-6fe3-3d23f159c2e5:mail:
 ### `task xargs` - output in the form -task <task> <allocid> that is usable with xargs nomad alloc
 
 ```
-$ nomadtools task -j mail xargs -0 logs -- -stderr | xargs -0 nomad alloc
-$ nomadtools task -j mail xargs logs -- -stderr | xargs nomad alloc
-$ nomad alloc logs $(nomadtools task -j mail xargs) -stderr
+$ nomad-tools task -j mail xargs -0 logs -- -stderr | xargs -0 nomad alloc
+$ nomad-tools task -j mail xargs logs -- -stderr | xargs nomad alloc
+$ nomad alloc logs $(nomad-tools task -j mail xargs) -stderr
 ```
 
 ## `nodenametoid` - convert node name to id
 
 ```
-$ nomadtools nodenametoid node1
+$ nomad-tools nodenametoid node1
 3e50c2ef-16bd-0253-6635-1a55c25e74ca
 ```
 
 ## `info topology` - show some information about Nomad node usage
 
 ```
-$ nomadtools info topology
+$ nomad-tools info topology
 dc node1 ready 2000B/15988MB 1000MHz/12000MHz 1allocs [mariadb.mariadb[0] mariadb services 2000MB 1000MHz]
 ```
 
@@ -419,7 +419,7 @@ represents models for Nomad API data documentation.
 # History
 
 This module once installed bunch of separate tools, like `nomad-watch` or
-`nomad-gitlab-runner`. That became unmaintainable. It is one `nomadtools`
+`nomad-gitlab-runner`. That became unmaintainable. It is one `nomad-tools`
 executable with several sub-commands.
 
 # Contributing

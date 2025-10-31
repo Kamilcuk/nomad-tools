@@ -77,7 +77,7 @@ class Args:
     help="""
     List all docker images referenced by a Nomad job.
     Typically used to download or test the images like
-    `nomadtools dockers ./file.nomad.hcl | xargs docker pull`.
+    `nomad-tools dockers ./file.nomad.hcl | xargs docker pull`.
     """,
 )
 @common_click.h_help_quiet_verbose_logging_options()

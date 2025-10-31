@@ -43,7 +43,7 @@ def _default_session():
             from requests_toolbelt.adapters.host_header_ssl import HostHeaderSSLAdapter
         except ImportError:
             print(
-                "nomadtools: install requests_toolbelt to use NOMAD_TLS_SERVER_NAME",
+                "nomad-tools: install requests_toolbelt to use NOMAD_TLS_SERVER_NAME",
                 file=sys.stderr,
             )
             raise
@@ -112,7 +112,7 @@ class Requestor(ABC):
                 ret = data
             else:
                 assert isinstance(ret, list) and isinstance(data, list), (
-                    f"Do not know how to merge {type(ret)} with {type(rr.json)}. There is an internal error in how pagination is implemented in nomadtools library. Please kindly report this error on github."
+                    f"Do not know how to merge {type(ret)} with {type(rr.json)}. There is an internal error in how pagination is implemented in nomad-tools library. Please kindly report this error on github."
                 )
                 ret.extend(data)
             next_token = rr.headers.get("X-Nomad-Nexttoken")

@@ -129,7 +129,7 @@ class ConfigCustom(DataDict):
         # Note - this function is overwritten by docker mode config.
         if ServiceSpec.get_servicespecs():
             log.warning(
-                f"Services only handled in Docker mode. The .gitlab-ci.yml configuration requested services: to be running for the current job. In nomadtools project for gitlab-runner the services: is only supported in docker mode configuration, while current mode is {config.mode}. The job will be run without any services. To remove this warning remove the services: from .gitlab-ci.yml of this job or change the nomadtools gitlab-runner configuration to run in docker mode."
+                f"Services only handled in Docker mode. The .gitlab-ci.yml configuration requested services: to be running for the current job. In nomad-tools project for gitlab-runner the services: is only supported in docker mode configuration, while current mode is {config.mode}. The job will be run without any services. To remove this warning remove the services: from .gitlab-ci.yml of this job or change the nomad-tools gitlab-runner configuration to run in docker mode."
             )
         assert nomadjob
 
@@ -816,7 +816,7 @@ def mode_prepare():
         run_entry_watch(f"--json start {f.name}")
 
 
-FILE_ISSUE: str = "File an issue at https://github.com/Kamilcuk/nomadtools/issues/new"
+FILE_ISSUE: str = "File an issue at https://github.com/Kamilcuk/nomad-tools/issues/new"
 
 
 @cli.command("run", help="https://docs.gitlab.com/runner/executors/custom.html#run")

@@ -9,9 +9,9 @@ scripts = nomad_tools.entry.cli.commands.keys()
 
 @pytest.mark.parametrize("cli", scripts)
 def test_cli_help(cli):
-    subprocess.check_call(["nomadtools", cli, "--help"])
+    subprocess.check_call(["nomad-tools", cli, "--help"])
 
 
 @pytest.mark.parametrize("cli", scripts)
 def test_cli_h(cli):
-    subprocess.check_call(["nomadtools", cli, "-h"])
+    subprocess.check_call(["nomad-tools", cli, "-h"])

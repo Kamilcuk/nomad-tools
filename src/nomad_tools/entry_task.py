@@ -340,7 +340,7 @@ Execute a command inside the allocation.
 
 \b
 Examples:
-    nomadtools task -j mail exec bash -l
+    nomad-tools task -j mail exec bash -l
 """,
 )
 @common_click.help_h_option()
@@ -357,9 +357,9 @@ Output in the form -task <task> <allocid> that is usable with xargs nomad alloc
 
 \b
 Examples:
-  nomadtools task -j mail xargs -0 logs -- -stderr | xargs -0 nomad alloc
-  nomadtools task -j mail xargs logs -- -stderr | xargs nomad alloc
-  nomad alloc logs $(nomadtools task -j mail xargs) -stderr
+  nomad-tools task -j mail xargs -0 logs -- -stderr | xargs -0 nomad alloc
+  nomad-tools task -j mail xargs logs -- -stderr | xargs nomad alloc
+  nomad alloc logs $(nomad-tools task -j mail xargs) -stderr
 """,
 )
 @common_click.help_h_option()
@@ -412,11 +412,11 @@ def task_path_completor(
 @cli.command(
     "path",
     help="""
-Output in the form properly escaped for use with nomadtools cp.
+Output in the form properly escaped for use with nomad-tools cp.
 
 \b
 Examples:
-    nomadtools cp "$(nomadtools task -j mail path /etc/fstab)" ./fstab
+    nomad-tools cp "$(nomad-tools task -j mail path /etc/fstab)" ./fstab
 """,
 )
 @common_click.help_h_option()

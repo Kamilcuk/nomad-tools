@@ -2000,10 +2000,10 @@ and optionally job namespaces are extracted from that file.
     epilog=f"""
 \b
 Examples:
-    nomadtools watch run ./some-job.nomad.hcl
-    nomadtools watch job some-job
-    nomadtools watch alloc af94b2
-    nomadtools watch -N services --task redis -1f job redis
+    nomad-tools watch run ./some-job.nomad.hcl
+    nomad-tools watch job some-job
+    nomad-tools watch alloc af94b2
+    nomad-tools watch -N services --task redis -1f job redis
 
 {EPILOG}
 """,
@@ -2156,11 +2156,11 @@ def mode_job(jobid: str):
     "changedstart",
     "run",
     help="""
-    If nomadtools changed detects job changes, then run start command, otherwise do nothing.
+    If nomad-tools changed detects job changes, then run start command, otherwise do nothing.
 
     The intention is to start only changed jobs.
 
-    See also nomadtools changed --help.
+    See also nomad-tools changed --help.
     """,
 )
 def mode_ifplanstart(args: Tuple[str, ...]):

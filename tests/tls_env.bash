@@ -46,11 +46,11 @@ while (($#)); do
 	test)
 		_r export NOMAD_NAMESPACE=default
 		_r nomad status
-		_r nomadtools vardir -j nginx@nginx ls
+		_r nomad-tools vardir -j nginx@nginx ls
 		_r python -m nomad_tools.taskexec test-forever test-forever echo Hello world
 		;;
 	testall)
-		_r "$0" tls -- nomadtools watch start "$_DIR"/../../jobs/test-forever.nomad.hcl
+		_r "$0" tls -- nomad-tools watch start "$_DIR"/../../jobs/test-forever.nomad.hcl
 		echo
 		_r "$0" tls test
 		echo
