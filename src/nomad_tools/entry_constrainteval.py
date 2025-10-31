@@ -107,7 +107,7 @@ class NodeCacheArgs:
     no_cache: bool = clickdc.option(help="Set to disable cache", show_default=True)
     cache: Path = clickdc.option(
         type=click.Path(dir_okay=False, writable=True, path_type=Path),
-        default=Path().home() / ".cache/nomadtools/nodes.json",
+        default=Path().home() / ".cache/nomad-tools/nodes.json",
         help="Cache file location",
         show_default=True,
     )
@@ -316,7 +316,7 @@ def grouper(thelist: List[str], count: int) -> List[List[str]]:
         %(prog)s '${attr.os.name}' '!=' ubuntu attr.os.name is_set
         %(prog)s attr.os.name is_set '' attr.kernel.name is_set
     """
-    % dict(prog="nomadtools constrainteval"),
+    % dict(prog="nomad-tools constrainteval"),
     epilog=EPILOG,
 )
 @clickdc.adddc("args", NodeCacheArgs)

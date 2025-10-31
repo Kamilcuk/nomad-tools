@@ -28,7 +28,7 @@ from .forward_args_to_nomad import command_forward_args_to_nomad, has_nomad_job_
 
     \b
     In scripts, you should check if the output of this command is not empty:
-        if tmp=$(nomadtools changed ./job.nomad.hcl); then
+        if tmp=$(nomad-tools changed ./job.nomad.hcl); then
         if [[ -z "$tmp" ]]; then
             echo "Job definition is ok and it was not changed"
         else

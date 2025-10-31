@@ -1,4 +1,4 @@
-job "nomadtools-githubrunner-executor" {
+job "nomad-tools-githubrunner-executor" {
   type = "batch"
   parameterized {
     meta_required = [
@@ -26,7 +26,7 @@ EOF
 {{param | tojson}}
 EOF
   }
-  group "nomadtools-githubrunner-executor" {
+  group "nomad-tools-githubrunner-executor" {
     reschedule {
       attempts  = 0
       unlimited = false
@@ -36,7 +36,7 @@ EOF
       mode     = "fail"
     }
 
-    task "nomadtools-githubrunner-executor" {
+    task "nomad-tools-githubrunner-executor" {
       driver       = "docker"
       kill_timeout = "5m"
       config {

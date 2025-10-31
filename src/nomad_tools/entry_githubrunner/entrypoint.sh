@@ -10,7 +10,7 @@ if [[ -n "${DEBUG:-}" ]]; then
 fi
 
 _log() {
-	echo "nomadtools: $1: ${FUNCNAME[2]:-main}:" "${@:2}"
+	echo "nomad-tools: $1: ${FUNCNAME[2]:-main}:" "${@:2}"
 }
 
 fatal() {

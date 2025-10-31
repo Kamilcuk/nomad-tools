@@ -70,7 +70,7 @@ subcommands = """
 
 
 @click.command(
-    "nomadtools",
+    "nomad-tools",
     cls=AliasedLazyGroup,
     lazy_subcommands={
         cmd: f"{__package__}.entry_{cmd.replace('-', '_')}.cli" for cmd in subcommands

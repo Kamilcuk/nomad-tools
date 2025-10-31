@@ -180,7 +180,7 @@ class ParsedArgs:
     cmd: List[str]
 
 
-NAME_PREFIX = "nomadtoolsgo_"
+NAME_PREFIX = "nomad-toolsgo_"
 
 
 @dataclass
@@ -725,7 +725,7 @@ def cli(
     if args.interactive:
         assert not args.detach, "interactive with detach doesn't make sense"
         terminal = Interactive(par, cmd)
-    log.debug(f"+ nomadtools watch {quotearr(cmd)}")
+    log.debug(f"+ nomad-tools watch {quotearr(cmd)}")
     try:
         entry_watch.cli.main(args=cmd)
     finally:

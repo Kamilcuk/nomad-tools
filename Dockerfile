@@ -14,7 +14,7 @@ RUN pip install --no-cache-dir -r ./requirements-test.txt
 COPY ./pyproject.toml ./pyproject.toml
 COPY ./src ./src
 COPY ./.git ./.git
-RUN pip install --no-cache-dir -e . && nomadtools --version
+RUN pip install --no-cache-dir -e . && nomad-tools --version
 COPY . .
 RUN ./unit_tests.sh
 
@@ -32,7 +32,7 @@ FROM req AS app
 COPY ./pyproject.toml ./pyproject.toml
 COPY ./src ./src
 COPY ./.git ./.git
-RUN pip install --no-cache-dir -e . && nomadtools --version
-RUN nomadtools downloadrelease -p 1.8.2 nomad /bin/nomad && nomad --version
+RUN pip install --no-cache-dir -e . && nomad-tools --version
+RUN nomad-tools downloadrelease -p 1.8.2 nomad /bin/nomad && nomad --version
 COPY . .
-ENTRYPOINT ["nomadtools"]
+ENTRYPOINT ["nomad-tools"]

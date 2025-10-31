@@ -25,6 +25,7 @@ documentation = "https://github.com/Kamilcuk/nomad-tools"
 
 [project.scripts]
 nomadtools = "nomad_tools:entrypoint.main"
+nomad-tools = "nomad_tools:entrypoint.main"
 
 [tool.setuptools.package-data]
 "*" = ["*/*.sh", "*.sh", "*/*.nomad.hcl", "*/*/*.nomad.hcl"]

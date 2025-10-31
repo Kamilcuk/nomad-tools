@@ -61,9 +61,9 @@ Create a file `config.yml` with the following content:
 
 Run the command line:
 
-    nomadtools githubrunner -c ./config.yml run
+    nomad-tools githubrunner -c ./config.yml run
 
-The default configuration can be listed with `nomadtools githubrunner -c $'{}\n' dumpconfig`.
+The default configuration can be listed with `nomad-tools githubrunner -c $'{}\n' dumpconfig`.
 
 The configuration description is in source code.
 

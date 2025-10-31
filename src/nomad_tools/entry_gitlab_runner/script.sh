@@ -20,11 +20,11 @@ for i in \
 	NOMAD_META_CI_CPUSET_CPUS \
 ; do
 	if eval "[ -z \"\${$i+x}\" ]"; then
-		fatal "variable is not set: $i. This is an internal error from nomadtools project. Please report it to it. The variables should be set from the job definition when running the job."
+		fatal "variable is not set: $i. This is an internal error from nomad-tools project. Please report it to it. The variables should be set from the job definition when running the job."
 	fi
 done
 if [ "$#" -lt 4 ]; then
-	fatal "wrong number of arguments: \$#=$#. This is an internal error from nomadtools project. The variables are passed to this script from the statement in nomadtools source code. Please report it to nomadtools project github issues page."
+	fatal "wrong number of arguments: \$#=$#. This is an internal error from nomad-tools project. The variables are passed to this script from the statement in nomad-tools source code. Please report it to nomad-tools project github issues page."
 fi
 # Adjust oom score.
 if [ "$NOMAD_META_CI_OOM_SCORE_ADJUST" -ne 0 ] &&
