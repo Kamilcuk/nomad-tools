@@ -452,5 +452,6 @@ To run integration tests, you have to be able to connect to Nomad server.
 
 # License
 
-GPL
+This project is licensed under the GNU General Public License v3.0 (GPLv3).
 
+However, commercial licensing is also available for organizations that wish to use this software without the copyleft requirements of GPL. For commercial licensing terms, please contact.
