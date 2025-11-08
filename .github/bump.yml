@@ -1,0 +1,15 @@
+# .github/bump.yml
+# configuration of MeilCli/bump-release-action
+---
+release:
+  title-prefix: 'v'
+  initial-version: '0.5.7'
+  tag-prefix: 'v'
+branch:
+  base-branch: 'main'
+  version-branch-prefix: 'v'
+  bump-version-commit-prefix: 'v'
+categories:
+  - title: 'Changes'
+    commits:
+      - ''
