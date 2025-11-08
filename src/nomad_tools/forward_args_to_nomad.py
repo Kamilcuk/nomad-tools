@@ -57,7 +57,7 @@ def cli_jobfile_disabled(root: Any, name: str, help: str):
 
 
 def complete_nomad_args(
-    self, ctx: click.Context, param: click.Parameter, incomplete: str
+    ctx: click.Context, param: click.Parameter, incomplete: str
 ) -> List[CompletionItem]:
     c = [
         CompletionItem(x)
