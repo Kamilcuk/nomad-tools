@@ -434,7 +434,7 @@ class Config(DataDict):
     """Should the job be purged after we are done?"""
     purge_successful: bool = True
     """Should the successful Nomad jobs be purged after we are done? Only relevant when purge=none."""
-    jobname: str = "gitlabrunner.${CUSTOM_ENV_CI_RUNNER_ID}.${CUSTOM_ENV_CI_PROJECT_PATH_SLUG}.${CUSTOM_ENV_CI_JOB_ID}"
+    jobname: str = "gitlabrunner.${CUSTOM_ENV_CI_PROJECT_PATH_SLUG}.${CUSTOM_ENV_CI_JOB_NAME_SLUG}.${CUSTOM_ENV_CI_JOB_ID}.${CUSTOM_ENV_CI_RUNNER_ID}"
     """The job name"""
     CPU: Optional[int] = None
     """The default job constraints."""

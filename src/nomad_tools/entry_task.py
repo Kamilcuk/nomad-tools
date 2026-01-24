@@ -237,7 +237,7 @@ class FindTask:
         ]
         return allocations
 
-    def find_tasks(self) -> List[TaskAlloc]:
+    def find_tasks(self, runningonly: bool = False) -> List[TaskAlloc]:
         allocs = self.find_allocations()
         assert len(allocs) > 0, (
             f"Found no running allocations matching {self.desc()}. The job might be not running. Consider adjusting command line options."
@@ -252,8 +252,12 @@ class FindTask:
         #
         ret: List[TaskAlloc] = []
         for alloc in allocs:
-            tasks = alloc.get_tasknames()
-            tasks = [task for task in tasks if not self.task or task == self.task]
+            taskstates = alloc.get_taskstates()
+            if runningonly:
+                taskstates = {k: v for k, v in taskstates.items() if not v.FinishedAt}
+            tasks: list[str] = list(taskstates.keys())
+            if self.task:
+                tasks = [task for task in taskstates.keys() if task == self.task]
             assert len(tasks) > 0, f"Found no tasks matching {self}"
             assert len(tasks) == 1, f"Multiple tasks found matching {self}: {tasks}"
             task = tasks[0]
@@ -346,8 +350,9 @@ Examples:
 @common_click.help_h_option()
 @clickdc.adddc("cmd", Cmd)
 def mode_exec(cmd: Cmd):
-    for t in FINDTASK.find_tasks():
-        cmd.run(t)
+    tasks = FINDTASK.find_tasks(True)
+    assert len(tasks) == 1, "Multiple tasks found: {tasks}"
+    cmd.run(tasks[0])
 
 
 @cli.command(
