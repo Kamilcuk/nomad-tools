@@ -27,6 +27,7 @@ class GitlabState:
             CUSTOM_ENV_CI_CONCURRENT_ID="ID",
             CUSTOM_ENV_CI_JOB_TIMEOUT="60",
             CUSTOM_ENV_CI_CONCURRENT_PROJECT_ID="CONID",
+            CUSTOM_ENV_CI_JOB_NAME_SLUG="group_proj",
             BUILD_FAILURE_EXIT_CODE=str(self.build_failure),
             SYSTEM_FAILURE_EXIT_CODE=str(self.system_failure),
         )
