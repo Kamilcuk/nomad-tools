@@ -484,7 +484,7 @@ class Args:
                                 ),
                             }
                         ]
-                        if self.expose or self.publish
+                        if self.expose or self.publish or self.group_network_mode
                         else None
                     ),
                     "Tasks": [
