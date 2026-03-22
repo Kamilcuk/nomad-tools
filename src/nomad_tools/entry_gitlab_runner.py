@@ -156,7 +156,7 @@ class ConfigDocker(ConfigCustom):
     Use with the Docker executor. Insecure."""
     force_pull: bool = True
     """https://developer.hashicorp.com/nomad/docs/drivers/docker#force_pull"""
-    waiter_image: str = "docker:25.0.3-cli"
+    waiter_image: str = "docker.io/library/docker:25.0.3-cli"
     """A image with POSIX sh and docker that waits for services to have open ports
     Url: https://hub.docker.com/r/gitlab/gitlab-runner/tags"""
     # helper_image: str = "docker.io/gitlab/gitlab-runner:alpine-v16.9.1"
@@ -434,7 +434,7 @@ class Config(DataDict):
     """Should the job be purged after we are done?"""
     purge_successful: bool = True
     """Should the successful Nomad jobs be purged after we are done? Only relevant when purge=none."""
-    jobname: str = "gitlabrunner.${CUSTOM_ENV_CI_RUNNER_ID}.${CUSTOM_ENV_CI_PROJECT_PATH_SLUG}.${CUSTOM_ENV_CI_JOB_ID}"
+    jobname: str = "gitlabrunner.${CUSTOM_ENV_CI_PROJECT_PATH_SLUG}.${CUSTOM_ENV_CI_JOB_NAME_SLUG}.${CUSTOM_ENV_CI_JOB_ID}.${CUSTOM_ENV_CI_RUNNER_ID}"
     """The job name"""
     CPU: Optional[int] = None
     """The default job constraints."""
