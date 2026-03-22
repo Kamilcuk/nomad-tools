@@ -156,7 +156,7 @@ class ConfigDocker(ConfigCustom):
     Use with the Docker executor. Insecure."""
     force_pull: bool = True
     """https://developer.hashicorp.com/nomad/docs/drivers/docker#force_pull"""
-    waiter_image: str = "docker:25.0.3-cli"
+    waiter_image: str = "docker.io/library/docker:25.0.3-cli"
     """A image with POSIX sh and docker that waits for services to have open ports
     Url: https://hub.docker.com/r/gitlab/gitlab-runner/tags"""
     # helper_image: str = "docker.io/gitlab/gitlab-runner:alpine-v16.9.1"
